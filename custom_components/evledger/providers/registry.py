@@ -6,6 +6,7 @@ from typing import Any
 from ..const import (
     CHARGER_PROVIDER_MANUAL,
     CHARGER_PROVIDER_MONTA,
+    CHARGER_PROVIDER_SPOT_PRICE,
     CHARGER_PROVIDER_ZAPTEC,
     CONF_BATTERY_ENTITY,
     CONF_CHARGER_PROVIDERS,
@@ -16,6 +17,7 @@ from ..const import (
     CONF_MONTA_WALLET_ENTITY,
     CONF_ODOMETER_ENTITY,
     CONF_OUTSIDE_TEMP_ENTITY,
+    CONF_SPOT_PRICE_ENTITY,
     CONF_ZAPTEC_CHARGING_ENTITY,
     CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
     CONF_ZAPTEC_POWER_ENTITY,
@@ -24,6 +26,7 @@ from ..const import (
 from .charger.base import ChargerProvider
 from .charger.manual import ManualChargerProvider
 from .charger.monta import MontaChargerProvider
+from .charger.spot_price import SpotPriceChargerProvider
 from .charger.zaptec import ZaptecChargerProvider
 from .vehicle.base import VehicleProvider
 from .vehicle.tesla_custom import TeslaCustomVehicleProvider
@@ -62,5 +65,10 @@ def build_charger_providers(data: dict[str, Any]) -> dict[str, ChargerProvider]:
 
     if CHARGER_PROVIDER_MANUAL in enabled:
         providers[CHARGER_PROVIDER_MANUAL] = ManualChargerProvider()
+
+    if CHARGER_PROVIDER_SPOT_PRICE in enabled:
+        providers[CHARGER_PROVIDER_SPOT_PRICE] = SpotPriceChargerProvider(
+            price_entity=data.get(CONF_SPOT_PRICE_ENTITY)
+        )
 
     return providers

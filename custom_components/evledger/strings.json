@@ -67,6 +67,13 @@
           "monta_wallet_entity": "Wallet balance sensor (optional)"
         }
       },
+      "spot_price": {
+        "title": "Spot price sensor",
+        "description": "Pick your electricity price sensor (Nordpool, Energi Data Service, Strømligning, or similar) — its current state is multiplied by the session's kWh to estimate home charging cost when Monta isn't available or fresh enough.",
+        "data": {
+          "spot_price_entity": "Current electricity price sensor"
+        }
+      },
       "efficiency": {
         "title": "Efficiency comparison",
         "description": "Pick your exact model/trim to compare real-world Wh/km against its official rated (WLTP) consumption, bucketed by outside temperature. These are best-effort published figures, not read from your car — pick 'Custom' if you know your own numbers, or 'Skip' to leave this off.",
@@ -140,6 +147,13 @@
           "monta_wallet_entity": "Wallet balance sensor (optional)"
         }
       },
+      "spot_price": {
+        "title": "Spot price sensor",
+        "description": "Pick your electricity price sensor (Nordpool, Energi Data Service, Strømligning, or similar) — its current state is multiplied by the session's kWh to estimate home charging cost when Monta isn't available or fresh enough.",
+        "data": {
+          "spot_price_entity": "Current electricity price sensor"
+        }
+      },
       "efficiency": {
         "title": "Efficiency comparison",
         "description": "Pick your exact model/trim to compare real-world Wh/km against its official rated (WLTP) consumption, bucketed by outside temperature. These are best-effort published figures, not read from your car — pick 'Custom' if you know your own numbers, or 'Skip' to leave this off.",
@@ -171,7 +185,11 @@
       },
       "cost_per_km": { "name": "Cost per km" },
       "pending_review": { "name": "Charges needing price" },
-      "efficiency": { "name": "Efficiency vs. rated" }
+      "efficiency": { "name": "Efficiency vs. rated" },
+      "total_cost": { "name": "Total charging cost" },
+      "total_distance": { "name": "Total distance" },
+      "last_trip": { "name": "Last trip" },
+      "last_charge": { "name": "Last charge" }
     }
   }
 }

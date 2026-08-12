@@ -51,7 +51,8 @@ or logged out anywhere.
 |---|---|---|
 | Vehicle | [Tesla Custom Integration](https://github.com/alandtse/tesla) | battery %, odometer, location, charging state, lock state |
 | Charger (live power) | [Zaptec](https://www.home-assistant.io/integrations/zaptec/) | live power, session energy |
-| Charger (cost) | [Monta](https://github.com/erlendsellie/monta_ha) | actual cost of the last completed session |
+| Charger (actual cost) | [Monta](https://github.com/erlendsellie/monta_ha) | actual cost of the last completed session |
+| Charger (estimated cost) | Any electricity-price sensor (Nordpool, Energi Data Service, Strømligning, ...) | kWh × current price — used when Monta isn't configured or isn't fresh enough |
 | Charger (anywhere) | Manual entry | one service call: kWh + price + location |
 
 More vehicle and charger providers are meant to be added over time — the
@@ -86,11 +87,12 @@ The config flow asks for:
    charging state, lock, outside temperature) are resolved automatically; you
    only see a manual entity form if something couldn't be auto-detected, or
    to fix anything guessed wrong.
-3. **Charger providers** — tick whichever of Zaptec / Monta / manual entry
-   apply to you.
+3. **Charger providers** — tick whichever of Zaptec / Monta / spot price /
+   manual entry apply to you.
 4. **Pick your charger(s)** — likewise, a device picker for your Zaptec
    charger and/or Monta charger (handy if you have more than one charger).
-   Same auto-resolve-then-fallback behaviour.
+   Same auto-resolve-then-fallback behaviour. If you picked spot price, you
+   pick your electricity-price sensor directly (there's no "device" for it).
 5. **Efficiency comparison** (optional) — pick your model/trim from a built-in
    list of Tesla's published WLTP figures, enter your own numbers, or skip it.
 
@@ -119,6 +121,21 @@ step and enter your own battery capacity and rated consumption (check your
 delivery paperwork or Tesla account for the exact number). Corrections and
 new model entries via PR are welcome.
 
+## Home charging cost sources
+
+Home charge sessions try each configured cost source in order and use the
+first one that answers:
+
+1. **Monta** — the actual billed cost of the session, matched by timestamp.
+2. **Spot price** — kWh (from Zaptec) × your price sensor's current state, as
+   an estimate. One price point at session end, not a time-weighted average
+   across the session — good enough for most sessions, less so for very long
+   ones spanning a price change. Assumes your sensor's state is already in
+   your configured currency per kWh (convert first with a template sensor if
+   yours reports in øre/cents).
+3. Neither → the session is flagged `needs_review` with `kwh` still recorded
+   from Zaptec, same as an unpriced public charge.
+
 ## Logging a public charge
 
 ```yaml
@@ -146,19 +163,31 @@ Each vehicle gets:
 | `sensor.<vehicle>_cost_per_km` | all-time avg cost/km | — |
 | `sensor.<vehicle>_pending_review` | count needing a price | `pending` (list) |
 | `sensor.<vehicle>_efficiency` | overall Wh/km | `cold_wh_per_km`, `mild_wh_per_km`, `warm_wh_per_km`, `*_deviation_pct`, `*_trip_count`, `rated_wh_per_km` (only created if efficiency comparison is configured) |
+| `sensor.<vehicle>_total_cost` | running total spent (monetary, `state_class: total`) | — |
+| `sensor.<vehicle>_total_distance` | running total km driven (`state_class: total_increasing`) | — |
+| `sensor.<vehicle>_last_trip` | most recent trip's distance | full trip record |
+| `sensor.<vehicle>_last_charge` | most recent charge's price | full charge record |
 
-These are plain sensors with list-valued attributes — build whatever
-`custom:button-card` / `auto-entities` / markdown-table dashboard you like on
-top. No bundled dashboard is shipped, on purpose — everyone's taste in "nerdy
-dashboard" differs.
+`total_cost` and `total_distance` carry proper `device_class`/`state_class`,
+so Home Assistant's own **Statistics graph** card gives you month-over-month
+(or any period) views natively — no need to build that yourself.
+
+## Dashboards
+
+[`dashboards/example-view.yaml`](dashboards/example-view.yaml) is a full
+ready-to-copy view built entirely from built-in card types (tile, markdown,
+statistics-graph, conditional) — glance tiles, last trip/charge, an
+efficiency tile, a "needs price" nag banner, month-over-month statistics
+graphs, and Jinja-templated recent-trips/recent-charges tables. See
+[`dashboards/README.md`](dashboards/README.md) for how to use it.
 
 ## Roadmap
 
 - [ ] MQTT export of ledger data (for anyone who wants to build a standalone
       app or dashboard outside Home Assistant)
 - [ ] More vehicle providers (official Tesla integration, other EVs)
-- [ ] More charger providers (Easee, Wallbox, generic price-sensor + energy-sensor pairing)
-- [ ] Statistics/long-term-stats integration for native HA energy dashboard support
+- [ ] More charger providers (Easee, Wallbox)
+- [ ] Time-weighted spot price cost (instead of a single price-at-session-end point)
 
 ## Contributing
 

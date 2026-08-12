@@ -11,6 +11,7 @@ from homeassistant.helpers import selector
 from .const import (
     CHARGER_PROVIDER_MANUAL,
     CHARGER_PROVIDER_MONTA,
+    CHARGER_PROVIDER_SPOT_PRICE,
     CHARGER_PROVIDER_ZAPTEC,
     CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_ENTITY,
@@ -25,6 +26,7 @@ from .const import (
     CONF_ODOMETER_ENTITY,
     CONF_OUTSIDE_TEMP_ENTITY,
     CONF_RATED_WH_PER_KM,
+    CONF_SPOT_PRICE_ENTITY,
     CONF_TESLA_MODEL_KEY,
     CONF_VEHICLE_NAME,
     CONF_VEHICLE_PROVIDER,
@@ -126,11 +128,26 @@ def _chargers_schema(defaults: dict[str, Any]) -> vol.Schema:
                             value=CHARGER_PROVIDER_MANUAL,
                             label="Manual entry (public/away charging)",
                         ),
+                        selector.SelectOptionDict(
+                            value=CHARGER_PROVIDER_SPOT_PRICE,
+                            label="Spot price (estimate cost = kWh × your price sensor)",
+                        ),
                     ],
                     multiple=True,
                     mode=selector.SelectSelectorMode.LIST,
                 )
             ),
+        }
+    )
+
+
+def _spot_price_schema(defaults: dict[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_SPOT_PRICE_ENTITY,
+                default=defaults.get(CONF_SPOT_PRICE_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
         }
     )
 
@@ -251,7 +268,7 @@ class EvLedgerFlowMixin:
                 return await self._async_step_zaptec_device(None)
             if CHARGER_PROVIDER_MONTA in user_input[CONF_CHARGER_PROVIDERS]:
                 return await self._async_step_monta_device(None)
-            return await self._async_step_efficiency(None)
+            return await self._async_step_after_chargers()
         return self.async_show_form(step_id="chargers", data_schema=_chargers_schema(self._data))
 
     # ---- zaptec: pick a device, auto-resolve, only ask for the rest if needed ----
@@ -276,7 +293,7 @@ class EvLedgerFlowMixin:
     async def _async_step_after_zaptec(self):
         if CHARGER_PROVIDER_MONTA in self._data.get(CONF_CHARGER_PROVIDERS, []):
             return await self._async_step_monta_device(None)
-        return await self._async_step_efficiency(None)
+        return await self._async_step_after_chargers()
 
     # ---- monta: pick a device, auto-resolve, only ask for the rest if needed ----
 
@@ -285,15 +302,30 @@ class EvLedgerFlowMixin:
             resolved = resolve_monta_charger_entities(self.hass, user_input[FIELD_MONTA_DEVICE])
             self._data.update({k: v for k, v in resolved.items() if v is not None})
             if all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS):
-                return await self._async_step_efficiency(None)
+                return await self._async_step_after_chargers()
             return await self._async_step_monta(None)
         return self.async_show_form(step_id="monta_device", data_schema=_monta_device_schema())
 
     async def _async_step_monta(self, user_input: dict[str, Any] | None):
         if user_input is not None:
             self._data.update(user_input)
-            return await self._async_step_efficiency(None)
+            return await self._async_step_after_chargers()
         return self.async_show_form(step_id="monta", data_schema=_monta_schema(self._data))
+
+    # ---- spot price: a single price sensor, no device concept ----
+
+    async def _async_step_after_chargers(self):
+        if CHARGER_PROVIDER_SPOT_PRICE in self._data.get(CONF_CHARGER_PROVIDERS, []):
+            return await self._async_step_spot_price(None)
+        return await self._async_step_efficiency(None)
+
+    async def _async_step_spot_price(self, user_input: dict[str, Any] | None):
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self._async_step_efficiency(None)
+        return self.async_show_form(
+            step_id="spot_price", data_schema=_spot_price_schema(self._data)
+        )
 
     async def _async_step_efficiency(self, user_input: dict[str, Any] | None):
         if user_input is not None:
@@ -376,6 +408,9 @@ class EvLedgerConfigFlow(ConfigFlow, EvLedgerFlowMixin, domain=DOMAIN):
     async def async_step_monta(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_monta(user_input)
 
+    async def async_step_spot_price(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_spot_price(user_input)
+
     async def async_step_efficiency(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_efficiency(user_input)
 
@@ -423,6 +458,9 @@ class EvLedgerOptionsFlow(OptionsFlow, EvLedgerFlowMixin):
 
     async def async_step_monta(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_monta(user_input)
+
+    async def async_step_spot_price(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_spot_price(user_input)
 
     async def async_step_efficiency(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_efficiency(user_input)

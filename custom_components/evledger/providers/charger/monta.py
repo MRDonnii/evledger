@@ -28,8 +28,14 @@ class MontaChargerProvider(ChargerProvider):
         self._wallet_entity = wallet_entity
 
     def get_recent_session_cost(
-        self, hass: HomeAssistant, session_end: datetime, max_age_minutes: int = 30
+        self,
+        hass: HomeAssistant,
+        session_end: datetime,
+        max_age_minutes: int = 30,
+        known_kwh: float | None = None,
     ) -> SessionCost | None:
+        # Monta reports its own metered energy for the session — more
+        # authoritative than any live_power reading — so known_kwh is unused.
         if not self._last_charge_entity:
             return None
         state = hass.states.get(self._last_charge_entity)

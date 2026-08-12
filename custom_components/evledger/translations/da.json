@@ -67,6 +67,13 @@
           "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
         }
       },
+      "spot_price": {
+        "title": "Spotpris-sensor",
+        "description": "Vælg din elpris-sensor (Nordpool, Energi Data Service, Strømligning eller lignende) — dens nuværende tilstand ganges med sessionens kWh for at estimere hjemmeladeomkostning når Monta ikke er tilgængelig eller frisk nok.",
+        "data": {
+          "spot_price_entity": "Aktuel elpris-sensor"
+        }
+      },
       "efficiency": {
         "title": "Effektivitetssammenligning",
         "description": "Vælg din nøjagtige model/variant for at sammenligne det reelle Wh/km med det officielle normerede (WLTP) forbrug, opdelt efter udendørstemperatur. Det er offentliggjorte tal, ikke aflæst fra din bil — vælg 'Brugerdefineret' hvis du kender dine egne tal, eller 'Spring over' for at lade det være.",
@@ -140,6 +147,13 @@
           "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
         }
       },
+      "spot_price": {
+        "title": "Spotpris-sensor",
+        "description": "Vælg din elpris-sensor (Nordpool, Energi Data Service, Strømligning eller lignende) — dens nuværende tilstand ganges med sessionens kWh for at estimere hjemmeladeomkostning når Monta ikke er tilgængelig eller frisk nok.",
+        "data": {
+          "spot_price_entity": "Aktuel elpris-sensor"
+        }
+      },
       "efficiency": {
         "title": "Effektivitetssammenligning",
         "description": "Vælg din nøjagtige model/variant for at sammenligne det reelle Wh/km med det officielle normerede (WLTP) forbrug, opdelt efter udendørstemperatur. Det er offentliggjorte tal, ikke aflæst fra din bil — vælg 'Brugerdefineret' hvis du kender dine egne tal, eller 'Spring over' for at lade det være.",
@@ -171,7 +185,11 @@
       },
       "cost_per_km": { "name": "Pris pr. km" },
       "pending_review": { "name": "Ladninger der mangler pris" },
-      "efficiency": { "name": "Effektivitet vs. normeret" }
+      "efficiency": { "name": "Effektivitet vs. normeret" },
+      "total_cost": { "name": "Samlet ladeomkostning" },
+      "total_distance": { "name": "Samlet distance" },
+      "last_trip": { "name": "Seneste tur" },
+      "last_charge": { "name": "Seneste ladning" }
     }
   }
 }
