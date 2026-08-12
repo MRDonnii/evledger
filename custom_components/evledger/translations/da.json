@@ -77,6 +77,7 @@
       "cost_per_km": { "name": "Pris pr. km" },
       "pending_review": { "name": "Ladninger der mangler pris" },
       "efficiency": { "name": "Effektivitet vs. normeret" },
+      "monthly_performance": { "name": "Månedlig performance" },
       "total_cost": { "name": "Samlet ladeomkostning" },
       "total_distance": { "name": "Samlet distance" },
       "last_trip": { "name": "Seneste tur" },

@@ -59,6 +59,28 @@
   name: Efficiency vs. rated
   icon: mdi:thermometer-lines
 
+# --- Performance score (only if efficiency comparison is configured) ---
+- type: tile
+  entity: sensor.energitte_monthly_performance
+  name: This month's score
+  icon: mdi:calendar-month
+
+# --- Month-by-month table: distance, Wh/km, score, cost — as far back as
+# there's history (up to 24 months) ---
+- type: markdown
+  title: Month by month
+  content: >
+    {% set months = state_attr('sensor.energitte_monthly_performance', 'months') or [] %}
+    {% if months %}
+    | Month | Distance | Wh/km | Score | Cost |
+    |---|---|---|---|---|
+    {% for m in months %}
+    | {{ m.month }} | {{ m.distance_km }} km | {{ m.wh_per_km or '—' }} | {{ (m.score ~ '%') if m.score is not none else '—' }} | {{ m.cost }} |
+    {% endfor %}
+    {% else %}
+    No history yet.
+    {% endif %}
+
 # --- Nag banner: only shows up when a public charge needs a price ---
 - type: conditional
   conditions:
