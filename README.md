@@ -183,6 +183,26 @@ If EV Ledger already noticed the car charging away from home and is waiting
 for a price, this fills that session in. Otherwise it creates a new one.
 Handy as a script tied to a phone widget/shortcut.
 
+## Fixing a mistake
+
+Trips and charges can be wrong — a phantom trip from GPS drift, a charge
+logged with a typo'd price. Two services remove a record permanently
+(there's no undo):
+
+```yaml
+service: evledger.delete_charge
+data:
+  entry_id: <your vehicle's config entry id>
+  charge_id: <the charge's id, from sensor.<vehicle>_charges' `charges` list>
+```
+
+```yaml
+service: evledger.delete_trip
+data:
+  entry_id: <your vehicle's config entry id>
+  trip_id: <the trip's id, from sensor.<vehicle>_trips' `trips` list>
+```
+
 ## Dashboard sensors
 
 Each vehicle gets:

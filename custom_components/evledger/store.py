@@ -72,6 +72,20 @@ class EvLedgerStore:
         self._charges[charge.id] = charge
         await self._async_save()
 
+    async def async_delete_trip(self, trip_id: str) -> bool:
+        if trip_id not in self._trips:
+            return False
+        del self._trips[trip_id]
+        await self._async_save()
+        return True
+
+    async def async_delete_charge(self, charge_id: str) -> bool:
+        if charge_id not in self._charges:
+            return False
+        del self._charges[charge_id]
+        await self._async_save()
+        return True
+
     @staticmethod
     def new_id() -> str:
         return uuid.uuid4().hex[:12]

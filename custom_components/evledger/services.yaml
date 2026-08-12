@@ -54,3 +54,47 @@ log_public_charge:
       required: false
       selector:
         text:
+
+delete_charge:
+  name: Delete charge
+  description: >-
+    Permanently remove one charge session — fixes a wrong manual entry or a
+    session that was mis-detected. This cannot be undone.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this charge belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    charge_id:
+      name: Charge ID
+      description: >-
+        The id of the charge to delete — see the `id` field on any entry in
+        sensor.<vehicle>_charges' `charges` attribute.
+      required: true
+      selector:
+        text:
+
+delete_trip:
+  name: Delete trip
+  description: >-
+    Permanently remove one trip — fixes a mis-detected or spurious trip. This
+    cannot be undone.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this trip belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    trip_id:
+      name: Trip ID
+      description: >-
+        The id of the trip to delete — see the `id` field on any entry in
+        sensor.<vehicle>_trips' `trips` attribute.
+      required: true
+      selector:
+        text:
