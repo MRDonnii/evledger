@@ -1,0 +1,56 @@
+log_public_charge:
+  name: Log public charge
+  description: >-
+    Record a charging session that happened away from your configured home
+    charger(s) — a public/destination charger with no Home Assistant
+    integration. If EV Ledger already noticed the car charging away from home
+    and is waiting for a price, this fills that session in; otherwise it
+    creates a new one.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this charge belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    kwh:
+      name: Energy added
+      description: How much energy was added, in kWh.
+      required: true
+      example: 24.5
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 0.1
+          unit_of_measurement: kWh
+    price:
+      name: Total price
+      description: What the session cost in total, in your vehicle's configured currency.
+      required: true
+      example: 145.5
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.01
+    location_name:
+      name: Location
+      description: Where you charged (e.g. "Ionity Kolding", "Clever, Aarhus").
+      required: false
+      example: Ionity Kolding
+      selector:
+        text:
+    started_at:
+      name: Started at
+      description: When the session started. Defaults to now if not set.
+      required: false
+      selector:
+        datetime:
+    note:
+      name: Note
+      description: Anything else worth remembering about this session.
+      required: false
+      selector:
+        text:

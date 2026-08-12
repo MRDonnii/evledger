@@ -1,0 +1,100 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a vehicle",
+        "description": "EV Ledger tracks one vehicle's trips and charging costs. Add more vehicles later by repeating this from Settings → Devices & services.",
+        "data": {
+          "vehicle_name": "Vehicle name",
+          "currency": "Currency"
+        }
+      },
+      "vehicle": {
+        "title": "Vehicle entities",
+        "description": "Pick the entities from your existing vehicle integration (e.g. Tesla Custom Integration) that EV Ledger should read.",
+        "data": {
+          "battery_entity": "Battery level sensor",
+          "odometer_entity": "Odometer sensor",
+          "device_tracker_entity": "Location (device tracker)",
+          "charging_binary_entity": "Is charging (binary sensor)",
+          "locked_entity": "Is locked (optional)"
+        }
+      },
+      "chargers": {
+        "title": "Charging sources",
+        "description": "Choose which chargers EV Ledger should pull cost/session data from.",
+        "data": {
+          "charger_providers": "Charger providers"
+        }
+      },
+      "zaptec": {
+        "title": "Zaptec entities",
+        "description": "Zaptec reports live power and session energy, but not cost.",
+        "data": {
+          "zaptec_power_entity": "Charge power sensor",
+          "zaptec_session_energy_entity": "Session energy sensor",
+          "zaptec_charging_entity": "Charging (binary sensor, optional)"
+        }
+      },
+      "monta": {
+        "title": "Monta entities",
+        "description": "Monta reports the cost of its most recent charge session.",
+        "data": {
+          "monta_last_charge_entity": "Last charge sensor",
+          "monta_wallet_entity": "Wallet balance sensor (optional)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "vehicle": {
+        "title": "Vehicle entities",
+        "data": {
+          "battery_entity": "Battery level sensor",
+          "odometer_entity": "Odometer sensor",
+          "device_tracker_entity": "Location (device tracker)",
+          "charging_binary_entity": "Is charging (binary sensor)",
+          "locked_entity": "Is locked (optional)"
+        }
+      },
+      "chargers": {
+        "title": "Charging sources",
+        "data": {
+          "charger_providers": "Charger providers"
+        }
+      },
+      "zaptec": {
+        "title": "Zaptec entities",
+        "data": {
+          "zaptec_power_entity": "Charge power sensor",
+          "zaptec_session_energy_entity": "Session energy sensor",
+          "zaptec_charging_entity": "Charging (binary sensor, optional)"
+        }
+      },
+      "monta": {
+        "title": "Monta entities",
+        "data": {
+          "monta_last_charge_entity": "Last charge sensor",
+          "monta_wallet_entity": "Wallet balance sensor (optional)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "trips": { "name": "Trips" },
+      "charges": { "name": "Charges" },
+      "charging_status": {
+        "name": "Charging status",
+        "state": {
+          "idle": "Idle",
+          "home": "Charging at home",
+          "public": "Charging (public)"
+        }
+      },
+      "cost_per_km": { "name": "Cost per km" },
+      "pending_review": { "name": "Charges needing price" }
+    }
+  }
+}

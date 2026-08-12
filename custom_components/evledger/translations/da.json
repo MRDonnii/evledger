@@ -1,0 +1,100 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tilføj en bil",
+        "description": "EV Ledger sporer én bils ture og ladeomkostninger. Tilføj flere biler senere fra Indstillinger → Enheder & tjenester.",
+        "data": {
+          "vehicle_name": "Bilnavn",
+          "currency": "Valuta"
+        }
+      },
+      "vehicle": {
+        "title": "Bil-entiteter",
+        "description": "Vælg entiteterne fra din eksisterende bil-integration (fx Tesla Custom Integration), som EV Ledger skal læse.",
+        "data": {
+          "battery_entity": "Batteriniveau-sensor",
+          "odometer_entity": "Kilometertæller-sensor",
+          "device_tracker_entity": "Lokation (device tracker)",
+          "charging_binary_entity": "Lader (binary sensor)",
+          "locked_entity": "Låst (valgfri)"
+        }
+      },
+      "chargers": {
+        "title": "Ladekilder",
+        "description": "Vælg hvilke ladere EV Ledger skal hente pris/session-data fra.",
+        "data": {
+          "charger_providers": "Lade-udbydere"
+        }
+      },
+      "zaptec": {
+        "title": "Zaptec-entiteter",
+        "description": "Zaptec rapporterer live effekt og sessionsenergi, men ikke pris.",
+        "data": {
+          "zaptec_power_entity": "Ladeeffekt-sensor",
+          "zaptec_session_energy_entity": "Sessionsenergi-sensor",
+          "zaptec_charging_entity": "Lader (binary sensor, valgfri)"
+        }
+      },
+      "monta": {
+        "title": "Monta-entiteter",
+        "description": "Monta rapporterer prisen på den seneste ladesession.",
+        "data": {
+          "monta_last_charge_entity": "Seneste ladning-sensor",
+          "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "vehicle": {
+        "title": "Bil-entiteter",
+        "data": {
+          "battery_entity": "Batteriniveau-sensor",
+          "odometer_entity": "Kilometertæller-sensor",
+          "device_tracker_entity": "Lokation (device tracker)",
+          "charging_binary_entity": "Lader (binary sensor)",
+          "locked_entity": "Låst (valgfri)"
+        }
+      },
+      "chargers": {
+        "title": "Ladekilder",
+        "data": {
+          "charger_providers": "Lade-udbydere"
+        }
+      },
+      "zaptec": {
+        "title": "Zaptec-entiteter",
+        "data": {
+          "zaptec_power_entity": "Ladeeffekt-sensor",
+          "zaptec_session_energy_entity": "Sessionsenergi-sensor",
+          "zaptec_charging_entity": "Lader (binary sensor, valgfri)"
+        }
+      },
+      "monta": {
+        "title": "Monta-entiteter",
+        "data": {
+          "monta_last_charge_entity": "Seneste ladning-sensor",
+          "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "trips": { "name": "Ture" },
+      "charges": { "name": "Ladninger" },
+      "charging_status": {
+        "name": "Ladestatus",
+        "state": {
+          "idle": "Lader ikke",
+          "home": "Lader hjemme",
+          "public": "Lader (offentlig)"
+        }
+      },
+      "cost_per_km": { "name": "Pris pr. km" },
+      "pending_review": { "name": "Ladninger der mangler pris" }
+    }
+  }
+}
