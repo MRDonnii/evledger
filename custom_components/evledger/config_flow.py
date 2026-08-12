@@ -40,6 +40,7 @@ from .const import (
 )
 from .device_resolve import (
     resolve_monta_charger_entities,
+    resolve_spot_price_entities,
     resolve_tesla_vehicle_entities,
     resolve_zaptec_charger_entities,
 )
@@ -50,6 +51,8 @@ SKIP_MODEL_KEY = "skip"
 FIELD_VEHICLE_DEVICE = "vehicle_device_id"
 FIELD_ZAPTEC_DEVICE = "zaptec_device_id"
 FIELD_MONTA_DEVICE = "monta_device_id"
+FIELD_SPOT_PRICE_DEVICE = "spot_price_device_id"
+FIELD_ADVANCED = "advanced_setup"
 
 REQUIRED_VEHICLE_FIELDS = (
     CONF_BATTERY_ENTITY,
@@ -65,7 +68,7 @@ def _entity_selector(domain: str | list[str]) -> selector.EntitySelector:
     return selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
 
 
-def _device_selector(integration: str) -> selector.DeviceSelector:
+def _device_selector(integration: str | None = None) -> selector.DeviceSelector:
     return selector.DeviceSelector(selector.DeviceSelectorConfig(integration=integration))
 
 
@@ -109,9 +112,9 @@ def _main_schema(defaults: dict[str, Any]) -> vol.Schema:
                 FIELD_MONTA_DEVICE, default=defaults.get(FIELD_MONTA_DEVICE, vol.UNDEFINED)
             ): _device_selector("monta"),
             vol.Optional(
-                CONF_SPOT_PRICE_ENTITY,
-                default=defaults.get(CONF_SPOT_PRICE_ENTITY, vol.UNDEFINED),
-            ): _entity_selector("sensor"),
+                FIELD_SPOT_PRICE_DEVICE,
+                default=defaults.get(FIELD_SPOT_PRICE_DEVICE, vol.UNDEFINED),
+            ): _device_selector(),
             vol.Optional(
                 CONF_TESLA_MODEL_KEY, default=defaults.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY)
             ): selector.SelectSelector(
@@ -135,6 +138,9 @@ def _main_schema(defaults: dict[str, Any]) -> vol.Schema:
                     min=50, max=400, step=1, mode=selector.NumberSelectorMode.BOX
                 )
             ),
+            vol.Optional(
+                FIELD_ADVANCED, default=defaults.get(FIELD_ADVANCED, False)
+            ): selector.BooleanSelector(),
         }
     )
 
@@ -308,6 +314,8 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._data: dict[str, Any] = {CONF_VEHICLE_PROVIDER: VEHICLE_PROVIDER_TESLA_CUSTOM}
         self._need_zaptec = False
         self._need_monta = False
+        self._need_spot_price = False
+        self._advanced = False
 
     def _missing_required(self) -> bool:
         if not all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
@@ -315,6 +323,8 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._need_zaptec and not all(self._data.get(f) for f in REQUIRED_ZAPTEC_FIELDS):
             return True
         if self._need_monta and not all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS):
+            return True
+        if self._need_spot_price and not self._data.get(CONF_SPOT_PRICE_ENTITY):
             return True
         return False
 
@@ -346,15 +356,18 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
                 resolved = resolve_monta_charger_entities(self.hass, monta_device)
                 self._data.update({k: v for k, v in resolved.items() if v is not None})
 
-            spot_price_entity = user_input.get(CONF_SPOT_PRICE_ENTITY)
-            if spot_price_entity:
+            spot_price_device = user_input.get(FIELD_SPOT_PRICE_DEVICE)
+            if spot_price_device:
+                self._need_spot_price = True
                 providers.append(CHARGER_PROVIDER_SPOT_PRICE)
-                self._data[CONF_SPOT_PRICE_ENTITY] = spot_price_entity
+                resolved = resolve_spot_price_entities(self.hass, spot_price_device)
+                self._data.update({k: v for k, v in resolved.items() if v is not None})
 
             self._data[CONF_CHARGER_PROVIDERS] = providers
+            self._advanced = bool(user_input.get(FIELD_ADVANCED, False))
             _process_efficiency(self._data, user_input)
 
-            if self._missing_required():
+            if self._advanced or self._missing_required():
                 return await self.async_step_fill_missing()
             return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
 
@@ -368,12 +381,18 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
 
         schema_dict: dict[Any, Any] = {}
-        if not all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
+        if self._advanced or not all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
             schema_dict.update(_vehicle_schema(self._data).schema)
-        if self._need_zaptec and not all(self._data.get(f) for f in REQUIRED_ZAPTEC_FIELDS):
+        if self._need_zaptec and (
+            self._advanced or not all(self._data.get(f) for f in REQUIRED_ZAPTEC_FIELDS)
+        ):
             schema_dict.update(_zaptec_schema(self._data).schema)
-        if self._need_monta and not all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS):
+        if self._need_monta and (
+            self._advanced or not all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS)
+        ):
             schema_dict.update(_monta_schema(self._data).schema)
+        if self._need_spot_price and (self._advanced or not self._data.get(CONF_SPOT_PRICE_ENTITY)):
+            schema_dict.update(_spot_price_schema(self._data).schema)
         return self.async_show_form(step_id="fill_missing", data_schema=vol.Schema(schema_dict))
 
     @staticmethod

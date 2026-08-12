@@ -3,22 +3,23 @@
     "step": {
       "user": {
         "title": "Add a vehicle",
-        "description": "One page for everything. Pick your vehicle — its entities (battery, odometer, location, etc.) are found automatically. Leave a charger picker empty to leave that provider out entirely; pick one and its entities are found automatically too. Efficiency comparison is optional.",
+        "description": "Pick a device for each role — Vehicle, Charger, Charging control, and Power price. EV Ledger finds every sensor it needs from the device itself. Leave a picker empty to leave that role out entirely. Turn on 'Advanced setup' to review or override every sensor by hand instead.",
         "data": {
           "vehicle_name": "Vehicle name",
           "currency": "Currency",
           "vehicle_device_id": "Vehicle",
-          "zaptec_device_id": "Zaptec charger (optional — leave empty if you don't have one)",
-          "monta_device_id": "Monta charger (optional — leave empty if you don't have one)",
-          "spot_price_entity": "Electricity price sensor for home charging cost (optional — Nordpool, Energi Data Service, Strømligning, ...)",
+          "zaptec_device_id": "Charger (optional — leave empty if you don't have one)",
+          "monta_device_id": "Charging control (optional — leave empty if you don't have one)",
+          "spot_price_device_id": "Power price (optional — leave empty if you don't have one)",
           "tesla_model_key": "Model / trim for efficiency comparison (optional)",
           "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
-          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')"
+          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')",
+          "advanced_setup": "Advanced setup — show every sensor field so I can review or override them"
         }
       },
       "fill_missing": {
-        "title": "A few things couldn't be found automatically",
-        "description": "Everything else was resolved from the device(s) you picked. Fill in (or correct) just what's shown here.",
+        "title": "Review sensors",
+        "description": "Either something couldn't be found automatically, or you turned on advanced setup — either way, everything shown here is editable. Anything already found is pre-filled; just correct what needs it.",
         "data": {
           "battery_entity": "Battery level sensor",
           "odometer_entity": "Odometer sensor",
