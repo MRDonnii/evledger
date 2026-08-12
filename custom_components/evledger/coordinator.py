@@ -242,7 +242,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cost = None
         for provider in self._charger_providers.values():
             if CAP_COST_LOOKUP in provider.capabilities:
-                cost = provider.get_recent_session_cost(self.hass, now)
+                cost = provider.get_recent_session_cost(self.hass, now, known_kwh=charge.kwh)
                 if cost is not None:
                     break
 

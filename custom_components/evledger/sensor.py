@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -35,6 +35,10 @@ async def async_setup_entry(
         EvLedgerChargingStatusSensor(coordinator, entry),
         EvLedgerCostPerKmSensor(coordinator, entry),
         EvLedgerPendingReviewSensor(coordinator, entry),
+        EvLedgerTotalCostSensor(coordinator, entry),
+        EvLedgerTotalDistanceSensor(coordinator, entry),
+        EvLedgerLastTripSensor(coordinator, entry),
+        EvLedgerLastChargeSensor(coordinator, entry),
     ]
     if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
         entities.append(EvLedgerEfficiencySensor(coordinator, entry))
@@ -184,6 +188,104 @@ class EvLedgerPendingReviewSensor(_EvLedgerBaseSensor):
         charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
         pending = [c for c in charges if c.needs_review]
         return {"pending": [c.to_dict() for c in pending[:MAX_LIST_ITEMS]]}
+
+
+class EvLedgerTotalCostSensor(_EvLedgerBaseSensor):
+    """Running total spent on charging — a proper monetary sensor with `state_class: total`,
+    so it shows up natively in HA's own Statistics graphs and month-over-month views."""
+
+    _attr_icon = "mdi:cash-multiple"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "total_cost", "Total charging cost")
+
+    @property
+    def native_value(self) -> float:
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        return round(sum(c.price or 0 for c in charges if c.ended_at is not None), 2)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+
+class EvLedgerTotalDistanceSensor(_EvLedgerBaseSensor):
+    """Running total distance driven — `state_class: total_increasing` for native HA
+    Statistics graphs (distance only ever goes up)."""
+
+    _attr_icon = "mdi:map-marker-distance"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "km"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "total_distance", "Total distance")
+
+    @property
+    def native_value(self) -> float:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        return round(sum(t.distance_km or 0 for t in trips), 1)
+
+
+class EvLedgerLastTripSensor(_EvLedgerBaseSensor):
+    """The most recent completed trip's distance, for a simple glanceable tile."""
+
+    _attr_icon = "mdi:map-marker-path"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = "km"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "last_trip", "Last trip")
+
+    def _last_trip(self) -> Trip | None:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        finished = [t for t in trips if t.ended_at is not None]
+        return finished[0] if finished else None
+
+    @property
+    def native_value(self) -> float | None:
+        trip = self._last_trip()
+        return trip.distance_km if trip else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        trip = self._last_trip()
+        return trip.to_dict() if trip else {}
+
+
+class EvLedgerLastChargeSensor(_EvLedgerBaseSensor):
+    """The most recent completed charge session's cost, for a simple glanceable tile."""
+
+    _attr_icon = "mdi:battery-charging-100"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "last_charge", "Last charge")
+
+    def _last_charge(self) -> ChargeSession | None:
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        finished = [c for c in charges if c.ended_at is not None]
+        return finished[0] if finished else None
+
+    @property
+    def native_value(self) -> float | None:
+        charge = self._last_charge()
+        return charge.price if charge else None
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        charge = self._last_charge()
+        return charge.to_dict() if charge else {}
 
 
 def _trip_energy_kwh(trip: Trip, battery_capacity_kwh: float) -> float | None:

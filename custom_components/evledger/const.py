@@ -51,12 +51,15 @@ CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY = "zaptec_completed_energy_entity"
 CONF_MONTA_LAST_CHARGE_ENTITY = "monta_last_charge_entity"
 CONF_MONTA_WALLET_ENTITY = "monta_wallet_entity"
 
+CONF_SPOT_PRICE_ENTITY = "spot_price_entity"
+
 # --- Provider registry ids ---
 VEHICLE_PROVIDER_TESLA_CUSTOM = "tesla_custom"
 
 CHARGER_PROVIDER_ZAPTEC = "zaptec"
 CHARGER_PROVIDER_MONTA = "monta"
 CHARGER_PROVIDER_MANUAL = "manual"
+CHARGER_PROVIDER_SPOT_PRICE = "spot_price"
 
 CHARGER_PROVIDERS_WITH_ENTITIES = (CHARGER_PROVIDER_ZAPTEC, CHARGER_PROVIDER_MONTA)
 

@@ -1,0 +1,121 @@
+# EV Ledger — example dashboard view
+#
+# Copy whichever cards below you want into a Lovelace view (raw
+# configuration editor, or a new dashboard's YAML mode). Every card here
+# uses only built-in Home Assistant card types — no extra HACS cards
+# required.
+#
+# Before using: replace every `energitte` with your own vehicle's entity
+# slug (whatever comes after `sensor.` on your EV Ledger entities — check
+# Settings → Devices & services → EV Ledger → your vehicle to find it).
+#
+# This whole file is also a valid single view — paste it as-is as the
+# `cards:` list of a masonry-type view if you just want everything at once.
+
+- type: heading
+  heading: EnerGitte
+  heading_style: title
+  icon: mdi:car-electric
+
+# --- Glance tiles: the numbers you check at a glance ---
+- type: grid
+  columns: 2
+  square: false
+  cards:
+    - type: tile
+      entity: sensor.energitte_charging_status
+      name: Charging
+      icon: mdi:ev-station
+    - type: tile
+      entity: sensor.energitte_cost_per_km
+      name: Cost per km
+      icon: mdi:cash-multiple
+    - type: tile
+      entity: sensor.energitte_total_cost
+      name: Total spent
+      icon: mdi:cash-multiple
+    - type: tile
+      entity: sensor.energitte_total_distance
+      name: Total driven
+      icon: mdi:map-marker-distance
+
+# --- Last trip / last charge: what just happened ---
+- type: grid
+  columns: 2
+  square: false
+  cards:
+    - type: tile
+      entity: sensor.energitte_last_trip
+      name: Last trip
+      icon: mdi:map-marker-path
+    - type: tile
+      entity: sensor.energitte_last_charge
+      name: Last charge
+      icon: mdi:battery-charging-100
+
+# --- Efficiency vs. rated consumption (only if you configured it) ---
+- type: tile
+  entity: sensor.energitte_efficiency_vs_rated
+  name: Efficiency vs. rated
+  icon: mdi:thermometer-lines
+
+# --- Nag banner: only shows up when a public charge needs a price ---
+- type: conditional
+  conditions:
+    - condition: numeric_state
+      entity: sensor.energitte_charges_needing_price
+      above: 0
+  card:
+    type: markdown
+    content: >
+      ⚠️ **{{ states('sensor.energitte_charges_needing_price') }} charge(s)
+      need a price.** Call `evledger.log_public_charge` (or your phone
+      shortcut for it) to fill them in.
+
+# --- Native HA Statistics graphs — month-over-month, for free ---
+# These work because total_cost/total_distance carry a proper state_class;
+# HA's own long-term statistics engine does the monthly bucketing.
+- type: statistics-graph
+  title: Charging cost by month
+  entities:
+    - sensor.energitte_total_cost
+  period: month
+  stat_types:
+    - change
+- type: statistics-graph
+  title: Distance driven by month
+  entities:
+    - sensor.energitte_total_distance
+  period: month
+  stat_types:
+    - change
+
+# --- Recent trips table (Jinja over the trips list attribute) ---
+- type: markdown
+  title: Recent trips
+  content: >
+    {% set trips = state_attr('sensor.energitte_trips', 'trips') or [] %}
+    {% if trips %}
+    | Date | Distance | Battery used |
+    |---|---|---|
+    {% for t in trips[:10] %}
+    | {{ as_timestamp(t.started_at) | timestamp_custom('%d/%m %H:%M') }} | {{ t.distance_km }} km | {{ ((t.start_battery_pct - t.end_battery_pct) | round(0)) if t.start_battery_pct is not none and t.end_battery_pct is not none else '—' }}% |
+    {% endfor %}
+    {% else %}
+    No trips recorded yet.
+    {% endif %}
+
+# --- Recent charges table (Jinja over the charges list attribute) ---
+- type: markdown
+  title: Recent charges
+  content: >
+    {% set charges = state_attr('sensor.energitte_charges', 'charges') or [] %}
+    {% if charges %}
+    | Date | Where | kWh | Price |
+    |---|---|---|---|
+    {% for c in charges[:10] %}
+    | {{ as_timestamp(c.started_at) | timestamp_custom('%d/%m %H:%M') }} | {{ c.location_name or c.location_kind }} | {{ (c.kwh | round(1)) if c.kwh is not none else '—' }} | {{ ((c.price | round(2)) ~ ' ' ~ c.price_currency) if c.price is not none else 'needs review' }} |
+    {% endfor %}
+    {% else %}
+    No charges recorded yet.
+    {% endif %}

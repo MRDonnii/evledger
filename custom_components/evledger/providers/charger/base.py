@@ -33,7 +33,18 @@ class ChargerProvider(ABC):
         return None
 
     def get_recent_session_cost(
-        self, hass: HomeAssistant, session_end: datetime, max_age_minutes: int = 30
+        self,
+        hass: HomeAssistant,
+        session_end: datetime,
+        max_age_minutes: int = 30,
+        known_kwh: float | None = None,
     ) -> SessionCost | None:
-        """Return the actual cost of a session that ended near `session_end`, if known."""
+        """Return the actual (or estimated) cost of a session that ended near `session_end`.
+
+        `known_kwh` is the energy already measured for this session by a
+        live_power provider (e.g. Zaptec), passed through so a provider that
+        only knows *price* (not energy) — a spot-price sensor — can still
+        compute a cost. Providers with their own authoritative energy figure
+        (e.g. Monta) can ignore it.
+        """
         return None
