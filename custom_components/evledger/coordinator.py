@@ -113,6 +113,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     end_lon=None,
                     start_battery_pct=snapshot.battery_pct,
                     end_battery_pct=None,
+                    start_outside_temp_c=snapshot.outside_temp_c,
                 )
                 await self.store.async_upsert_trip(open_trip)
                 self._trip_idle_since = None

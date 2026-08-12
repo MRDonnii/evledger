@@ -10,7 +10,14 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    CONF_BATTERY_CAPACITY_KWH,
+    CONF_MODEL_LABEL,
+    CONF_RATED_WH_PER_KM,
+    DOMAIN,
+    TEMP_BUCKET_COLD_MAX_C,
+    TEMP_BUCKET_MILD_MAX_C,
+)
 from .coordinator import EvLedgerCoordinator
 from .models import ChargeSession, Trip
 
@@ -22,15 +29,16 @@ async def async_setup_entry(
 ) -> None:
     """Set up EV Ledger sensors for one vehicle entry."""
     coordinator: EvLedgerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            EvLedgerTripsSensor(coordinator, entry),
-            EvLedgerChargesSensor(coordinator, entry),
-            EvLedgerChargingStatusSensor(coordinator, entry),
-            EvLedgerCostPerKmSensor(coordinator, entry),
-            EvLedgerPendingReviewSensor(coordinator, entry),
-        ]
-    )
+    entities: list[SensorEntity] = [
+        EvLedgerTripsSensor(coordinator, entry),
+        EvLedgerChargesSensor(coordinator, entry),
+        EvLedgerChargingStatusSensor(coordinator, entry),
+        EvLedgerCostPerKmSensor(coordinator, entry),
+        EvLedgerPendingReviewSensor(coordinator, entry),
+    ]
+    if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
+        entities.append(EvLedgerEfficiencySensor(coordinator, entry))
+    async_add_entities(entities)
 
 
 class _EvLedgerBaseSensor(CoordinatorEntity[EvLedgerCoordinator], SensorEntity):
@@ -176,3 +184,95 @@ class EvLedgerPendingReviewSensor(_EvLedgerBaseSensor):
         charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
         pending = [c for c in charges if c.needs_review]
         return {"pending": [c.to_dict() for c in pending[:MAX_LIST_ITEMS]]}
+
+
+def _trip_energy_kwh(trip: Trip, battery_capacity_kwh: float) -> float | None:
+    """Estimate a trip's energy use from its battery-percent drop.
+
+    Only valid for trips that didn't charge mid-drive (battery % should only
+    fall); returns None if the data needed isn't there or looks wrong.
+    """
+    if trip.start_battery_pct is None or trip.end_battery_pct is None:
+        return None
+    if not trip.distance_km or trip.distance_km <= 0:
+        return None
+    delta_pct = trip.start_battery_pct - trip.end_battery_pct
+    if delta_pct <= 0:
+        return None
+    return (delta_pct / 100) * battery_capacity_kwh
+
+
+def _bucket_for_temp(temp_c: float) -> str:
+    if temp_c < TEMP_BUCKET_COLD_MAX_C:
+        return "cold"
+    if temp_c < TEMP_BUCKET_MILD_MAX_C:
+        return "mild"
+    return "warm"
+
+
+class EvLedgerEfficiencySensor(_EvLedgerBaseSensor):
+    """Real-world Wh/km, bucketed by outside temperature at trip start, vs. the
+    configured rated (WLTP) consumption for this vehicle's model/trim."""
+
+    _attr_icon = "mdi:thermometer-lines"
+    _attr_native_unit_of_measurement = "Wh/km"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "efficiency", "Efficiency vs. rated")
+        self._battery_capacity_kwh: float = entry.data[CONF_BATTERY_CAPACITY_KWH]
+        self._rated_wh_per_km: float = entry.data[CONF_RATED_WH_PER_KM]
+        self._model_label: str = entry.data.get(CONF_MODEL_LABEL, "Custom")
+
+    def _buckets(self) -> dict[str, dict[str, float]]:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        buckets: dict[str, dict[str, float]] = {
+            "cold": {"kwh": 0.0, "km": 0.0, "trips": 0},
+            "mild": {"kwh": 0.0, "km": 0.0, "trips": 0},
+            "warm": {"kwh": 0.0, "km": 0.0, "trips": 0},
+        }
+        for trip in trips:
+            energy_kwh = _trip_energy_kwh(trip, self._battery_capacity_kwh)
+            if energy_kwh is None or trip.start_outside_temp_c is None:
+                continue
+            bucket = buckets[_bucket_for_temp(trip.start_outside_temp_c)]
+            bucket["kwh"] += energy_kwh
+            bucket["km"] += trip.distance_km
+            bucket["trips"] += 1
+        return buckets
+
+    @staticmethod
+    def _wh_per_km(bucket: dict[str, float]) -> float | None:
+        if bucket["km"] <= 0:
+            return None
+        return round((bucket["kwh"] * 1000) / bucket["km"], 0)
+
+    @property
+    def native_value(self) -> float | None:
+        overall_kwh = 0.0
+        overall_km = 0.0
+        for bucket in self._buckets().values():
+            overall_kwh += bucket["kwh"]
+            overall_km += bucket["km"]
+        if overall_km <= 0:
+            return None
+        return round((overall_kwh * 1000) / overall_km, 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        buckets = self._buckets()
+        result: dict[str, Any] = {
+            "model": self._model_label,
+            "rated_wh_per_km": self._rated_wh_per_km,
+            "battery_capacity_kwh": self._battery_capacity_kwh,
+        }
+        for name, bucket in buckets.items():
+            wh_per_km = self._wh_per_km(bucket)
+            result[f"{name}_wh_per_km"] = wh_per_km
+            result[f"{name}_trip_count"] = int(bucket["trips"])
+            result[f"{name}_deviation_pct"] = (
+                round(((wh_per_km - self._rated_wh_per_km) / self._rated_wh_per_km) * 100, 1)
+                if wh_per_km is not None
+                else None
+            )
+        return result

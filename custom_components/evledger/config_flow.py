@@ -12,15 +12,20 @@ from .const import (
     CHARGER_PROVIDER_MANUAL,
     CHARGER_PROVIDER_MONTA,
     CHARGER_PROVIDER_ZAPTEC,
+    CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_ENTITY,
     CONF_CHARGER_PROVIDERS,
     CONF_CHARGING_BINARY_ENTITY,
     CONF_CURRENCY,
     CONF_DEVICE_TRACKER_ENTITY,
     CONF_LOCKED_ENTITY,
+    CONF_MODEL_LABEL,
     CONF_MONTA_LAST_CHARGE_ENTITY,
     CONF_MONTA_WALLET_ENTITY,
     CONF_ODOMETER_ENTITY,
+    CONF_OUTSIDE_TEMP_ENTITY,
+    CONF_RATED_WH_PER_KM,
+    CONF_TESLA_MODEL_KEY,
     CONF_VEHICLE_NAME,
     CONF_VEHICLE_PROVIDER,
     CONF_ZAPTEC_CHARGING_ENTITY,
@@ -31,6 +36,9 @@ from .const import (
     DOMAIN,
     VEHICLE_PROVIDER_TESLA_CUSTOM,
 )
+from .tesla_models import CUSTOM_MODEL_KEY, TESLA_MODEL_SPECS
+
+SKIP_MODEL_KEY = "skip"
 
 
 def _entity_selector(domain: str | list[str]) -> selector.EntitySelector:
@@ -57,6 +65,10 @@ def _vehicle_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_LOCKED_ENTITY, default=defaults.get(CONF_LOCKED_ENTITY, vol.UNDEFINED)
             ): _entity_selector("lock"),
+            vol.Optional(
+                CONF_OUTSIDE_TEMP_ENTITY,
+                default=defaults.get(CONF_OUTSIDE_TEMP_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
         }
     )
 
@@ -127,6 +139,53 @@ def _monta_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _efficiency_schema(defaults: dict[str, Any]) -> vol.Schema:
+    options = [
+        selector.SelectOptionDict(value=key, label=spec["label"])
+        for key, spec in TESLA_MODEL_SPECS.items()
+    ]
+    options.append(
+        selector.SelectOptionDict(value=CUSTOM_MODEL_KEY, label="Custom (enter my own numbers)")
+    )
+    options.append(
+        selector.SelectOptionDict(value=SKIP_MODEL_KEY, label="Skip — no efficiency tracking")
+    )
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_TESLA_MODEL_KEY, default=defaults.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY)
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=options, mode=selector.SelectSelectorMode.DROPDOWN
+                )
+            ),
+        }
+    )
+
+
+def _efficiency_custom_schema(defaults: dict[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_BATTERY_CAPACITY_KWH,
+                default=defaults.get(CONF_BATTERY_CAPACITY_KWH, vol.UNDEFINED),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=10, max=200, step=0.1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Required(
+                CONF_RATED_WH_PER_KM,
+                default=defaults.get(CONF_RATED_WH_PER_KM, vol.UNDEFINED),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=50, max=400, step=1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+        }
+    )
+
+
 class EvLedgerFlowMixin:
     """Shared step logic for both the initial config flow and the options flow."""
 
@@ -145,7 +204,7 @@ class EvLedgerFlowMixin:
                 return await self._async_step_zaptec(None)
             if CHARGER_PROVIDER_MONTA in user_input[CONF_CHARGER_PROVIDERS]:
                 return await self._async_step_monta(None)
-            return self._async_finish()
+            return await self._async_step_efficiency(None)
         return self.async_show_form(step_id="chargers", data_schema=_chargers_schema(self._data))
 
     async def _async_step_zaptec(self, user_input: dict[str, Any] | None):
@@ -153,14 +212,43 @@ class EvLedgerFlowMixin:
             self._data.update(user_input)
             if CHARGER_PROVIDER_MONTA in self._data.get(CONF_CHARGER_PROVIDERS, []):
                 return await self._async_step_monta(None)
-            return self._async_finish()
+            return await self._async_step_efficiency(None)
         return self.async_show_form(step_id="zaptec", data_schema=_zaptec_schema(self._data))
 
     async def _async_step_monta(self, user_input: dict[str, Any] | None):
         if user_input is not None:
             self._data.update(user_input)
-            return self._async_finish()
+            return await self._async_step_efficiency(None)
         return self.async_show_form(step_id="monta", data_schema=_monta_schema(self._data))
+
+    async def _async_step_efficiency(self, user_input: dict[str, Any] | None):
+        if user_input is not None:
+            key = user_input[CONF_TESLA_MODEL_KEY]
+            self._data[CONF_TESLA_MODEL_KEY] = key
+            if key == CUSTOM_MODEL_KEY:
+                return await self._async_step_efficiency_custom(None)
+            if key in TESLA_MODEL_SPECS:
+                spec = TESLA_MODEL_SPECS[key]
+                self._data[CONF_BATTERY_CAPACITY_KWH] = spec["battery_kwh"]
+                self._data[CONF_RATED_WH_PER_KM] = spec["wltp_wh_per_km"]
+                self._data[CONF_MODEL_LABEL] = spec["label"]
+            else:
+                self._data.pop(CONF_BATTERY_CAPACITY_KWH, None)
+                self._data.pop(CONF_RATED_WH_PER_KM, None)
+                self._data.pop(CONF_MODEL_LABEL, None)
+            return self._async_finish()
+        return self.async_show_form(
+            step_id="efficiency", data_schema=_efficiency_schema(self._data)
+        )
+
+    async def _async_step_efficiency_custom(self, user_input: dict[str, Any] | None):
+        if user_input is not None:
+            self._data.update(user_input)
+            self._data[CONF_MODEL_LABEL] = "Custom"
+            return self._async_finish()
+        return self.async_show_form(
+            step_id="efficiency_custom", data_schema=_efficiency_custom_schema(self._data)
+        )
 
     def _async_finish(self):
         raise NotImplementedError
@@ -205,6 +293,12 @@ class EvLedgerConfigFlow(ConfigFlow, EvLedgerFlowMixin, domain=DOMAIN):
     async def async_step_monta(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_monta(user_input)
 
+    async def async_step_efficiency(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_efficiency(user_input)
+
+    async def async_step_efficiency_custom(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_efficiency_custom(user_input)
+
     def _async_finish(self):
         return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
 
@@ -235,6 +329,12 @@ class EvLedgerOptionsFlow(OptionsFlow, EvLedgerFlowMixin):
 
     async def async_step_monta(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_monta(user_input)
+
+    async def async_step_efficiency(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_efficiency(user_input)
+
+    async def async_step_efficiency_custom(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_efficiency_custom(user_input)
 
     def _async_finish(self):
         self.hass.config_entries.async_update_entry(self._entry, data=self._data)

@@ -17,7 +17,8 @@
           "odometer_entity": "Odometer sensor",
           "device_tracker_entity": "Location (device tracker)",
           "charging_binary_entity": "Is charging (binary sensor)",
-          "locked_entity": "Is locked (optional)"
+          "locked_entity": "Is locked (optional)",
+          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)"
         }
       },
       "chargers": {
@@ -44,6 +45,21 @@
           "monta_last_charge_entity": "Last charge sensor",
           "monta_wallet_entity": "Wallet balance sensor (optional)"
         }
+      },
+      "efficiency": {
+        "title": "Efficiency comparison",
+        "description": "Pick your exact model/trim to compare real-world Wh/km against its official rated (WLTP) consumption, bucketed by outside temperature. These are best-effort published figures, not read from your car — pick 'Custom' if you know your own numbers, or 'Skip' to leave this off.",
+        "data": {
+          "tesla_model_key": "Model / trim"
+        }
+      },
+      "efficiency_custom": {
+        "title": "Custom efficiency numbers",
+        "description": "Enter your vehicle's usable battery capacity and its official rated consumption. Check your delivery paperwork or Tesla account if you want the exact figure for your configuration.",
+        "data": {
+          "battery_capacity_kwh": "Usable battery capacity (kWh)",
+          "rated_wh_per_km": "Rated consumption (Wh/km)"
+        }
       }
     }
   },
@@ -56,7 +72,8 @@
           "odometer_entity": "Odometer sensor",
           "device_tracker_entity": "Location (device tracker)",
           "charging_binary_entity": "Is charging (binary sensor)",
-          "locked_entity": "Is locked (optional)"
+          "locked_entity": "Is locked (optional)",
+          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)"
         }
       },
       "chargers": {
@@ -80,6 +97,21 @@
           "monta_last_charge_entity": "Last charge sensor",
           "monta_wallet_entity": "Wallet balance sensor (optional)"
         }
+      },
+      "efficiency": {
+        "title": "Efficiency comparison",
+        "description": "Pick your exact model/trim to compare real-world Wh/km against its official rated (WLTP) consumption, bucketed by outside temperature. These are best-effort published figures, not read from your car — pick 'Custom' if you know your own numbers, or 'Skip' to leave this off.",
+        "data": {
+          "tesla_model_key": "Model / trim"
+        }
+      },
+      "efficiency_custom": {
+        "title": "Custom efficiency numbers",
+        "description": "Enter your vehicle's usable battery capacity and its official rated consumption. Check your delivery paperwork or Tesla account if you want the exact figure for your configuration.",
+        "data": {
+          "battery_capacity_kwh": "Usable battery capacity (kWh)",
+          "rated_wh_per_km": "Rated consumption (Wh/km)"
+        }
       }
     }
   },
@@ -96,7 +128,8 @@
         }
       },
       "cost_per_km": { "name": "Cost per km" },
-      "pending_review": { "name": "Charges needing price" }
+      "pending_review": { "name": "Charges needing price" },
+      "efficiency": { "name": "Efficiency vs. rated" }
     }
   }
 }
