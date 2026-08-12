@@ -32,7 +32,7 @@ from .const import (
 )
 
 
-def _entity_selector(domain: str) -> selector.EntitySelector:
+def _entity_selector(domain: str | list[str]) -> selector.EntitySelector:
     return selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
 
 
@@ -102,7 +102,7 @@ def _zaptec_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_ZAPTEC_CHARGING_ENTITY,
                 default=defaults.get(CONF_ZAPTEC_CHARGING_ENTITY, vol.UNDEFINED),
-            ): _entity_selector("binary_sensor"),
+            ): _entity_selector(["binary_sensor", "switch"]),
         }
     )
 
