@@ -69,7 +69,10 @@ def _entity_selector(domain: str | list[str]) -> selector.EntitySelector:
 
 
 def _device_selector(integration: str | None = None) -> selector.DeviceSelector:
-    return selector.DeviceSelector(selector.DeviceSelectorConfig(integration=integration))
+    config: dict[str, str] = {}
+    if integration:
+        config["integration"] = integration
+    return selector.DeviceSelector(selector.DeviceSelectorConfig(**config))
 
 
 def _model_select_options() -> list[selector.SelectOptionDict]:
