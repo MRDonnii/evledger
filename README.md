@@ -78,30 +78,38 @@ folder and restart.
 
 ## Setting it up
 
-It's one page:
+Pick a device for each role — that's it:
 
 1. **Vehicle name** and **currency** (e.g. DKK, EUR, USD).
-2. **Pick your vehicle** — a device picker scoped to the Tesla Custom
-   Integration. If you have more than one car, this is how EV Ledger knows
-   which one this entry is for. Its entities (battery, odometer, location,
-   charging state, lock, outside temperature) are resolved automatically.
-3. **Pick your charger(s)** — a device picker for Zaptec and one for Monta.
-   Leave either empty and that provider is simply left out of the setup —
-   there's no separate "which providers do you want" step. Their entities
-   are resolved automatically from whichever device you picked.
-4. **Electricity price sensor** (optional) — for home charging cost when
-   Monta isn't configured or isn't fresh enough. Leave empty to skip.
-5. **Efficiency comparison** (optional) — pick your model/trim from a built-in
+2. **Vehicle** — a device picker scoped to the Tesla Custom Integration. If
+   you have more than one car, this is how EV Ledger knows which one this
+   entry is for. Its entities (battery, odometer, location, charging state,
+   lock, outside temperature) are resolved automatically.
+3. **Charger** (Zaptec) — pick your charger device, or leave it empty if you
+   don't have one. Its power/energy entities are resolved automatically.
+4. **Charging control** (Monta) — same idea; leave it empty to skip Monta
+   entirely.
+5. **Power price** — pick your electricity-price device (Nordpool, Energi
+   Data Service, Strømligning, ...), or leave it empty. Used for home
+   charging cost when Monta isn't configured or isn't fresh enough.
+6. **Efficiency comparison** (optional) — pick your model/trim from a built-in
    list of Tesla's published WLTP figures, or "Custom" and enter your own
    battery capacity + rated consumption right there on the same page.
 
-Submit, and you're done — unless something couldn't be auto-detected from a
-device you picked, in which case a second, much shorter page asks only for
-the specific entity that's missing.
+Leaving a device picker empty simply leaves that role out of the setup —
+there's no separate "which providers do you want" step. Submit, and you're
+done, unless something couldn't be auto-detected from a device you picked,
+in which case a second, much shorter page asks only for the specific
+sensor that's missing.
+
+**Want to set every sensor yourself instead?** Tick **Advanced setup** on
+the first page. It skips nothing — every sensor field for every role you
+picked a device for shows up on the review page, pre-filled with whatever
+was auto-detected, so you can check or override anything before saving.
 
 You can revisit all of this later from the integration's **Configure**
-button — also one page, pre-filled with everything currently configured.
-Clearing a Zaptec/Monta/price entity there drops that provider.
+button — one page of every current sensor, editable directly. Clearing a
+Zaptec/Monta/price entity there drops that role.
 
 ## Efficiency comparison
 

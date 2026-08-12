@@ -3,22 +3,23 @@
     "step": {
       "user": {
         "title": "Tilføj en bil",
-        "description": "Én side for det hele. Vælg din bil — dens entiteter (batteri, km-tæller, lokation osv.) findes automatisk. Lad en lader-vælger stå tom for at udelade den udbyder helt; vælg én og dens entiteter findes også automatisk. Effektivitetssammenligning er valgfri.",
+        "description": "Vælg en enhed for hver rolle — Bil, Lader, Ladestyring og Strømpris. EV Ledger finder selv alle de sensorer den skal bruge fra enheden. Lad en vælger stå tom for at udelade den rolle helt. Slå 'Avanceret opsætning' til hvis du hellere selv vil se og rette alle sensorer manuelt.",
         "data": {
           "vehicle_name": "Bilnavn",
           "currency": "Valuta",
           "vehicle_device_id": "Bil",
-          "zaptec_device_id": "Zaptec-lader (valgfri — lad stå tom hvis du ikke har en)",
-          "monta_device_id": "Monta-lader (valgfri — lad stå tom hvis du ikke har en)",
-          "spot_price_entity": "Elpris-sensor til hjemmeladeomkostning (valgfri — Nordpool, Energi Data Service, Strømligning osv.)",
+          "zaptec_device_id": "Lader (valgfri — lad stå tom hvis du ikke har en)",
+          "monta_device_id": "Ladestyring (valgfri — lad stå tom hvis du ikke har en)",
+          "spot_price_device_id": "Strømpris (valgfri — lad stå tom hvis du ikke har en)",
           "tesla_model_key": "Model / variant til effektivitetssammenligning (valgfri)",
           "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
-          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')"
+          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')",
+          "advanced_setup": "Avanceret opsætning — vis alle sensorfelter så jeg selv kan gennemgå eller rette dem"
         }
       },
       "fill_missing": {
-        "title": "Et par ting kunne ikke findes automatisk",
-        "description": "Alt andet blev fundet ud fra den/de enheder du valgte. Udfyld (eller ret) kun det der vises her.",
+        "title": "Gennemgå sensorer",
+        "description": "Enten kunne noget ikke findes automatisk, eller også har du slået avanceret opsætning til — under alle omstændigheder kan alt herunder redigeres. Det der allerede er fundet er udfyldt på forhånd; ret kun det der skal rettes.",
         "data": {
           "battery_entity": "Batteriniveau-sensor",
           "odometer_entity": "Kilometertæller-sensor",

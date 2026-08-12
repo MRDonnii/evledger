@@ -22,6 +22,7 @@ from .const import (
     CONF_MONTA_WALLET_ENTITY,
     CONF_ODOMETER_ENTITY,
     CONF_OUTSIDE_TEMP_ENTITY,
+    CONF_SPOT_PRICE_ENTITY,
     CONF_ZAPTEC_CHARGING_ENTITY,
     CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
     CONF_ZAPTEC_POWER_ENTITY,
@@ -111,3 +112,37 @@ def resolve_monta_charger_entities(hass: HomeAssistant, device_id: str) -> dict[
             break
 
     return result
+
+
+def resolve_spot_price_entities(hass: HomeAssistant, device_id: str) -> dict[str, str | None]:
+    """Guess the electricity-price entity for a price-sensor device.
+
+    Strømligning devices carry an unambiguous suffix for the VAT-inclusive
+    current price. Other price integrations (Nordpool, Energi Data Service,
+    ...) don't share a stable naming convention, so this falls through a
+    series of looser heuristics, ending with a live-state check for a
+    ".../kWh" unit — which catches Nordpool-style entities regardless of
+    their entity_id.
+    """
+    entries = _entities_for_device(hass, device_id)
+
+    stromligning_match = _first_matching(entries, "sensor", "_current_price_vat")
+    if stromligning_match:
+        return {CONF_SPOT_PRICE_ENTITY: stromligning_match}
+
+    for needle in ("current_price", "spot_price", "spotprice"):
+        for entry in entries:
+            if entry.domain != "sensor":
+                continue
+            if needle in entry.entity_id and "ex_vat" not in entry.entity_id:
+                return {CONF_SPOT_PRICE_ENTITY: entry.entity_id}
+
+    for entry in entries:
+        if entry.domain != "sensor":
+            continue
+        state = hass.states.get(entry.entity_id)
+        unit = (state.attributes.get("unit_of_measurement") if state else None) or ""
+        if "/kwh" in unit.lower():
+            return {CONF_SPOT_PRICE_ENTITY: entry.entity_id}
+
+    return {CONF_SPOT_PRICE_ENTITY: None}
