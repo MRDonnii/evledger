@@ -9,9 +9,16 @@
           "currency": "Currency"
         }
       },
+      "vehicle_device": {
+        "title": "Choose your vehicle",
+        "description": "Pick the Tesla device this EV Ledger entry tracks. Its entities (battery, odometer, location, etc.) are found automatically — you'll only be asked to fill anything in by hand if something couldn't be auto-detected.",
+        "data": {
+          "vehicle_device_id": "Vehicle"
+        }
+      },
       "vehicle": {
         "title": "Vehicle entities",
-        "description": "Pick the entities from your existing vehicle integration (e.g. Tesla Custom Integration) that EV Ledger should read.",
+        "description": "Some entities couldn't be auto-detected from the device — fill in the rest here (or correct anything that was guessed wrong).",
         "data": {
           "battery_entity": "Battery level sensor",
           "odometer_entity": "Odometer sensor",
@@ -28,9 +35,16 @@
           "charger_providers": "Charger providers"
         }
       },
+      "zaptec_device": {
+        "title": "Choose your Zaptec charger",
+        "description": "Its power/energy entities are found automatically.",
+        "data": {
+          "zaptec_device_id": "Zaptec charger"
+        }
+      },
       "zaptec": {
         "title": "Zaptec entities",
-        "description": "Zaptec reports live power and session energy, but not cost.",
+        "description": "Some entities couldn't be auto-detected — fill in the rest here (or correct anything guessed wrong). Zaptec reports live power and session energy, but not cost.",
         "data": {
           "zaptec_power_entity": "Charge power sensor",
           "zaptec_session_energy_entity": "Session energy sensor",
@@ -38,9 +52,16 @@
           "zaptec_completed_energy_entity": "Completed session energy sensor (optional, recommended)"
         }
       },
+      "monta_device": {
+        "title": "Choose your Monta charger",
+        "description": "Its cost entity — and your account's wallet balance, if found — are resolved automatically.",
+        "data": {
+          "monta_device_id": "Monta charger"
+        }
+      },
       "monta": {
         "title": "Monta entities",
-        "description": "Monta reports the cost of its most recent charge session.",
+        "description": "Some entities couldn't be auto-detected — fill in the rest here (or correct anything guessed wrong). Monta reports the cost of its most recent charge session.",
         "data": {
           "monta_last_charge_entity": "Last charge sensor",
           "monta_wallet_entity": "Wallet balance sensor (optional)"
@@ -65,6 +86,13 @@
   },
   "options": {
     "step": {
+      "vehicle_device": {
+        "title": "Choose your vehicle",
+        "description": "Pick the Tesla device this EV Ledger entry tracks. Its entities are found automatically — you'll only be asked to fill anything in by hand if something couldn't be auto-detected.",
+        "data": {
+          "vehicle_device_id": "Vehicle"
+        }
+      },
       "vehicle": {
         "title": "Vehicle entities",
         "data": {
@@ -82,6 +110,13 @@
           "charger_providers": "Charger providers"
         }
       },
+      "zaptec_device": {
+        "title": "Choose your Zaptec charger",
+        "description": "Its power/energy entities are found automatically.",
+        "data": {
+          "zaptec_device_id": "Zaptec charger"
+        }
+      },
       "zaptec": {
         "title": "Zaptec entities",
         "data": {
@@ -89,6 +124,13 @@
           "zaptec_session_energy_entity": "Session energy sensor",
           "zaptec_charging_entity": "Charging (binary sensor or switch, optional)",
           "zaptec_completed_energy_entity": "Completed session energy sensor (optional, recommended)"
+        }
+      },
+      "monta_device": {
+        "title": "Choose your Monta charger",
+        "description": "Its cost entity — and your account's wallet balance, if found — are resolved automatically.",
+        "data": {
+          "monta_device_id": "Monta charger"
         }
       },
       "monta": {

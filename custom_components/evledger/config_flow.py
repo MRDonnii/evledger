@@ -36,13 +36,47 @@ from .const import (
     DOMAIN,
     VEHICLE_PROVIDER_TESLA_CUSTOM,
 )
+from .device_resolve import (
+    resolve_monta_charger_entities,
+    resolve_tesla_vehicle_entities,
+    resolve_zaptec_charger_entities,
+)
 from .tesla_models import CUSTOM_MODEL_KEY, TESLA_MODEL_SPECS
 
 SKIP_MODEL_KEY = "skip"
 
+FIELD_VEHICLE_DEVICE = "vehicle_device_id"
+FIELD_ZAPTEC_DEVICE = "zaptec_device_id"
+FIELD_MONTA_DEVICE = "monta_device_id"
+
+REQUIRED_VEHICLE_FIELDS = (
+    CONF_BATTERY_ENTITY,
+    CONF_ODOMETER_ENTITY,
+    CONF_DEVICE_TRACKER_ENTITY,
+    CONF_CHARGING_BINARY_ENTITY,
+)
+REQUIRED_ZAPTEC_FIELDS = (CONF_ZAPTEC_POWER_ENTITY, CONF_ZAPTEC_SESSION_ENERGY_ENTITY)
+REQUIRED_MONTA_FIELDS = (CONF_MONTA_LAST_CHARGE_ENTITY,)
+
 
 def _entity_selector(domain: str | list[str]) -> selector.EntitySelector:
     return selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
+
+
+def _device_selector(integration: str) -> selector.DeviceSelector:
+    return selector.DeviceSelector(selector.DeviceSelectorConfig(integration=integration))
+
+
+def _vehicle_device_schema() -> vol.Schema:
+    return vol.Schema({vol.Required(FIELD_VEHICLE_DEVICE): _device_selector("tesla_custom")})
+
+
+def _zaptec_device_schema() -> vol.Schema:
+    return vol.Schema({vol.Required(FIELD_ZAPTEC_DEVICE): _device_selector("zaptec")})
+
+
+def _monta_device_schema() -> vol.Schema:
+    return vol.Schema({vol.Required(FIELD_MONTA_DEVICE): _device_selector("monta")})
 
 
 def _vehicle_schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -191,6 +225,19 @@ class EvLedgerFlowMixin:
 
     _data: dict[str, Any]
 
+    # ---- vehicle: pick a device, auto-resolve, only ask for the rest if needed ----
+
+    async def _async_step_vehicle_device(self, user_input: dict[str, Any] | None):
+        if user_input is not None:
+            resolved = resolve_tesla_vehicle_entities(self.hass, user_input[FIELD_VEHICLE_DEVICE])
+            self._data.update({k: v for k, v in resolved.items() if v is not None})
+            if all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
+                return await self._async_step_chargers(None)
+            return await self._async_step_vehicle(None)
+        return self.async_show_form(
+            step_id="vehicle_device", data_schema=_vehicle_device_schema()
+        )
+
     async def _async_step_vehicle(self, user_input: dict[str, Any] | None):
         if user_input is not None:
             self._data.update(user_input)
@@ -201,19 +248,46 @@ class EvLedgerFlowMixin:
         if user_input is not None:
             self._data[CONF_CHARGER_PROVIDERS] = user_input[CONF_CHARGER_PROVIDERS]
             if CHARGER_PROVIDER_ZAPTEC in user_input[CONF_CHARGER_PROVIDERS]:
-                return await self._async_step_zaptec(None)
+                return await self._async_step_zaptec_device(None)
             if CHARGER_PROVIDER_MONTA in user_input[CONF_CHARGER_PROVIDERS]:
-                return await self._async_step_monta(None)
+                return await self._async_step_monta_device(None)
             return await self._async_step_efficiency(None)
         return self.async_show_form(step_id="chargers", data_schema=_chargers_schema(self._data))
+
+    # ---- zaptec: pick a device, auto-resolve, only ask for the rest if needed ----
+
+    async def _async_step_zaptec_device(self, user_input: dict[str, Any] | None):
+        if user_input is not None:
+            resolved = resolve_zaptec_charger_entities(
+                self.hass, user_input[FIELD_ZAPTEC_DEVICE]
+            )
+            self._data.update({k: v for k, v in resolved.items() if v is not None})
+            if all(self._data.get(f) for f in REQUIRED_ZAPTEC_FIELDS):
+                return await self._async_step_after_zaptec()
+            return await self._async_step_zaptec(None)
+        return self.async_show_form(step_id="zaptec_device", data_schema=_zaptec_device_schema())
 
     async def _async_step_zaptec(self, user_input: dict[str, Any] | None):
         if user_input is not None:
             self._data.update(user_input)
-            if CHARGER_PROVIDER_MONTA in self._data.get(CONF_CHARGER_PROVIDERS, []):
-                return await self._async_step_monta(None)
-            return await self._async_step_efficiency(None)
+            return await self._async_step_after_zaptec()
         return self.async_show_form(step_id="zaptec", data_schema=_zaptec_schema(self._data))
+
+    async def _async_step_after_zaptec(self):
+        if CHARGER_PROVIDER_MONTA in self._data.get(CONF_CHARGER_PROVIDERS, []):
+            return await self._async_step_monta_device(None)
+        return await self._async_step_efficiency(None)
+
+    # ---- monta: pick a device, auto-resolve, only ask for the rest if needed ----
+
+    async def _async_step_monta_device(self, user_input: dict[str, Any] | None):
+        if user_input is not None:
+            resolved = resolve_monta_charger_entities(self.hass, user_input[FIELD_MONTA_DEVICE])
+            self._data.update({k: v for k, v in resolved.items() if v is not None})
+            if all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS):
+                return await self._async_step_efficiency(None)
+            return await self._async_step_monta(None)
+        return self.async_show_form(step_id="monta_device", data_schema=_monta_device_schema())
 
     async def _async_step_monta(self, user_input: dict[str, Any] | None):
         if user_input is not None:
@@ -268,7 +342,7 @@ class EvLedgerConfigFlow(ConfigFlow, EvLedgerFlowMixin, domain=DOMAIN):
             self._data.update(user_input)
             await self.async_set_unique_id(user_input[CONF_VEHICLE_NAME].lower())
             self._abort_if_unique_id_configured()
-            return await self._async_step_vehicle(None)
+            return await self._async_step_vehicle_device(None)
 
         return self.async_show_form(
             step_id="user",
@@ -281,14 +355,23 @@ class EvLedgerConfigFlow(ConfigFlow, EvLedgerFlowMixin, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_vehicle_device(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_vehicle_device(user_input)
+
     async def async_step_vehicle(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_vehicle(user_input)
 
     async def async_step_chargers(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_chargers(user_input)
 
+    async def async_step_zaptec_device(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_zaptec_device(user_input)
+
     async def async_step_zaptec(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_zaptec(user_input)
+
+    async def async_step_monta_device(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_monta_device(user_input)
 
     async def async_step_monta(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_monta(user_input)
@@ -316,7 +399,12 @@ class EvLedgerOptionsFlow(OptionsFlow, EvLedgerFlowMixin):
         self._data: dict[str, Any] = dict(config_entry.data)
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        # Reconfiguring: go straight to the editable form with current values
+        # pre-filled, rather than forcing a device re-pick.
         return await self._async_step_vehicle(None)
+
+    async def async_step_vehicle_device(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_vehicle_device(user_input)
 
     async def async_step_vehicle(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_vehicle(user_input)
@@ -324,8 +412,14 @@ class EvLedgerOptionsFlow(OptionsFlow, EvLedgerFlowMixin):
     async def async_step_chargers(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_chargers(user_input)
 
+    async def async_step_zaptec_device(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_zaptec_device(user_input)
+
     async def async_step_zaptec(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_zaptec(user_input)
+
+    async def async_step_monta_device(self, user_input: dict[str, Any] | None = None):
+        return await self._async_step_monta_device(user_input)
 
     async def async_step_monta(self, user_input: dict[str, Any] | None = None):
         return await self._async_step_monta(user_input)

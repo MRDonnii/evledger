@@ -80,12 +80,17 @@ folder and restart.
 The config flow asks for:
 
 1. **Vehicle name** and **currency** (e.g. DKK, EUR, USD).
-2. **Vehicle entities** — battery %, odometer, device tracker, "is charging"
-   binary sensor, and optionally a lock entity, all picked from your existing
-   vehicle integration.
+2. **Pick your vehicle** — a device picker scoped to the Tesla Custom
+   Integration. If you have more than one car, this is how EV Ledger knows
+   which one this entry is for. Its entities (battery, odometer, location,
+   charging state, lock, outside temperature) are resolved automatically; you
+   only see a manual entity form if something couldn't be auto-detected, or
+   to fix anything guessed wrong.
 3. **Charger providers** — tick whichever of Zaptec / Monta / manual entry
    apply to you.
-4. Entity pickers for whichever providers you ticked.
+4. **Pick your charger(s)** — likewise, a device picker for your Zaptec
+   charger and/or Monta charger (handy if you have more than one charger).
+   Same auto-resolve-then-fallback behaviour.
 5. **Efficiency comparison** (optional) — pick your model/trim from a built-in
    list of Tesla's published WLTP figures, enter your own numbers, or skip it.
 
