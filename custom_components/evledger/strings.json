@@ -3,18 +3,24 @@
     "step": {
       "user": {
         "title": "Add a vehicle",
-        "description": "Pick a device for each role — Vehicle, Charger, Charging control, and Power price. EV Ledger finds every sensor it needs from the device itself. Leave a picker empty to leave that role out entirely. Turn on 'Advanced setup' to review or override every sensor by hand instead.",
+        "description": "Four device pickers below, in this order: (1) Vehicle, (2) Charger, (3) Charging control, (4) Power price. EV Ledger finds every sensor it needs from whichever device you pick. Leave a picker empty to leave that role out entirely. Turn on 'Advanced setup' at the bottom to review or override every sensor by hand instead.",
         "data": {
           "vehicle_name": "Vehicle name",
           "currency": "Currency",
-          "vehicle_device_id": "Vehicle",
-          "zaptec_device_id": "Charger (optional — leave empty if you don't have one)",
-          "monta_device_id": "Charging control (optional — leave empty if you don't have one)",
-          "spot_price_device_id": "Power price (optional — leave empty if you don't have one)",
+          "vehicle_device_id": "1. Vehicle",
+          "zaptec_device_id": "2. Charger (optional)",
+          "monta_device_id": "3. Charging control (optional)",
+          "spot_price_device_id": "4. Power price (optional)",
           "tesla_model_key": "Model / trim for efficiency comparison (optional)",
           "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
           "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')",
           "advanced_setup": "Advanced setup — show every sensor field so I can review or override them"
+        },
+        "data_description": {
+          "vehicle_device_id": "Your car, e.g. a Tesla",
+          "zaptec_device_id": "Your home charger, e.g. Zaptec — leave empty if you don't have one",
+          "monta_device_id": "Your charging-control app/account, e.g. Monta — leave empty if you don't have one",
+          "spot_price_device_id": "Your electricity-price integration, e.g. Nordpool or Strømligning — leave empty if you don't have one"
         }
       },
       "fill_missing": {

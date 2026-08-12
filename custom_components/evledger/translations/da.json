@@ -3,18 +3,24 @@
     "step": {
       "user": {
         "title": "Tilføj en bil",
-        "description": "Vælg en enhed for hver rolle — Bil, Lader, Ladestyring og Strømpris. EV Ledger finder selv alle de sensorer den skal bruge fra enheden. Lad en vælger stå tom for at udelade den rolle helt. Slå 'Avanceret opsætning' til hvis du hellere selv vil se og rette alle sensorer manuelt.",
+        "description": "Fire enheds-vælgere herunder, i denne rækkefølge: (1) Bil, (2) Lader, (3) Ladestyring, (4) Strømpris. EV Ledger finder selv alle de sensorer den skal bruge fra den enhed du vælger. Lad en vælger stå tom for at udelade den rolle helt. Slå 'Avanceret opsætning' til nederst hvis du hellere selv vil se og rette alle sensorer manuelt.",
         "data": {
           "vehicle_name": "Bilnavn",
           "currency": "Valuta",
-          "vehicle_device_id": "Bil",
-          "zaptec_device_id": "Lader (valgfri — lad stå tom hvis du ikke har en)",
-          "monta_device_id": "Ladestyring (valgfri — lad stå tom hvis du ikke har en)",
-          "spot_price_device_id": "Strømpris (valgfri — lad stå tom hvis du ikke har en)",
+          "vehicle_device_id": "1. Bil",
+          "zaptec_device_id": "2. Lader (valgfri)",
+          "monta_device_id": "3. Ladestyring (valgfri)",
+          "spot_price_device_id": "4. Strømpris (valgfri)",
           "tesla_model_key": "Model / variant til effektivitetssammenligning (valgfri)",
           "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
           "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')",
           "advanced_setup": "Avanceret opsætning — vis alle sensorfelter så jeg selv kan gennemgå eller rette dem"
+        },
+        "data_description": {
+          "vehicle_device_id": "Din bil, fx en Tesla",
+          "zaptec_device_id": "Din hjemmelader, fx Zaptec — lad stå tom hvis du ikke har en",
+          "monta_device_id": "Din ladestyrings-app/konto, fx Monta — lad stå tom hvis du ikke har en",
+          "spot_price_device_id": "Din elpris-integration, fx Nordpool eller Strømligning — lad stå tom hvis du ikke har en"
         }
       },
       "fill_missing": {
