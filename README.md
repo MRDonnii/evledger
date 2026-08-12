@@ -126,6 +126,25 @@ step and enter your own battery capacity and rated consumption (check your
 delivery paperwork or Tesla account for the exact number). Corrections and
 new model entries via PR are welcome.
 
+## Month-by-month history and performance score
+
+Every trip and charge is kept forever (nothing is ever pruned), so nothing
+about "going back in time" needs a special feature — `sensor.<vehicle>_trips`
+and `sensor.<vehicle>_charges`' totals (and `total_cost`/`total_distance`)
+are always computed over the *entire* history, only their `trips`/`charges`
+attribute lists are capped to the most recent 20 for a manageable dashboard
+tile.
+
+If efficiency comparison is configured, `sensor.<vehicle>_monthly_performance`
+buckets that same full history by calendar month (up to 24 months back) and
+scores each one: `rated_wh_per_km ÷ actual_wh_per_km × 100` — 100 means you
+drove exactly as efficiently as the official rated figure, above 100 beats
+it, below 100 falls short. Its `months` attribute is the "look back" table:
+newest month first, each with distance, cost, Wh/km, and score. The state
+itself is a plain `measurement` sensor too, so HA's built-in **History**
+graph on that entity lets you scrub back through every past reading, not
+just the last 24 months.
+
 ## Home charging cost sources
 
 Home charge sessions try each configured cost source in order and use the
@@ -168,6 +187,7 @@ Each vehicle gets:
 | `sensor.<vehicle>_cost_per_km` | all-time avg cost/km | — |
 | `sensor.<vehicle>_pending_review` | count needing a price | `pending` (list) |
 | `sensor.<vehicle>_efficiency` | overall Wh/km | `cold_wh_per_km`, `mild_wh_per_km`, `warm_wh_per_km`, `*_deviation_pct`, `*_trip_count`, `rated_wh_per_km` (only created if efficiency comparison is configured) |
+| `sensor.<vehicle>_monthly_performance` | current month's score (%) | `months` (up to 24 months back, newest first — each with `distance_km`, `wh_per_km`, `score`, `cost`, `cost_per_km`, `trip_count`); only created if efficiency comparison is configured |
 | `sensor.<vehicle>_total_charging_cost` | running total spent (monetary, `state_class: total`) | — |
 | `sensor.<vehicle>_total_distance` | running total km driven (`state_class: total_increasing`) | — |
 | `sensor.<vehicle>_last_trip` | most recent trip's distance | full trip record |
