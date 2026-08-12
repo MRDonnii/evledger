@@ -1,7 +1,7 @@
 """Shared data models for EV Ledger."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -24,6 +24,11 @@ class LiveChargeState:
     is_charging: bool
     power_w: float | None
     session_energy_kwh: float | None
+    # A stable post-session energy reading, if the provider exposes one (e.g.
+    # Zaptec's "completed session energy" sensor, which holds its value after
+    # the session ends rather than resetting immediately). Preferred over a
+    # value captured mid-session when available, since it can't go stale.
+    completed_session_kwh: float | None = None
 
 
 @dataclass

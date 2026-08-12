@@ -16,6 +16,7 @@ from ..const import (
     CONF_MONTA_WALLET_ENTITY,
     CONF_ODOMETER_ENTITY,
     CONF_ZAPTEC_CHARGING_ENTITY,
+    CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
     CONF_ZAPTEC_POWER_ENTITY,
     CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
 )
@@ -48,6 +49,7 @@ def build_charger_providers(data: dict[str, Any]) -> dict[str, ChargerProvider]:
             power_entity=data.get(CONF_ZAPTEC_POWER_ENTITY),
             session_energy_entity=data.get(CONF_ZAPTEC_SESSION_ENERGY_ENTITY),
             charging_entity=data.get(CONF_ZAPTEC_CHARGING_ENTITY),
+            completed_energy_entity=data.get(CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY),
         )
 
     if CHARGER_PROVIDER_MONTA in enabled:
