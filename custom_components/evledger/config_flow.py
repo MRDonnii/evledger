@@ -214,6 +214,17 @@ def _monta_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _spot_price_schema(defaults: dict[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_SPOT_PRICE_ENTITY,
+                default=defaults.get(CONF_SPOT_PRICE_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+        }
+    )
+
+
 def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     """One combined edit page for the options flow.
 
