@@ -17,7 +17,7 @@ from .const import (
     TRIP_END_IDLE_MINUTES,
     TRIP_MIN_DISTANCE_KM,
 )
-from .models import ChargeSession, Trip, VehicleSnapshot
+from .models import ChargeSession, LiveChargeState, Trip, VehicleSnapshot
 from .providers.charger.base import CAP_COST_LOOKUP, CAP_LIVE_POWER, ChargerProvider
 from .providers.vehicle.base import VehicleProvider
 from .store import EvLedgerStore
@@ -116,6 +116,9 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 await self.store.async_upsert_trip(open_trip)
                 self._trip_idle_since = None
+                _LOGGER.info(
+                    "%s: trip started at odometer %.1f km", self.vehicle_name, self._last_odometer_km
+                )
             self._last_odometer_km = snapshot.odometer_km
             return
 
@@ -140,6 +143,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if trip.start_odometer_km is not None and snapshot.odometer_km is not None:
             trip.distance_km = round(snapshot.odometer_km - trip.start_odometer_km, 1)
         await self.store.async_upsert_trip(trip)
+        _LOGGER.info("%s: trip ended, %s km", self.vehicle_name, trip.distance_km)
 
     # -------------------------------------------------------------- charging
 
@@ -180,9 +184,10 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             self._last_known_session_kwh = None
             await self.store.async_upsert_charge(open_home)
+            _LOGGER.info("%s: home charging started (%s)", self.vehicle_name, home_provider_id)
 
         elif not home_charging and open_home is not None:
-            await self._end_home_charge(open_home, snapshot, now)
+            await self._end_home_charge(open_home, snapshot, now, live_states)
             self._home_cooldown_until = now + timedelta(minutes=HOME_TO_PUBLIC_COOLDOWN_MINUTES)
 
         vehicle_charging = bool(snapshot.is_charging)
@@ -205,17 +210,33 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     needs_review=True,
                 )
                 await self.store.async_upsert_charge(open_public)
+                _LOGGER.info("%s: public charging started", self.vehicle_name)
         elif not vehicle_charging and open_public is not None:
             open_public.ended_at = now.isoformat()
             open_public.end_battery_pct = snapshot.battery_pct
             await self.store.async_upsert_charge(open_public)
+            _LOGGER.info(
+                "%s: public charging ended, waiting for price (log_public_charge service)",
+                self.vehicle_name,
+            )
 
     async def _end_home_charge(
-        self, charge: ChargeSession, snapshot: VehicleSnapshot, now: datetime
+        self,
+        charge: ChargeSession,
+        snapshot: VehicleSnapshot,
+        now: datetime,
+        live_states: dict[str, LiveChargeState],
     ) -> None:
         charge.ended_at = now.isoformat()
         charge.end_battery_pct = snapshot.battery_pct
-        charge.kwh = self._last_known_session_kwh
+
+        # A stable post-session reading (if any provider exposes one) beats a
+        # value captured mid-session, which can go stale across a restart.
+        completed_kwh = next(
+            (s.completed_session_kwh for s in live_states.values() if s.completed_session_kwh),
+            None,
+        )
+        charge.kwh = completed_kwh or self._last_known_session_kwh
 
         cost = None
         for provider in self._charger_providers.values():
@@ -233,3 +254,10 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self.store.async_upsert_charge(charge)
         self._last_known_session_kwh = None
+        _LOGGER.info(
+            "%s: home charging ended, %.2f kWh, %s %.2f",
+            self.vehicle_name,
+            charge.kwh or 0,
+            charge.price_currency,
+            charge.price or 0,
+        )

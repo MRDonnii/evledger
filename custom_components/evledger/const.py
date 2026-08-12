@@ -36,6 +36,7 @@ CONF_CHARGER_PROVIDERS = "charger_providers"
 CONF_ZAPTEC_POWER_ENTITY = "zaptec_power_entity"
 CONF_ZAPTEC_SESSION_ENERGY_ENTITY = "zaptec_session_energy_entity"
 CONF_ZAPTEC_CHARGING_ENTITY = "zaptec_charging_entity"
+CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY = "zaptec_completed_energy_entity"
 
 CONF_MONTA_LAST_CHARGE_ENTITY = "monta_last_charge_entity"
 CONF_MONTA_WALLET_ENTITY = "monta_wallet_entity"

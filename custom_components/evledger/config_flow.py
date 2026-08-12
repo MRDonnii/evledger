@@ -24,6 +24,7 @@ from .const import (
     CONF_VEHICLE_NAME,
     CONF_VEHICLE_PROVIDER,
     CONF_ZAPTEC_CHARGING_ENTITY,
+    CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
     CONF_ZAPTEC_POWER_ENTITY,
     CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
     DEFAULT_CURRENCY,
@@ -103,6 +104,10 @@ def _zaptec_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_ZAPTEC_CHARGING_ENTITY,
                 default=defaults.get(CONF_ZAPTEC_CHARGING_ENTITY, vol.UNDEFINED),
             ): _entity_selector(["binary_sensor", "switch"]),
+            vol.Optional(
+                CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
+                default=defaults.get(CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
         }
     )
 

@@ -52,14 +52,17 @@ class ZaptecChargerProvider(ChargerProvider):
         power_entity: str | None,
         session_energy_entity: str | None,
         charging_entity: str | None,
+        completed_energy_entity: str | None = None,
     ) -> None:
         self._power_entity = power_entity
         self._session_energy_entity = session_energy_entity
         self._charging_entity = charging_entity
+        self._completed_energy_entity = completed_energy_entity
 
     def get_live_state(self, hass: HomeAssistant) -> LiveChargeState | None:
         power_w = _numeric_state_in_watts(hass, self._power_entity)
         session_energy_kwh = _numeric_state(hass, self._session_energy_entity)
+        completed_session_kwh = _numeric_state(hass, self._completed_energy_entity)
 
         if self._charging_entity:
             state = hass.states.get(self._charging_entity)
@@ -75,4 +78,5 @@ class ZaptecChargerProvider(ChargerProvider):
             is_charging=is_charging,
             power_w=power_w,
             session_energy_kwh=session_energy_kwh,
+            completed_session_kwh=completed_session_kwh,
         )

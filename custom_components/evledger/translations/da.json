@@ -33,7 +33,8 @@
         "data": {
           "zaptec_power_entity": "Ladeeffekt-sensor",
           "zaptec_session_energy_entity": "Sessionsenergi-sensor",
-          "zaptec_charging_entity": "Lader (binary sensor, valgfri)"
+          "zaptec_charging_entity": "Lader (binary sensor eller switch, valgfri)",
+          "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)"
         }
       },
       "monta": {
@@ -69,7 +70,8 @@
         "data": {
           "zaptec_power_entity": "Ladeeffekt-sensor",
           "zaptec_session_energy_entity": "Sessionsenergi-sensor",
-          "zaptec_charging_entity": "Lader (binary sensor, valgfri)"
+          "zaptec_charging_entity": "Lader (binary sensor eller switch, valgfri)",
+          "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)"
         }
       },
       "monta": {
