@@ -69,10 +69,14 @@ LOCATION_PUBLIC = "public"
 
 # --- Services ---
 SERVICE_LOG_PUBLIC_CHARGE = "log_public_charge"
+SERVICE_DELETE_CHARGE = "delete_charge"
+SERVICE_DELETE_TRIP = "delete_trip"
 ATTR_KWH = "kwh"
 ATTR_PRICE = "price"
 ATTR_LOCATION_NAME = "location_name"
 ATTR_STARTED_AT = "started_at"
 ATTR_NOTE = "note"
+ATTR_CHARGE_ID = "charge_id"
+ATTR_TRIP_ID = "trip_id"
 
 SIGNAL_UPDATE = f"{DOMAIN}_update"
