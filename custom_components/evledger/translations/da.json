@@ -9,9 +9,16 @@
           "currency": "Valuta"
         }
       },
+      "vehicle_device": {
+        "title": "Vælg din bil",
+        "description": "Vælg Tesla-enheden denne EV Ledger-post skal spore. Dens entiteter (batteri, km-tæller, lokation osv.) findes automatisk — du bliver kun bedt om at udfylde noget manuelt hvis det ikke kunne findes automatisk.",
+        "data": {
+          "vehicle_device_id": "Bil"
+        }
+      },
       "vehicle": {
         "title": "Bil-entiteter",
-        "description": "Vælg entiteterne fra din eksisterende bil-integration (fx Tesla Custom Integration), som EV Ledger skal læse.",
+        "description": "Nogle entiteter kunne ikke findes automatisk ud fra enheden — udfyld resten her (eller ret hvis noget blev gættet forkert).",
         "data": {
           "battery_entity": "Batteriniveau-sensor",
           "odometer_entity": "Kilometertæller-sensor",
@@ -28,9 +35,16 @@
           "charger_providers": "Lade-udbydere"
         }
       },
+      "zaptec_device": {
+        "title": "Vælg din Zaptec-lader",
+        "description": "Dens effekt-/energientiteter findes automatisk.",
+        "data": {
+          "zaptec_device_id": "Zaptec-lader"
+        }
+      },
       "zaptec": {
         "title": "Zaptec-entiteter",
-        "description": "Zaptec rapporterer live effekt og sessionsenergi, men ikke pris.",
+        "description": "Nogle entiteter kunne ikke findes automatisk — udfyld resten her (eller ret hvad der blev gættet forkert). Zaptec rapporterer live effekt og sessionsenergi, men ikke pris.",
         "data": {
           "zaptec_power_entity": "Ladeeffekt-sensor",
           "zaptec_session_energy_entity": "Sessionsenergi-sensor",
@@ -38,9 +52,16 @@
           "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)"
         }
       },
+      "monta_device": {
+        "title": "Vælg din Monta-lader",
+        "description": "Dens pris-entitet — og din kontos wallet-saldo, hvis fundet — findes automatisk.",
+        "data": {
+          "monta_device_id": "Monta-lader"
+        }
+      },
       "monta": {
         "title": "Monta-entiteter",
-        "description": "Monta rapporterer prisen på den seneste ladesession.",
+        "description": "Nogle entiteter kunne ikke findes automatisk — udfyld resten her (eller ret hvad der blev gættet forkert). Monta rapporterer prisen på den seneste ladesession.",
         "data": {
           "monta_last_charge_entity": "Seneste ladning-sensor",
           "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
@@ -65,6 +86,13 @@
   },
   "options": {
     "step": {
+      "vehicle_device": {
+        "title": "Vælg din bil",
+        "description": "Vælg Tesla-enheden denne EV Ledger-post skal spore. Dens entiteter findes automatisk — du bliver kun bedt om at udfylde noget manuelt hvis det ikke kunne findes automatisk.",
+        "data": {
+          "vehicle_device_id": "Bil"
+        }
+      },
       "vehicle": {
         "title": "Bil-entiteter",
         "data": {
@@ -82,6 +110,13 @@
           "charger_providers": "Lade-udbydere"
         }
       },
+      "zaptec_device": {
+        "title": "Vælg din Zaptec-lader",
+        "description": "Dens effekt-/energientiteter findes automatisk.",
+        "data": {
+          "zaptec_device_id": "Zaptec-lader"
+        }
+      },
       "zaptec": {
         "title": "Zaptec-entiteter",
         "data": {
@@ -89,6 +124,13 @@
           "zaptec_session_energy_entity": "Sessionsenergi-sensor",
           "zaptec_charging_entity": "Lader (binary sensor eller switch, valgfri)",
           "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)"
+        }
+      },
+      "monta_device": {
+        "title": "Vælg din Monta-lader",
+        "description": "Dens pris-entitet — og din kontos wallet-saldo, hvis fundet — findes automatisk.",
+        "data": {
+          "monta_device_id": "Monta-lader"
         }
       },
       "monta": {
