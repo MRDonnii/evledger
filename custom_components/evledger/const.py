@@ -30,6 +30,16 @@ CONF_ODOMETER_ENTITY = "odometer_entity"
 CONF_DEVICE_TRACKER_ENTITY = "device_tracker_entity"
 CONF_CHARGING_BINARY_ENTITY = "charging_binary_entity"
 CONF_LOCKED_ENTITY = "locked_entity"
+CONF_OUTSIDE_TEMP_ENTITY = "outside_temp_entity"
+
+CONF_TESLA_MODEL_KEY = "tesla_model_key"
+CONF_BATTERY_CAPACITY_KWH = "battery_capacity_kwh"
+CONF_RATED_WH_PER_KM = "rated_wh_per_km"
+CONF_MODEL_LABEL = "model_label"
+
+# Temperature buckets for efficiency-vs-rating comparison (degrees C, trip start reading)
+TEMP_BUCKET_COLD_MAX_C = 5
+TEMP_BUCKET_MILD_MAX_C = 15
 
 CONF_CHARGER_PROVIDERS = "charger_providers"
 

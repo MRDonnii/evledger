@@ -15,6 +15,7 @@ class VehicleSnapshot:
     longitude: float | None
     is_charging: bool | None
     is_locked: bool | None
+    outside_temp_c: float | None = None
 
 
 @dataclass
@@ -56,6 +57,7 @@ class Trip:
     end_lon: float | None
     start_battery_pct: float | None
     end_battery_pct: float | None
+    start_outside_temp_c: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

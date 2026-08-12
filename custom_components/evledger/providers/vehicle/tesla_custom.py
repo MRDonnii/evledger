@@ -42,16 +42,19 @@ class TeslaCustomVehicleProvider(VehicleProvider):
         device_tracker_entity: str | None,
         charging_binary_entity: str | None,
         locked_entity: str | None,
+        outside_temp_entity: str | None = None,
     ) -> None:
         self._battery_entity = battery_entity
         self._odometer_entity = odometer_entity
         self._device_tracker_entity = device_tracker_entity
         self._charging_binary_entity = charging_binary_entity
         self._locked_entity = locked_entity
+        self._outside_temp_entity = outside_temp_entity
 
     def get_snapshot(self, hass: HomeAssistant) -> VehicleSnapshot | None:
         battery_pct = _float_state(hass, self._battery_entity)
         odometer_km = _float_state(hass, self._odometer_entity)
+        outside_temp_c = _float_state(hass, self._outside_temp_entity)
 
         latitude: float | None = None
         longitude: float | None = None
@@ -75,4 +78,5 @@ class TeslaCustomVehicleProvider(VehicleProvider):
             longitude=longitude,
             is_charging=is_charging,
             is_locked=is_locked,
+            outside_temp_c=outside_temp_c,
         )

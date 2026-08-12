@@ -35,6 +35,9 @@ their raw entity states into a proper **trip and charging ledger**:
 - **A handful of ledger sensors** (trip/charge totals, cost per km, sessions
   still waiting for a price) designed to be dropped straight into a custom
   Lovelace dashboard.
+- **Efficiency vs. rated consumption** — real-world Wh/km, bucketed by outside
+  temperature (cold/mild/warm) at trip time, compared against your vehicle's
+  official WLTP-rated consumption. See "Efficiency comparison" below.
 
 EV Ledger never talks to a vehicle or charger vendor's API directly — it only
 reads entities that another integration already created. That's deliberate:
@@ -83,8 +86,33 @@ The config flow asks for:
 3. **Charger providers** — tick whichever of Zaptec / Monta / manual entry
    apply to you.
 4. Entity pickers for whichever providers you ticked.
+5. **Efficiency comparison** (optional) — pick your model/trim from a built-in
+   list of Tesla's published WLTP figures, enter your own numbers, or skip it.
 
 You can revisit all of this later from the integration's **Configure** button.
+
+## Efficiency comparison
+
+If you gave EV Ledger an outside-temperature sensor and picked (or entered) a
+model spec, `sensor.<vehicle>_efficiency` reports real-world Wh/km — estimated
+per trip from the battery-percent drop × your battery capacity — bucketed by
+the outside temperature at the start of each trip:
+
+- **cold**: below 5°C
+- **mild**: 5–15°C
+- **warm**: 15°C and up
+
+Its attributes carry each bucket's Wh/km, trip count, and % deviation from
+your configured rated consumption, plus the overall state.
+
+**The model list is a starting point, not ground truth.** The Tesla Custom
+Integration exposes no VIN, trim, or battery-size data — the figures in
+`tesla_models.py` are Tesla's own published EU WLTP numbers by model
+generation/trim, which can still be off for your exact wheel size or model
+year. If the closest match doesn't feel right, use "Custom" in the efficiency
+step and enter your own battery capacity and rated consumption (check your
+delivery paperwork or Tesla account for the exact number). Corrections and
+new model entries via PR are welcome.
 
 ## Logging a public charge
 
@@ -112,6 +140,7 @@ Each vehicle gets:
 | `sensor.<vehicle>_charging_status` | `idle` / `home` / `public` | current open session, if any |
 | `sensor.<vehicle>_cost_per_km` | all-time avg cost/km | — |
 | `sensor.<vehicle>_pending_review` | count needing a price | `pending` (list) |
+| `sensor.<vehicle>_efficiency` | overall Wh/km | `cold_wh_per_km`, `mild_wh_per_km`, `warm_wh_per_km`, `*_deviation_pct`, `*_trip_count`, `rated_wh_per_km` (only created if efficiency comparison is configured) |
 
 These are plain sensors with list-valued attributes — build whatever
 `custom:button-card` / `auto-entities` / markdown-table dashboard you like on
