@@ -3,170 +3,61 @@
     "step": {
       "user": {
         "title": "Add a vehicle",
-        "description": "EV Ledger tracks one vehicle's trips and charging costs. Add more vehicles later by repeating this from Settings → Devices & services.",
+        "description": "One page for everything. Pick your vehicle — its entities (battery, odometer, location, etc.) are found automatically. Leave a charger picker empty to leave that provider out entirely; pick one and its entities are found automatically too. Efficiency comparison is optional.",
         "data": {
           "vehicle_name": "Vehicle name",
-          "currency": "Currency"
+          "currency": "Currency",
+          "vehicle_device_id": "Vehicle",
+          "zaptec_device_id": "Zaptec charger (optional — leave empty if you don't have one)",
+          "monta_device_id": "Monta charger (optional — leave empty if you don't have one)",
+          "spot_price_entity": "Electricity price sensor for home charging cost (optional — Nordpool, Energi Data Service, Strømligning, ...)",
+          "tesla_model_key": "Model / trim for efficiency comparison (optional)",
+          "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
+          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')"
         }
       },
-      "vehicle_device": {
-        "title": "Choose your vehicle",
-        "description": "Pick the Tesla device this EV Ledger entry tracks. Its entities (battery, odometer, location, etc.) are found automatically — you'll only be asked to fill anything in by hand if something couldn't be auto-detected.",
-        "data": {
-          "vehicle_device_id": "Vehicle"
-        }
-      },
-      "vehicle": {
-        "title": "Vehicle entities",
-        "description": "Some entities couldn't be auto-detected from the device — fill in the rest here (or correct anything that was guessed wrong).",
+      "fill_missing": {
+        "title": "A few things couldn't be found automatically",
+        "description": "Everything else was resolved from the device(s) you picked. Fill in (or correct) just what's shown here.",
         "data": {
           "battery_entity": "Battery level sensor",
           "odometer_entity": "Odometer sensor",
           "device_tracker_entity": "Location (device tracker)",
           "charging_binary_entity": "Is charging (binary sensor)",
           "locked_entity": "Is locked (optional)",
-          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)"
-        }
-      },
-      "chargers": {
-        "title": "Charging sources",
-        "description": "Choose which chargers EV Ledger should pull cost/session data from.",
-        "data": {
-          "charger_providers": "Charger providers"
-        }
-      },
-      "zaptec_device": {
-        "title": "Choose your Zaptec charger",
-        "description": "Its power/energy entities are found automatically.",
-        "data": {
-          "zaptec_device_id": "Zaptec charger"
-        }
-      },
-      "zaptec": {
-        "title": "Zaptec entities",
-        "description": "Some entities couldn't be auto-detected — fill in the rest here (or correct anything guessed wrong). Zaptec reports live power and session energy, but not cost.",
-        "data": {
+          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)",
           "zaptec_power_entity": "Charge power sensor",
           "zaptec_session_energy_entity": "Session energy sensor",
           "zaptec_charging_entity": "Charging (binary sensor or switch, optional)",
-          "zaptec_completed_energy_entity": "Completed session energy sensor (optional, recommended)"
-        }
-      },
-      "monta_device": {
-        "title": "Choose your Monta charger",
-        "description": "Its cost entity — and your account's wallet balance, if found — are resolved automatically.",
-        "data": {
-          "monta_device_id": "Monta charger"
-        }
-      },
-      "monta": {
-        "title": "Monta entities",
-        "description": "Some entities couldn't be auto-detected — fill in the rest here (or correct anything guessed wrong). Monta reports the cost of its most recent charge session.",
-        "data": {
+          "zaptec_completed_energy_entity": "Completed session energy sensor (optional, recommended)",
           "monta_last_charge_entity": "Last charge sensor",
           "monta_wallet_entity": "Wallet balance sensor (optional)"
-        }
-      },
-      "spot_price": {
-        "title": "Spot price sensor",
-        "description": "Pick your electricity price sensor (Nordpool, Energi Data Service, Strømligning, or similar) — its current state is multiplied by the session's kWh to estimate home charging cost when Monta isn't available or fresh enough.",
-        "data": {
-          "spot_price_entity": "Current electricity price sensor"
-        }
-      },
-      "efficiency": {
-        "title": "Efficiency comparison",
-        "description": "Pick your exact model/trim to compare real-world Wh/km against its official rated (WLTP) consumption, bucketed by outside temperature. These are best-effort published figures, not read from your car — pick 'Custom' if you know your own numbers, or 'Skip' to leave this off.",
-        "data": {
-          "tesla_model_key": "Model / trim"
-        }
-      },
-      "efficiency_custom": {
-        "title": "Custom efficiency numbers",
-        "description": "Enter your vehicle's usable battery capacity and its official rated consumption. Check your delivery paperwork or Tesla account if you want the exact figure for your configuration.",
-        "data": {
-          "battery_capacity_kwh": "Usable battery capacity (kWh)",
-          "rated_wh_per_km": "Rated consumption (Wh/km)"
         }
       }
     }
   },
   "options": {
     "step": {
-      "vehicle_device": {
-        "title": "Choose your vehicle",
-        "description": "Pick the Tesla device this EV Ledger entry tracks. Its entities are found automatically — you'll only be asked to fill anything in by hand if something couldn't be auto-detected.",
-        "data": {
-          "vehicle_device_id": "Vehicle"
-        }
-      },
-      "vehicle": {
-        "title": "Vehicle entities",
+      "init": {
+        "title": "Reconfigure EV Ledger",
+        "description": "One page for everything currently configured. Clear a Zaptec/Monta/price entity to drop that provider entirely.",
         "data": {
           "battery_entity": "Battery level sensor",
           "odometer_entity": "Odometer sensor",
           "device_tracker_entity": "Location (device tracker)",
           "charging_binary_entity": "Is charging (binary sensor)",
           "locked_entity": "Is locked (optional)",
-          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)"
-        }
-      },
-      "chargers": {
-        "title": "Charging sources",
-        "data": {
-          "charger_providers": "Charger providers"
-        }
-      },
-      "zaptec_device": {
-        "title": "Choose your Zaptec charger",
-        "description": "Its power/energy entities are found automatically.",
-        "data": {
-          "zaptec_device_id": "Zaptec charger"
-        }
-      },
-      "zaptec": {
-        "title": "Zaptec entities",
-        "data": {
-          "zaptec_power_entity": "Charge power sensor",
-          "zaptec_session_energy_entity": "Session energy sensor",
-          "zaptec_charging_entity": "Charging (binary sensor or switch, optional)",
-          "zaptec_completed_energy_entity": "Completed session energy sensor (optional, recommended)"
-        }
-      },
-      "monta_device": {
-        "title": "Choose your Monta charger",
-        "description": "Its cost entity — and your account's wallet balance, if found — are resolved automatically.",
-        "data": {
-          "monta_device_id": "Monta charger"
-        }
-      },
-      "monta": {
-        "title": "Monta entities",
-        "data": {
-          "monta_last_charge_entity": "Last charge sensor",
-          "monta_wallet_entity": "Wallet balance sensor (optional)"
-        }
-      },
-      "spot_price": {
-        "title": "Spot price sensor",
-        "description": "Pick your electricity price sensor (Nordpool, Energi Data Service, Strømligning, or similar) — its current state is multiplied by the session's kWh to estimate home charging cost when Monta isn't available or fresh enough.",
-        "data": {
-          "spot_price_entity": "Current electricity price sensor"
-        }
-      },
-      "efficiency": {
-        "title": "Efficiency comparison",
-        "description": "Pick your exact model/trim to compare real-world Wh/km against its official rated (WLTP) consumption, bucketed by outside temperature. These are best-effort published figures, not read from your car — pick 'Custom' if you know your own numbers, or 'Skip' to leave this off.",
-        "data": {
-          "tesla_model_key": "Model / trim"
-        }
-      },
-      "efficiency_custom": {
-        "title": "Custom efficiency numbers",
-        "description": "Enter your vehicle's usable battery capacity and its official rated consumption. Check your delivery paperwork or Tesla account if you want the exact figure for your configuration.",
-        "data": {
-          "battery_capacity_kwh": "Usable battery capacity (kWh)",
-          "rated_wh_per_km": "Rated consumption (Wh/km)"
+          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)",
+          "zaptec_power_entity": "Zaptec charge power sensor (optional — leave empty to drop Zaptec)",
+          "zaptec_session_energy_entity": "Zaptec session energy sensor (optional — leave empty to drop Zaptec)",
+          "zaptec_charging_entity": "Zaptec charging (binary sensor or switch, optional)",
+          "zaptec_completed_energy_entity": "Zaptec completed session energy sensor (optional)",
+          "monta_last_charge_entity": "Monta last charge sensor (optional — leave empty to drop Monta)",
+          "monta_wallet_entity": "Monta wallet balance sensor (optional)",
+          "spot_price_entity": "Electricity price sensor (optional — leave empty to drop spot-price estimates)",
+          "tesla_model_key": "Model / trim for efficiency comparison (optional)",
+          "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
+          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')"
         }
       }
     }

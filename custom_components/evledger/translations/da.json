@@ -3,170 +3,61 @@
     "step": {
       "user": {
         "title": "Tilføj en bil",
-        "description": "EV Ledger sporer én bils ture og ladeomkostninger. Tilføj flere biler senere fra Indstillinger → Enheder & tjenester.",
+        "description": "Én side for det hele. Vælg din bil — dens entiteter (batteri, km-tæller, lokation osv.) findes automatisk. Lad en lader-vælger stå tom for at udelade den udbyder helt; vælg én og dens entiteter findes også automatisk. Effektivitetssammenligning er valgfri.",
         "data": {
           "vehicle_name": "Bilnavn",
-          "currency": "Valuta"
+          "currency": "Valuta",
+          "vehicle_device_id": "Bil",
+          "zaptec_device_id": "Zaptec-lader (valgfri — lad stå tom hvis du ikke har en)",
+          "monta_device_id": "Monta-lader (valgfri — lad stå tom hvis du ikke har en)",
+          "spot_price_entity": "Elpris-sensor til hjemmeladeomkostning (valgfri — Nordpool, Energi Data Service, Strømligning osv.)",
+          "tesla_model_key": "Model / variant til effektivitetssammenligning (valgfri)",
+          "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
+          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')"
         }
       },
-      "vehicle_device": {
-        "title": "Vælg din bil",
-        "description": "Vælg Tesla-enheden denne EV Ledger-post skal spore. Dens entiteter (batteri, km-tæller, lokation osv.) findes automatisk — du bliver kun bedt om at udfylde noget manuelt hvis det ikke kunne findes automatisk.",
-        "data": {
-          "vehicle_device_id": "Bil"
-        }
-      },
-      "vehicle": {
-        "title": "Bil-entiteter",
-        "description": "Nogle entiteter kunne ikke findes automatisk ud fra enheden — udfyld resten her (eller ret hvis noget blev gættet forkert).",
+      "fill_missing": {
+        "title": "Et par ting kunne ikke findes automatisk",
+        "description": "Alt andet blev fundet ud fra den/de enheder du valgte. Udfyld (eller ret) kun det der vises her.",
         "data": {
           "battery_entity": "Batteriniveau-sensor",
           "odometer_entity": "Kilometertæller-sensor",
           "device_tracker_entity": "Lokation (device tracker)",
           "charging_binary_entity": "Lader (binary sensor)",
           "locked_entity": "Låst (valgfri)",
-          "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)"
-        }
-      },
-      "chargers": {
-        "title": "Ladekilder",
-        "description": "Vælg hvilke ladere EV Ledger skal hente pris/session-data fra.",
-        "data": {
-          "charger_providers": "Lade-udbydere"
-        }
-      },
-      "zaptec_device": {
-        "title": "Vælg din Zaptec-lader",
-        "description": "Dens effekt-/energientiteter findes automatisk.",
-        "data": {
-          "zaptec_device_id": "Zaptec-lader"
-        }
-      },
-      "zaptec": {
-        "title": "Zaptec-entiteter",
-        "description": "Nogle entiteter kunne ikke findes automatisk — udfyld resten her (eller ret hvad der blev gættet forkert). Zaptec rapporterer live effekt og sessionsenergi, men ikke pris.",
-        "data": {
+          "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)",
           "zaptec_power_entity": "Ladeeffekt-sensor",
           "zaptec_session_energy_entity": "Sessionsenergi-sensor",
           "zaptec_charging_entity": "Lader (binary sensor eller switch, valgfri)",
-          "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)"
-        }
-      },
-      "monta_device": {
-        "title": "Vælg din Monta-lader",
-        "description": "Dens pris-entitet — og din kontos wallet-saldo, hvis fundet — findes automatisk.",
-        "data": {
-          "monta_device_id": "Monta-lader"
-        }
-      },
-      "monta": {
-        "title": "Monta-entiteter",
-        "description": "Nogle entiteter kunne ikke findes automatisk — udfyld resten her (eller ret hvad der blev gættet forkert). Monta rapporterer prisen på den seneste ladesession.",
-        "data": {
+          "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)",
           "monta_last_charge_entity": "Seneste ladning-sensor",
           "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
-        }
-      },
-      "spot_price": {
-        "title": "Spotpris-sensor",
-        "description": "Vælg din elpris-sensor (Nordpool, Energi Data Service, Strømligning eller lignende) — dens nuværende tilstand ganges med sessionens kWh for at estimere hjemmeladeomkostning når Monta ikke er tilgængelig eller frisk nok.",
-        "data": {
-          "spot_price_entity": "Aktuel elpris-sensor"
-        }
-      },
-      "efficiency": {
-        "title": "Effektivitetssammenligning",
-        "description": "Vælg din nøjagtige model/variant for at sammenligne det reelle Wh/km med det officielle normerede (WLTP) forbrug, opdelt efter udendørstemperatur. Det er offentliggjorte tal, ikke aflæst fra din bil — vælg 'Brugerdefineret' hvis du kender dine egne tal, eller 'Spring over' for at lade det være.",
-        "data": {
-          "tesla_model_key": "Model / variant"
-        }
-      },
-      "efficiency_custom": {
-        "title": "Brugerdefinerede effektivitetstal",
-        "description": "Indtast din bils brugbare batterikapacitet og officielle normerede forbrug. Tjek dine leveringspapirer eller Tesla-konto for det præcise tal til din konfiguration.",
-        "data": {
-          "battery_capacity_kwh": "Brugbar batterikapacitet (kWh)",
-          "rated_wh_per_km": "Normeret forbrug (Wh/km)"
         }
       }
     }
   },
   "options": {
     "step": {
-      "vehicle_device": {
-        "title": "Vælg din bil",
-        "description": "Vælg Tesla-enheden denne EV Ledger-post skal spore. Dens entiteter findes automatisk — du bliver kun bedt om at udfylde noget manuelt hvis det ikke kunne findes automatisk.",
-        "data": {
-          "vehicle_device_id": "Bil"
-        }
-      },
-      "vehicle": {
-        "title": "Bil-entiteter",
+      "init": {
+        "title": "Genkonfigurér EV Ledger",
+        "description": "Én side for alt der er sat op i dag. Ryd en Zaptec-/Monta-/pris-entitet for at fjerne den udbyder helt.",
         "data": {
           "battery_entity": "Batteriniveau-sensor",
           "odometer_entity": "Kilometertæller-sensor",
           "device_tracker_entity": "Lokation (device tracker)",
           "charging_binary_entity": "Lader (binary sensor)",
           "locked_entity": "Låst (valgfri)",
-          "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)"
-        }
-      },
-      "chargers": {
-        "title": "Ladekilder",
-        "data": {
-          "charger_providers": "Lade-udbydere"
-        }
-      },
-      "zaptec_device": {
-        "title": "Vælg din Zaptec-lader",
-        "description": "Dens effekt-/energientiteter findes automatisk.",
-        "data": {
-          "zaptec_device_id": "Zaptec-lader"
-        }
-      },
-      "zaptec": {
-        "title": "Zaptec-entiteter",
-        "data": {
-          "zaptec_power_entity": "Ladeeffekt-sensor",
-          "zaptec_session_energy_entity": "Sessionsenergi-sensor",
-          "zaptec_charging_entity": "Lader (binary sensor eller switch, valgfri)",
-          "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)"
-        }
-      },
-      "monta_device": {
-        "title": "Vælg din Monta-lader",
-        "description": "Dens pris-entitet — og din kontos wallet-saldo, hvis fundet — findes automatisk.",
-        "data": {
-          "monta_device_id": "Monta-lader"
-        }
-      },
-      "monta": {
-        "title": "Monta-entiteter",
-        "data": {
-          "monta_last_charge_entity": "Seneste ladning-sensor",
-          "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
-        }
-      },
-      "spot_price": {
-        "title": "Spotpris-sensor",
-        "description": "Vælg din elpris-sensor (Nordpool, Energi Data Service, Strømligning eller lignende) — dens nuværende tilstand ganges med sessionens kWh for at estimere hjemmeladeomkostning når Monta ikke er tilgængelig eller frisk nok.",
-        "data": {
-          "spot_price_entity": "Aktuel elpris-sensor"
-        }
-      },
-      "efficiency": {
-        "title": "Effektivitetssammenligning",
-        "description": "Vælg din nøjagtige model/variant for at sammenligne det reelle Wh/km med det officielle normerede (WLTP) forbrug, opdelt efter udendørstemperatur. Det er offentliggjorte tal, ikke aflæst fra din bil — vælg 'Brugerdefineret' hvis du kender dine egne tal, eller 'Spring over' for at lade det være.",
-        "data": {
-          "tesla_model_key": "Model / variant"
-        }
-      },
-      "efficiency_custom": {
-        "title": "Brugerdefinerede effektivitetstal",
-        "description": "Indtast din bils brugbare batterikapacitet og officielle normerede forbrug. Tjek dine leveringspapirer eller Tesla-konto for det præcise tal til din konfiguration.",
-        "data": {
-          "battery_capacity_kwh": "Brugbar batterikapacitet (kWh)",
-          "rated_wh_per_km": "Normeret forbrug (Wh/km)"
+          "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)",
+          "zaptec_power_entity": "Zaptec ladeeffekt-sensor (valgfri — lad stå tom for at fjerne Zaptec)",
+          "zaptec_session_energy_entity": "Zaptec sessionsenergi-sensor (valgfri — lad stå tom for at fjerne Zaptec)",
+          "zaptec_charging_entity": "Zaptec lader (binary sensor eller switch, valgfri)",
+          "zaptec_completed_energy_entity": "Zaptec afsluttet sessionsenergi-sensor (valgfri)",
+          "monta_last_charge_entity": "Monta seneste ladning-sensor (valgfri — lad stå tom for at fjerne Monta)",
+          "monta_wallet_entity": "Monta wallet-saldo-sensor (valgfri)",
+          "spot_price_entity": "Elpris-sensor (valgfri — lad stå tom for at fjerne spotpris-estimater)",
+          "tesla_model_key": "Model / variant til effektivitetssammenligning (valgfri)",
+          "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
+          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')"
         }
       }
     }

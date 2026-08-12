@@ -78,25 +78,30 @@ folder and restart.
 
 ## Setting it up
 
-The config flow asks for:
+It's one page:
 
 1. **Vehicle name** and **currency** (e.g. DKK, EUR, USD).
 2. **Pick your vehicle** — a device picker scoped to the Tesla Custom
    Integration. If you have more than one car, this is how EV Ledger knows
    which one this entry is for. Its entities (battery, odometer, location,
-   charging state, lock, outside temperature) are resolved automatically; you
-   only see a manual entity form if something couldn't be auto-detected, or
-   to fix anything guessed wrong.
-3. **Charger providers** — tick whichever of Zaptec / Monta / spot price /
-   manual entry apply to you.
-4. **Pick your charger(s)** — likewise, a device picker for your Zaptec
-   charger and/or Monta charger (handy if you have more than one charger).
-   Same auto-resolve-then-fallback behaviour. If you picked spot price, you
-   pick your electricity-price sensor directly (there's no "device" for it).
+   charging state, lock, outside temperature) are resolved automatically.
+3. **Pick your charger(s)** — a device picker for Zaptec and one for Monta.
+   Leave either empty and that provider is simply left out of the setup —
+   there's no separate "which providers do you want" step. Their entities
+   are resolved automatically from whichever device you picked.
+4. **Electricity price sensor** (optional) — for home charging cost when
+   Monta isn't configured or isn't fresh enough. Leave empty to skip.
 5. **Efficiency comparison** (optional) — pick your model/trim from a built-in
-   list of Tesla's published WLTP figures, enter your own numbers, or skip it.
+   list of Tesla's published WLTP figures, or "Custom" and enter your own
+   battery capacity + rated consumption right there on the same page.
 
-You can revisit all of this later from the integration's **Configure** button.
+Submit, and you're done — unless something couldn't be auto-detected from a
+device you picked, in which case a second, much shorter page asks only for
+the specific entity that's missing.
+
+You can revisit all of this later from the integration's **Configure**
+button — also one page, pre-filled with everything currently configured.
+Clearing a Zaptec/Monta/price entity there drops that provider.
 
 ## Efficiency comparison
 
@@ -163,7 +168,7 @@ Each vehicle gets:
 | `sensor.<vehicle>_cost_per_km` | all-time avg cost/km | — |
 | `sensor.<vehicle>_pending_review` | count needing a price | `pending` (list) |
 | `sensor.<vehicle>_efficiency` | overall Wh/km | `cold_wh_per_km`, `mild_wh_per_km`, `warm_wh_per_km`, `*_deviation_pct`, `*_trip_count`, `rated_wh_per_km` (only created if efficiency comparison is configured) |
-| `sensor.<vehicle>_total_cost` | running total spent (monetary, `state_class: total`) | — |
+| `sensor.<vehicle>_total_charging_cost` | running total spent (monetary, `state_class: total`) | — |
 | `sensor.<vehicle>_total_distance` | running total km driven (`state_class: total_increasing`) | — |
 | `sensor.<vehicle>_last_trip` | most recent trip's distance | full trip record |
 | `sensor.<vehicle>_last_charge` | most recent charge's price | full charge record |
