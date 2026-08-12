@@ -31,7 +31,7 @@
       name: Cost per km
       icon: mdi:cash-multiple
     - type: tile
-      entity: sensor.energitte_total_cost
+      entity: sensor.energitte_total_charging_cost
       name: Total spent
       icon: mdi:cash-multiple
     - type: tile
@@ -78,7 +78,7 @@
 - type: statistics-graph
   title: Charging cost by month
   entities:
-    - sensor.energitte_total_cost
+    - sensor.energitte_total_charging_cost
   period: month
   stat_types:
     - change

@@ -69,16 +69,74 @@ def _device_selector(integration: str) -> selector.DeviceSelector:
     return selector.DeviceSelector(selector.DeviceSelectorConfig(integration=integration))
 
 
-def _vehicle_device_schema() -> vol.Schema:
-    return vol.Schema({vol.Required(FIELD_VEHICLE_DEVICE): _device_selector("tesla_custom")})
+def _model_select_options() -> list[selector.SelectOptionDict]:
+    options = [
+        selector.SelectOptionDict(value=key, label=spec["label"])
+        for key, spec in TESLA_MODEL_SPECS.items()
+    ]
+    options.append(
+        selector.SelectOptionDict(value=CUSTOM_MODEL_KEY, label="Custom (enter my own numbers)")
+    )
+    options.append(
+        selector.SelectOptionDict(value=SKIP_MODEL_KEY, label="Skip — no efficiency tracking")
+    )
+    return options
 
 
-def _zaptec_device_schema() -> vol.Schema:
-    return vol.Schema({vol.Required(FIELD_ZAPTEC_DEVICE): _device_selector("zaptec")})
+def _main_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """The single setup page: name/currency, one device picker per role.
 
-
-def _monta_device_schema() -> vol.Schema:
-    return vol.Schema({vol.Required(FIELD_MONTA_DEVICE): _device_selector("monta")})
+    Zaptec, Monta and spot price are all optional — leaving a picker empty
+    simply leaves that provider out of the config entry. Entities for
+    whichever devices *are* picked are resolved automatically after submit;
+    a follow-up page only appears if something couldn't be found.
+    """
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_VEHICLE_NAME, default=defaults.get(CONF_VEHICLE_NAME, vol.UNDEFINED)
+            ): str,
+            vol.Required(
+                CONF_CURRENCY, default=defaults.get(CONF_CURRENCY, DEFAULT_CURRENCY)
+            ): str,
+            vol.Required(
+                FIELD_VEHICLE_DEVICE, default=defaults.get(FIELD_VEHICLE_DEVICE, vol.UNDEFINED)
+            ): _device_selector("tesla_custom"),
+            vol.Optional(
+                FIELD_ZAPTEC_DEVICE, default=defaults.get(FIELD_ZAPTEC_DEVICE, vol.UNDEFINED)
+            ): _device_selector("zaptec"),
+            vol.Optional(
+                FIELD_MONTA_DEVICE, default=defaults.get(FIELD_MONTA_DEVICE, vol.UNDEFINED)
+            ): _device_selector("monta"),
+            vol.Optional(
+                CONF_SPOT_PRICE_ENTITY,
+                default=defaults.get(CONF_SPOT_PRICE_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+            vol.Optional(
+                CONF_TESLA_MODEL_KEY, default=defaults.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY)
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=_model_select_options(), mode=selector.SelectSelectorMode.DROPDOWN
+                )
+            ),
+            vol.Optional(
+                CONF_BATTERY_CAPACITY_KWH,
+                default=defaults.get(CONF_BATTERY_CAPACITY_KWH, vol.UNDEFINED),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=10, max=200, step=0.1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Optional(
+                CONF_RATED_WH_PER_KM,
+                default=defaults.get(CONF_RATED_WH_PER_KM, vol.UNDEFINED),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=50, max=400, step=1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+        }
+    )
 
 
 def _vehicle_schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -104,49 +162,6 @@ def _vehicle_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Optional(
                 CONF_OUTSIDE_TEMP_ENTITY,
                 default=defaults.get(CONF_OUTSIDE_TEMP_ENTITY, vol.UNDEFINED),
-            ): _entity_selector("sensor"),
-        }
-    )
-
-
-def _chargers_schema(defaults: dict[str, Any]) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_CHARGER_PROVIDERS,
-                default=defaults.get(CONF_CHARGER_PROVIDERS, [CHARGER_PROVIDER_MANUAL]),
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        selector.SelectOptionDict(
-                            value=CHARGER_PROVIDER_ZAPTEC, label="Zaptec (live power, no cost)"
-                        ),
-                        selector.SelectOptionDict(
-                            value=CHARGER_PROVIDER_MONTA, label="Monta (session cost)"
-                        ),
-                        selector.SelectOptionDict(
-                            value=CHARGER_PROVIDER_MANUAL,
-                            label="Manual entry (public/away charging)",
-                        ),
-                        selector.SelectOptionDict(
-                            value=CHARGER_PROVIDER_SPOT_PRICE,
-                            label="Spot price (estimate cost = kWh × your price sensor)",
-                        ),
-                    ],
-                    multiple=True,
-                    mode=selector.SelectSelectorMode.LIST,
-                )
-            ),
-        }
-    )
-
-
-def _spot_price_schema(defaults: dict[str, Any]) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(
-                CONF_SPOT_PRICE_ENTITY,
-                default=defaults.get(CONF_SPOT_PRICE_ENTITY, vol.UNDEFINED),
             ): _entity_selector("sensor"),
         }
     )
@@ -190,34 +205,55 @@ def _monta_schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _efficiency_schema(defaults: dict[str, Any]) -> vol.Schema:
-    options = [
-        selector.SelectOptionDict(value=key, label=spec["label"])
-        for key, spec in TESLA_MODEL_SPECS.items()
-    ]
-    options.append(
-        selector.SelectOptionDict(value=CUSTOM_MODEL_KEY, label="Custom (enter my own numbers)")
-    )
-    options.append(
-        selector.SelectOptionDict(value=SKIP_MODEL_KEY, label="Skip — no efficiency tracking")
-    )
-    return vol.Schema(
+def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """One combined edit page for the options flow.
+
+    No device picker here (the originally picked device isn't persisted,
+    only the entities it resolved to) — this edits entities directly.
+    Clearing an entity that identifies a provider (Zaptec power/session,
+    Monta last-charge, spot price) drops that provider on save.
+    """
+    schema_dict: dict[Any, Any] = {}
+    schema_dict.update(_vehicle_schema(defaults).schema)
+    schema_dict.update(
         {
-            vol.Required(
-                CONF_TESLA_MODEL_KEY, default=defaults.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY)
+            vol.Optional(
+                CONF_ZAPTEC_POWER_ENTITY,
+                default=defaults.get(CONF_ZAPTEC_POWER_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+            vol.Optional(
+                CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
+                default=defaults.get(CONF_ZAPTEC_SESSION_ENERGY_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+            vol.Optional(
+                CONF_ZAPTEC_CHARGING_ENTITY,
+                default=defaults.get(CONF_ZAPTEC_CHARGING_ENTITY, vol.UNDEFINED),
+            ): _entity_selector(["binary_sensor", "switch"]),
+            vol.Optional(
+                CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
+                default=defaults.get(CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+            vol.Optional(
+                CONF_MONTA_LAST_CHARGE_ENTITY,
+                default=defaults.get(CONF_MONTA_LAST_CHARGE_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+            vol.Optional(
+                CONF_MONTA_WALLET_ENTITY,
+                default=defaults.get(CONF_MONTA_WALLET_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+            vol.Optional(
+                CONF_SPOT_PRICE_ENTITY,
+                default=defaults.get(CONF_SPOT_PRICE_ENTITY, vol.UNDEFINED),
+            ): _entity_selector("sensor"),
+            vol.Optional(
+                CONF_TESLA_MODEL_KEY,
+                default=defaults.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY),
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=options, mode=selector.SelectSelectorMode.DROPDOWN
+                    options=_model_select_options(), mode=selector.SelectSelectorMode.DROPDOWN
                 )
             ),
-        }
-    )
-
-
-def _efficiency_custom_schema(defaults: dict[str, Any]) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(
+            vol.Optional(
                 CONF_BATTERY_CAPACITY_KWH,
                 default=defaults.get(CONF_BATTERY_CAPACITY_KWH, vol.UNDEFINED),
             ): selector.NumberSelector(
@@ -225,7 +261,7 @@ def _efficiency_custom_schema(defaults: dict[str, Any]) -> vol.Schema:
                     min=10, max=200, step=0.1, mode=selector.NumberSelectorMode.BOX
                 )
             ),
-            vol.Required(
+            vol.Optional(
                 CONF_RATED_WH_PER_KM,
                 default=defaults.get(CONF_RATED_WH_PER_KM, vol.UNDEFINED),
             ): selector.NumberSelector(
@@ -235,190 +271,110 @@ def _efficiency_custom_schema(defaults: dict[str, Any]) -> vol.Schema:
             ),
         }
     )
+    return vol.Schema(schema_dict)
 
 
-class EvLedgerFlowMixin:
-    """Shared step logic for both the initial config flow and the options flow."""
-
-    _data: dict[str, Any]
-
-    # ---- vehicle: pick a device, auto-resolve, only ask for the rest if needed ----
-
-    async def _async_step_vehicle_device(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            resolved = resolve_tesla_vehicle_entities(self.hass, user_input[FIELD_VEHICLE_DEVICE])
-            self._data.update({k: v for k, v in resolved.items() if v is not None})
-            if all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
-                return await self._async_step_chargers(None)
-            return await self._async_step_vehicle(None)
-        return self.async_show_form(
-            step_id="vehicle_device", data_schema=_vehicle_device_schema()
-        )
-
-    async def _async_step_vehicle(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            self._data.update(user_input)
-            return await self._async_step_chargers(None)
-        return self.async_show_form(step_id="vehicle", data_schema=_vehicle_schema(self._data))
-
-    async def _async_step_chargers(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            self._data[CONF_CHARGER_PROVIDERS] = user_input[CONF_CHARGER_PROVIDERS]
-            if CHARGER_PROVIDER_ZAPTEC in user_input[CONF_CHARGER_PROVIDERS]:
-                return await self._async_step_zaptec_device(None)
-            if CHARGER_PROVIDER_MONTA in user_input[CONF_CHARGER_PROVIDERS]:
-                return await self._async_step_monta_device(None)
-            return await self._async_step_after_chargers()
-        return self.async_show_form(step_id="chargers", data_schema=_chargers_schema(self._data))
-
-    # ---- zaptec: pick a device, auto-resolve, only ask for the rest if needed ----
-
-    async def _async_step_zaptec_device(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            resolved = resolve_zaptec_charger_entities(
-                self.hass, user_input[FIELD_ZAPTEC_DEVICE]
-            )
-            self._data.update({k: v for k, v in resolved.items() if v is not None})
-            if all(self._data.get(f) for f in REQUIRED_ZAPTEC_FIELDS):
-                return await self._async_step_after_zaptec()
-            return await self._async_step_zaptec(None)
-        return self.async_show_form(step_id="zaptec_device", data_schema=_zaptec_device_schema())
-
-    async def _async_step_zaptec(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            self._data.update(user_input)
-            return await self._async_step_after_zaptec()
-        return self.async_show_form(step_id="zaptec", data_schema=_zaptec_schema(self._data))
-
-    async def _async_step_after_zaptec(self):
-        if CHARGER_PROVIDER_MONTA in self._data.get(CONF_CHARGER_PROVIDERS, []):
-            return await self._async_step_monta_device(None)
-        return await self._async_step_after_chargers()
-
-    # ---- monta: pick a device, auto-resolve, only ask for the rest if needed ----
-
-    async def _async_step_monta_device(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            resolved = resolve_monta_charger_entities(self.hass, user_input[FIELD_MONTA_DEVICE])
-            self._data.update({k: v for k, v in resolved.items() if v is not None})
-            if all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS):
-                return await self._async_step_after_chargers()
-            return await self._async_step_monta(None)
-        return self.async_show_form(step_id="monta_device", data_schema=_monta_device_schema())
-
-    async def _async_step_monta(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            self._data.update(user_input)
-            return await self._async_step_after_chargers()
-        return self.async_show_form(step_id="monta", data_schema=_monta_schema(self._data))
-
-    # ---- spot price: a single price sensor, no device concept ----
-
-    async def _async_step_after_chargers(self):
-        if CHARGER_PROVIDER_SPOT_PRICE in self._data.get(CONF_CHARGER_PROVIDERS, []):
-            return await self._async_step_spot_price(None)
-        return await self._async_step_efficiency(None)
-
-    async def _async_step_spot_price(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            self._data.update(user_input)
-            return await self._async_step_efficiency(None)
-        return self.async_show_form(
-            step_id="spot_price", data_schema=_spot_price_schema(self._data)
-        )
-
-    async def _async_step_efficiency(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            key = user_input[CONF_TESLA_MODEL_KEY]
-            self._data[CONF_TESLA_MODEL_KEY] = key
-            if key == CUSTOM_MODEL_KEY:
-                return await self._async_step_efficiency_custom(None)
-            if key in TESLA_MODEL_SPECS:
-                spec = TESLA_MODEL_SPECS[key]
-                self._data[CONF_BATTERY_CAPACITY_KWH] = spec["battery_kwh"]
-                self._data[CONF_RATED_WH_PER_KM] = spec["wltp_wh_per_km"]
-                self._data[CONF_MODEL_LABEL] = spec["label"]
-            else:
-                self._data.pop(CONF_BATTERY_CAPACITY_KWH, None)
-                self._data.pop(CONF_RATED_WH_PER_KM, None)
-                self._data.pop(CONF_MODEL_LABEL, None)
-            return self._async_finish()
-        return self.async_show_form(
-            step_id="efficiency", data_schema=_efficiency_schema(self._data)
-        )
-
-    async def _async_step_efficiency_custom(self, user_input: dict[str, Any] | None):
-        if user_input is not None:
-            self._data.update(user_input)
-            self._data[CONF_MODEL_LABEL] = "Custom"
-            return self._async_finish()
-        return self.async_show_form(
-            step_id="efficiency_custom", data_schema=_efficiency_custom_schema(self._data)
-        )
-
-    def _async_finish(self):
-        raise NotImplementedError
+def _process_efficiency(data: dict[str, Any], user_input: dict[str, Any]) -> None:
+    key = user_input.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY)
+    data[CONF_TESLA_MODEL_KEY] = key
+    if key == CUSTOM_MODEL_KEY:
+        battery = user_input.get(CONF_BATTERY_CAPACITY_KWH)
+        rated = user_input.get(CONF_RATED_WH_PER_KM)
+        if battery and rated:
+            data[CONF_BATTERY_CAPACITY_KWH] = battery
+            data[CONF_RATED_WH_PER_KM] = rated
+            data[CONF_MODEL_LABEL] = "Custom"
+            return
+        key = SKIP_MODEL_KEY
+        data[CONF_TESLA_MODEL_KEY] = key
+    if key in TESLA_MODEL_SPECS:
+        spec = TESLA_MODEL_SPECS[key]
+        data[CONF_BATTERY_CAPACITY_KWH] = spec["battery_kwh"]
+        data[CONF_RATED_WH_PER_KM] = spec["wltp_wh_per_km"]
+        data[CONF_MODEL_LABEL] = spec["label"]
+    else:
+        data.pop(CONF_BATTERY_CAPACITY_KWH, None)
+        data.pop(CONF_RATED_WH_PER_KM, None)
+        data.pop(CONF_MODEL_LABEL, None)
 
 
-class EvLedgerConfigFlow(ConfigFlow, EvLedgerFlowMixin, domain=DOMAIN):
-    """Handle initial setup of an EV Ledger vehicle."""
+class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle initial setup of an EV Ledger vehicle — one page, then only ask
+    for anything that couldn't be auto-resolved from the devices picked."""
 
     VERSION = 1
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {CONF_VEHICLE_PROVIDER: VEHICLE_PROVIDER_TESLA_CUSTOM}
+        self._need_zaptec = False
+        self._need_monta = False
+
+    def _missing_required(self) -> bool:
+        if not all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
+            return True
+        if self._need_zaptec and not all(self._data.get(f) for f in REQUIRED_ZAPTEC_FIELDS):
+            return True
+        if self._need_monta and not all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS):
+            return True
+        return False
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
         if user_input is not None:
-            self._data.update(user_input)
             await self.async_set_unique_id(user_input[CONF_VEHICLE_NAME].lower())
             self._abort_if_unique_id_configured()
-            return await self._async_step_vehicle_device(None)
+
+            self._data[CONF_VEHICLE_NAME] = user_input[CONF_VEHICLE_NAME]
+            self._data[CONF_CURRENCY] = user_input[CONF_CURRENCY]
+
+            resolved = resolve_tesla_vehicle_entities(self.hass, user_input[FIELD_VEHICLE_DEVICE])
+            self._data.update({k: v for k, v in resolved.items() if v is not None})
+
+            providers = [CHARGER_PROVIDER_MANUAL]
+
+            zaptec_device = user_input.get(FIELD_ZAPTEC_DEVICE)
+            if zaptec_device:
+                self._need_zaptec = True
+                providers.append(CHARGER_PROVIDER_ZAPTEC)
+                resolved = resolve_zaptec_charger_entities(self.hass, zaptec_device)
+                self._data.update({k: v for k, v in resolved.items() if v is not None})
+
+            monta_device = user_input.get(FIELD_MONTA_DEVICE)
+            if monta_device:
+                self._need_monta = True
+                providers.append(CHARGER_PROVIDER_MONTA)
+                resolved = resolve_monta_charger_entities(self.hass, monta_device)
+                self._data.update({k: v for k, v in resolved.items() if v is not None})
+
+            spot_price_entity = user_input.get(CONF_SPOT_PRICE_ENTITY)
+            if spot_price_entity:
+                providers.append(CHARGER_PROVIDER_SPOT_PRICE)
+                self._data[CONF_SPOT_PRICE_ENTITY] = spot_price_entity
+
+            self._data[CONF_CHARGER_PROVIDERS] = providers
+            _process_efficiency(self._data, user_input)
+
+            if self._missing_required():
+                return await self.async_step_fill_missing()
+            return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_VEHICLE_NAME): str,
-                    vol.Required(CONF_CURRENCY, default=DEFAULT_CURRENCY): str,
-                }
-            ),
-            errors=errors,
+            step_id="user", data_schema=_main_schema(self._data), errors=errors
         )
 
-    async def async_step_vehicle_device(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_vehicle_device(user_input)
+    async def async_step_fill_missing(self, user_input: dict[str, Any] | None = None):
+        if user_input is not None:
+            self._data.update(user_input)
+            return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
 
-    async def async_step_vehicle(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_vehicle(user_input)
-
-    async def async_step_chargers(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_chargers(user_input)
-
-    async def async_step_zaptec_device(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_zaptec_device(user_input)
-
-    async def async_step_zaptec(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_zaptec(user_input)
-
-    async def async_step_monta_device(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_monta_device(user_input)
-
-    async def async_step_monta(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_monta(user_input)
-
-    async def async_step_spot_price(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_spot_price(user_input)
-
-    async def async_step_efficiency(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_efficiency(user_input)
-
-    async def async_step_efficiency_custom(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_efficiency_custom(user_input)
-
-    def _async_finish(self):
-        return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
+        schema_dict: dict[Any, Any] = {}
+        if not all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
+            schema_dict.update(_vehicle_schema(self._data).schema)
+        if self._need_zaptec and not all(self._data.get(f) for f in REQUIRED_ZAPTEC_FIELDS):
+            schema_dict.update(_zaptec_schema(self._data).schema)
+        if self._need_monta and not all(self._data.get(f) for f in REQUIRED_MONTA_FIELDS):
+            schema_dict.update(_monta_schema(self._data).schema)
+        return self.async_show_form(step_id="fill_missing", data_schema=vol.Schema(schema_dict))
 
     @staticmethod
     @callback
@@ -426,48 +382,46 @@ class EvLedgerConfigFlow(ConfigFlow, EvLedgerFlowMixin, domain=DOMAIN):
         return EvLedgerOptionsFlow(config_entry)
 
 
-class EvLedgerOptionsFlow(OptionsFlow, EvLedgerFlowMixin):
-    """Let the user revisit every entity mapping after initial setup."""
+class EvLedgerOptionsFlow(OptionsFlow):
+    """Reconfigure everything from one combined page of current entities."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._entry = config_entry
         self._data: dict[str, Any] = dict(config_entry.data)
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
-        # Reconfiguring: go straight to the editable form with current values
-        # pre-filled, rather than forcing a device re-pick.
-        return await self._async_step_vehicle(None)
+        if user_input is not None:
+            self._data.update(user_input)
 
-    async def async_step_vehicle_device(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_vehicle_device(user_input)
+            providers = [CHARGER_PROVIDER_MANUAL]
+            if user_input.get(CONF_ZAPTEC_POWER_ENTITY) and user_input.get(
+                CONF_ZAPTEC_SESSION_ENERGY_ENTITY
+            ):
+                providers.append(CHARGER_PROVIDER_ZAPTEC)
+            else:
+                for field in (
+                    CONF_ZAPTEC_POWER_ENTITY,
+                    CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
+                    CONF_ZAPTEC_CHARGING_ENTITY,
+                    CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
+                ):
+                    self._data.pop(field, None)
 
-    async def async_step_vehicle(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_vehicle(user_input)
+            if user_input.get(CONF_MONTA_LAST_CHARGE_ENTITY):
+                providers.append(CHARGER_PROVIDER_MONTA)
+            else:
+                for field in (CONF_MONTA_LAST_CHARGE_ENTITY, CONF_MONTA_WALLET_ENTITY):
+                    self._data.pop(field, None)
 
-    async def async_step_chargers(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_chargers(user_input)
+            if user_input.get(CONF_SPOT_PRICE_ENTITY):
+                providers.append(CHARGER_PROVIDER_SPOT_PRICE)
+            else:
+                self._data.pop(CONF_SPOT_PRICE_ENTITY, None)
 
-    async def async_step_zaptec_device(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_zaptec_device(user_input)
+            self._data[CONF_CHARGER_PROVIDERS] = providers
+            _process_efficiency(self._data, user_input)
 
-    async def async_step_zaptec(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_zaptec(user_input)
+            self.hass.config_entries.async_update_entry(self._entry, data=self._data)
+            return self.async_create_entry(title="", data={})
 
-    async def async_step_monta_device(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_monta_device(user_input)
-
-    async def async_step_monta(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_monta(user_input)
-
-    async def async_step_spot_price(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_spot_price(user_input)
-
-    async def async_step_efficiency(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_efficiency(user_input)
-
-    async def async_step_efficiency_custom(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_efficiency_custom(user_input)
-
-    def _async_finish(self):
-        self.hass.config_entries.async_update_entry(self._entry, data=self._data)
-        return self.async_create_entry(title="", data={})
+        return self.async_show_form(step_id="init", data_schema=_options_schema(self._data))
