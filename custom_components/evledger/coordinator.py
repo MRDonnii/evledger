@@ -59,6 +59,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._trip_idle_since: datetime | None = None
         self._last_known_session_kwh: float | None = None
         self._home_cooldown_until: datetime | None = None
+        self._vehicle_was_charging = False
 
     async def _async_update_data(self) -> dict[str, Any]:
         snapshot = self._vehicle_provider.get_snapshot(self.hass)
@@ -194,7 +195,16 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         vehicle_charging = bool(snapshot.is_charging)
         in_cooldown = self._home_cooldown_until is not None and now < self._home_cooldown_until
 
-        if vehicle_charging and not home_charging and not in_cooldown:
+        # Only a genuine off->on transition of the vehicle's own charging flag
+        # counts as "a new session started" — a home session ending doesn't
+        # always bring this flag down in the same poll tick (the vehicle can
+        # keep reporting charging for a while after Zaptec says it's done),
+        # so treating "still charging" as "new public session" invents a
+        # phantom session out of the tail end of the home charge.
+        vehicle_charge_edge = vehicle_charging and not self._vehicle_was_charging
+        self._vehicle_was_charging = vehicle_charging
+
+        if vehicle_charge_edge and not home_charging and not in_cooldown:
             if open_public is None:
                 open_public = ChargeSession(
                     id=self.store.new_id(),
