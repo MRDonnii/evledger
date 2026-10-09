@@ -25,6 +25,7 @@ from .const import (
     CONF_TRIP_KEYWORD,
     PRECONDITION_OFF_AFTER_MINUTES,
     REMINDER_WINDOW_HOURS,
+    STARTED_NOTE_QUIET_MINUTES,
     STATUS_DONE,
 )
 from .control import ChargerState
@@ -103,6 +104,10 @@ class Routines:
         # The day the evening check was made (kept across restarts by the reminder switch).
         self.evening_checked: date | None = None
         self._offline_since: datetime | None = None
+        # Charging started: whether it charged at the last look (None until the first one, so a charge already running
+        # at start-up is not a new start) and when the last "started" message went out.
+        self._was_charging: bool | None = None
+        self._started_note: datetime | None = None
         self._offline_alerted = False
         # The ready-by (or departure) time the phones were asked to precondition for, and whether they said yes
         # (then the climate was turned on by us, and is turned off again if nobody left).
@@ -141,6 +146,27 @@ class Routines:
         text = done_text(run, p.price_unit or "kr", p._battery_soc())
         p.entry.async_create_background_task(
             self.hass, p.notify.async_send_note("done", title, text), "ev_smart_charge_notify_done")
+
+    # -- charging started -----------------------------------------------------------------------
+
+    def check_started(self, now: datetime) -> None:
+        """Tell the phones when the charger starts charging this car: plan, expected end, price and target. A short
+        stop and start (the car pausing, a charger reboot) does not send it again within half an hour."""
+        p = self.planner
+        charging = p.charger_state == ChargerState.CHARGING and p.car_present
+        was, self._was_charging = self._was_charging, charging
+        if not charging or was is not False:
+            return
+        if self._started_note is not None and now - self._started_note < timedelta(minutes=STARTED_NOTE_QUIET_MINUTES):
+            return
+        self._started_note = now
+        if not (p.flags["notify_start"] and p.notify.targets):
+            return
+        text = p.notify.start_text(p, now)
+        actions = [{"action": f"{p.notify.prefix}OFF", "title": "Pause"}]
+        p.entry.async_create_background_task(
+            self.hass, p.notify.async_send_note("start", "ladning startet", text, actions),
+            "ev_smart_charge_notify_start")
 
     # -- charger offline ------------------------------------------------------------------------
 

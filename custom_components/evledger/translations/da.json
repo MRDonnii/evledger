@@ -299,6 +299,9 @@
       },
       "precondition": {
         "name": "Forvarm bilen til Klar senest"
+      },
+      "notify_start": {
+        "name": "Besked når opladningen starter"
       }
     },
     "button": {

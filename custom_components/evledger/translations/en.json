@@ -299,6 +299,9 @@
       },
       "precondition": {
         "name": "Precondition the car for ready by"
+      },
+      "notify_start": {
+        "name": "Message when charging starts"
       }
     },
     "button": {

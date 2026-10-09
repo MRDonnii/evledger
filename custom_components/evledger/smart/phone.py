@@ -142,6 +142,24 @@ class PhoneNotifier:
         day = {0: "kl. ", 1: "i morgen kl. "}.get(days, local.strftime("%d.%m. kl. "))
         return f"{day}{local.strftime('%H:%M')}"
 
+    def start_text(self, planner: ChargePlanner, now) -> str:
+        """Charging started: the plan, when this charging period ends, the expected price and the target."""
+        schedule = planner.schedule
+        lines = [f"Plan: {NAMES.get(planner.mode, planner.mode)}"]
+        block = schedule.next_block(now)
+        if block is not None:
+            end = f"Slut ca. {self.when(block.end)}"
+            if len(schedule.blocks) > 1:
+                end += f" (periode 1 af {len(schedule.blocks)})"
+            lines.append(end)
+        if schedule.cost is not None and schedule.energy_kwh > 0:
+            energy = f"{schedule.energy_kwh:.1f}".replace(".", ",")
+            lines.append(f"Forventet pris: {self.money(planner, schedule.cost)} for {energy} kWh")
+        soc = planner._battery_soc()
+        if schedule.target_soc is not None:
+            lines.append(f"Mål {schedule.target_soc:.0f} %" + (f" (nu {soc:.0f} %)" if soc is not None else ""))
+        return "\n".join(lines)
+
     def cap_text(self, planner: ChargePlanner, now) -> str:
         """The price cap cannot reach the target in time: what the cap reaches, and what exceeding it costs."""
         schedule = planner.schedule
@@ -233,11 +251,11 @@ class PhoneNotifier:
         for service in self.recipients():
             await self._call(service, data)
 
-    async def async_send_note(self, kind: str, title: str, text: str) -> None:
-        """A message under its own tag and without buttons: the charge is done, a reminder to plug in, the charger
-        is offline."""
+    async def async_send_note(self, kind: str, title: str, text: str, actions: list[dict] | None = None) -> None:
+        """A message under its own tag: charging started (with Pause), the charge is done, a reminder to plug in,
+        the charger is offline."""
         data = {"title": f"{self.entry.title}: {title}", "message": text,
-                "data": {**self._tap(), "tag": f"{self.tag}_{kind}"}}
+                "data": {**self._tap(), "tag": f"{self.tag}_{kind}", **({"actions": actions} if actions else {})}}
         for service in self.recipients():
             await self._call(service, data)
 

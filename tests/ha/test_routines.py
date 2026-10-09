@@ -308,3 +308,23 @@ async def test_unplugged_mid_plan_sends_what_was_charged(hass: HomeAssistant, re
     await later(hass, freezer, 3)
     assert [m["title"] for m in sent] == ["Bil: opladning slut"]
     assert sent[0]["message"].startswith("3,0 kWh for 1,20 kr")
+
+
+async def test_charging_started_message(hass: HomeAssistant, request, freezer):
+    sent = phones(hass)
+    entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=True)
+    await with_options(hass, entry)
+    hass.states.async_set(MODE, "connected_charging")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    started = [m for m in sent if "ladning startet" in m.get("title", "")]
+    assert len(started) == 1
+    text = started[0]["message"]
+    assert "Plan: Billigst" in text and "Slut ca." in text and "Forventet pris:" in text and "Mål 80 %" in text
+    assert [a["title"] for a in started[0]["data"]["actions"]] == ["Pause"]
+    # the car pauses for a moment and goes on: no second message
+    hass.states.async_set(MODE, "connected_finished")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 2)
+    hass.states.async_set(MODE, "connected_charging")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len([m for m in sent if "ladning startet" in m.get("title", "")]) == 1

@@ -150,7 +150,8 @@ class ChargePlanner:
         }
         # On/off settings: the message when a charge is done, the evening reminder, another ready-by time at the
         # weekend and the car's climate before the ready-by time.
-        self.flags: dict[str, bool] = {"notify_done": True, "plug_reminder": True, "weekend_ready_by": False,
+        self.flags: dict[str, bool] = {"notify_start": True, "notify_done": True,
+                                       "plug_reminder": True, "weekend_ready_by": False,
                                        "precondition": False}
         # The default plan runs when a car is plugged in; any other plan returns to it once it has run.
         self.default_mode = MODE_SMART
@@ -731,6 +732,7 @@ class ChargePlanner:
         self._control(now)
         self._warn(now)
         self.routines.check_offline(now)
+        self.routines.check_started(now)
         self.routines.check_done(now)
         if self._info_pending and not self._notify_pending:
             self._info_pending = False
