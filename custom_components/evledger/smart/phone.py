@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import time
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
@@ -29,6 +30,11 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 ACTION_EVENT = "mobile_app_notification_action"
+# Messages that only tell what happens (plan active, charging started, charge done) arrive without sound at night;
+# questions and warnings keep their sound.
+QUIET_FROM = time(22, 0)
+QUIET_UNTIL = time(7, 0)
+QUIET_KINDS = ("start", "done")
 ANSWERS = {"NOW": MODE_NOW, "OFF": MODE_OFF}
 NAMES = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft",
          MODE_MANUAL: "Manuel"}
@@ -196,6 +202,12 @@ class PhoneNotifier:
                  "notification_icon_color": "white", "color": NOTIFY_COLOR}
         return data
 
+    @staticmethod
+    def quiet() -> dict:
+        """iOS "passive" at night: into the notification centre without sound or lighting the screen."""
+        now = dt_util.now().time()
+        return {"push": {"interruption-level": "passive"}} if now >= QUIET_FROM or now < QUIET_UNTIL else {}
+
     async def async_send_info(self, planner: ChargePlanner) -> None:
         """Tell the phones which plan is active, with times and price; the same tag replaces an older one."""
         data = {
@@ -203,6 +215,7 @@ class PhoneNotifier:
             "message": self.plan_text(planner),
             "data": {
                 **self._tap(),
+                **self.quiet(),
                 "tag": self.tag,
                 "actions": [
                     {"action": f"{self.prefix}NOW", "title": "Lad nu"},
@@ -255,7 +268,8 @@ class PhoneNotifier:
         """A message under its own tag: charging started (with Pause), the charge is done, a reminder to plug in,
         the charger is offline."""
         data = {"title": f"{self.entry.title}: {title}", "message": text,
-                "data": {**self._tap(), "tag": f"{self.tag}_{kind}", **({"actions": actions} if actions else {})}}
+                "data": {**self._tap(), "tag": f"{self.tag}_{kind}", **({"actions": actions} if actions else {}),
+                         **(self.quiet() if kind in QUIET_KINDS else {})}}
         for service in self.recipients():
             await self._call(service, data)
 

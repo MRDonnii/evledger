@@ -328,3 +328,14 @@ async def test_charging_started_message(hass: HomeAssistant, request, freezer):
     hass.states.async_set(MODE, "connected_charging")
     await hass.async_block_till_done(wait_background_tasks=True)
     assert len([m for m in sent if "ladning startet" in m.get("title", "")]) == 1
+
+
+async def test_charging_started_is_quiet_at_night(hass: HomeAssistant, request, freezer):
+    freezer.move_to(dt_util.now().replace(hour=1, minute=0, second=5))
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, charger_state="connected_finished", cheap_now=True)
+    await with_options(hass, entry)
+    hass.states.async_set(MODE, "connected_charging")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    started = [m for m in sent if "ladning startet" in m.get("title", "")]
+    assert started and started[0]["data"]["push"] == {"interruption-level": "passive"}

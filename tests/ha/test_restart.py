@@ -189,3 +189,22 @@ async def test_an_ended_saved_plan_is_not_followed(hass: HomeAssistant, request)
     restore(hass, [State("select.bil_charge_mode", "smart", {"last_soc": 50, "planned": saved_plan(-90, -30)})])
     _, calls = await setup(hass, request, soc="unavailable", prices=False)
     assert not calls["switch.turn_on"]
+
+
+async def test_cleared_calendar_trip_stays_cleared_after_a_restart(hass: HomeAssistant, request, freezer):
+    from homeassistant.core import SupportsResponse
+
+    from .test_routines import with_options
+    start = (dt_util.now() + timedelta(hours=8)).replace(minute=0, second=0, microsecond=0)
+    events = [{"start": start.isoformat(), "end": (start + timedelta(hours=1)).isoformat(), "summary": "Tur",
+               "location": ""}]
+
+    async def get_events(call):
+        return {"calendar.familie": {"events": list(events)}}
+
+    hass.services.async_register("calendar", "get_events", get_events, supports_response=SupportsResponse.ONLY)
+    restore(hass, [State("datetime.bil_temporary_departure", "unknown", {"dismissed": [f"{start.isoformat()}|Tur"]})])
+    entry, _ = await setup(hass, request, charger=False, cheap_now=False)
+    planner = await with_options(hass, entry, trip_calendar="calendar.familie", trip_calendar_keyword="tur")
+    await later(hass, freezer, 1)
+    assert planner.trip.departure is None, "cleared by hand before the restart: not added again"

@@ -289,7 +289,9 @@ loaded again the charging periods planned before the restart are followed, so a 
 planned start does not lose the charge. A charger that is offline for 10 minutes while the plan
 wants to charge is reported on the phones at once; the charge starts as soon as it answers again. A car that stops at its own charge limit is done:
 it is neither started again nor reported as stopped from outside. Settings, the chosen plan, a temporary plan and an
-open phone question all survive a restart. The
+open phone question all survive a restart. Messages that only tell what happens (the active plan,
+charging started, charge done) arrive without sound between 22:00 and 07:00 (iOS "passive"); questions
+and warnings keep their sound. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)
 shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
 
@@ -300,7 +302,7 @@ the **keyword** in its title or description (or, without a keyword, the first ev
 address) becomes the temporary plan: its address is the destination, and the car leaves so it is
 there at the event's start (the drive time plus 10 minutes, or 45 minutes before when there is no
 address). Moving or deleting the event moves or clears the plan. A trip set by hand is never
-replaced, and a calendar trip cleared by hand is not added again. All-day events are skipped.
+replaced, and a calendar trip cleared by hand is not added again (also after a restart). All-day events are skipped.
 
 ### Controlling the car
 
