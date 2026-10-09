@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 from . import trip, vehicles
 from .charger import ChargerBackend, create_backend
 from .const import (
+    ASSUMED_SOC,
     CONF_BATTERY_ENTITY,
     CONF_CAPACITY,
     CONF_CAR_PLUGGED_ENTITY,
@@ -38,6 +39,7 @@ from .const import (
     DEFAULT_TARGET_SOC,
     DEFAULT_TRIP_MARGIN,
     DEFAULT_TRIP_RESERVE,
+    INPUT_WAIT_SECONDS,
     START_DELAY_SECONDS,
     STARTUP_GRACE_SECONDS,
     STATUS_AWAITING_CONFIRMATION,
@@ -53,6 +55,7 @@ from .const import (
     STATUS_STOPPED_EXTERNALLY,
     STATUS_UNKNOWN,
     STATUS_WAITING,
+    UNPLUG_GRACE_SECONDS,
     VEHICLE_AUTO,
 )
 from .control import CONNECTED, Action, ChargerState, Controller
@@ -152,6 +155,11 @@ class ChargePlanner:
         self._recheck: CALLBACK_TYPE | None = None
         self._notify_pending = False
         self._info_pending = False
+        self._disconnected_since: datetime | None = None
+        self._alerted: set[str] = set()
+        # The last battery level seen (restored with the charge mode), used while the car is not reporting.
+        self.last_soc: float | None = None
+        self.soc_assumed = False
         self.notify = PhoneNotifier(hass, entry, lambda: self.options)
         self._guessed: vehicles.Vehicle | None = None
         self._started_at: datetime | None = None
@@ -462,15 +470,21 @@ class ChargePlanner:
             self.charger_state = self.backend.state()
             self.car_present = self._car_present()
             event = self.controller.observe(self.charger_state, now)
-            self._handle_event(event)
+            self._handle_event(event, now)
+            if self.charger_state == ChargerState.DISCONNECTED:
+                self._disconnected_since = self._disconnected_since or now
+            elif self.charger_state in CONNECTED:
+                self._disconnected_since = None
+            unplugged = (self._disconnected_since is not None
+                         and now - self._disconnected_since >= timedelta(seconds=UNPLUG_GRACE_SECONDS))
             if self.mode not in (MODE_SMART, MODE_MANUAL):
                 if self.charger_state in CONNECTED:
                     self.now_seen_connected = True
-                elif self.charger_state == ChargerState.DISCONNECTED and self.now_seen_connected:
+                elif unplugged and self.now_seen_connected:
                     _LOGGER.debug("Car unplugged, %s has run, back to the cheapest plan", self.mode)
                     self.mode = MODE_SMART
                     self.now_seen_connected = False
-            if self.charger_state == ChargerState.DISCONNECTED:
+            if unplugged:
                 self.awaiting_since = None
             elif self.awaiting_since and now - self.awaiting_since >= timedelta(minutes=CONFIRM_TIMEOUT_MINUTES):
                 _LOGGER.debug("No answer on the phone, the plan runs")
@@ -491,6 +505,13 @@ class ChargePlanner:
         self.slot_count = len(ordered)
         self.deadline = next_deadline(now, self.ready_by)
         soc = self._battery_soc()
+        self.soc_assumed = False
+        if soc is not None:
+            self.last_soc = soc
+        elif self._inputs_waited(now):
+            # The car is not reporting (asleep, cloud down): plan with what we know rather than not at all.
+            soc = self.last_soc if self.last_soc is not None else ASSUMED_SOC
+            self.soc_assumed = True
         self.result = calculate(PlanInput(
             soc=soc,
             target_soc=self.settings["target_soc"],
@@ -541,21 +562,35 @@ class ChargePlanner:
         for update in list(self._listeners):
             update()
 
+    def _inputs_waited(self, now: datetime) -> bool:
+        return self._started_at is None or (dt_util.utcnow() - self._started_at).total_seconds() >= INPUT_WAIT_SECONDS
+
     @callback
-    def _handle_event(self, event: ChargerEvent | None) -> None:
+    def _handle_event(self, event: ChargerEvent | None, now: datetime) -> None:
         if event is None:
             return
         _LOGGER.debug("Charger event %s (mode %s)", event, self.mode)
+        # A charger that rebooted or lost its connection for a moment is not a car being plugged in.
+        new_plug = event == ChargerEvent.PLUGGED and (
+            self._disconnected_since is None
+            or now - self._disconnected_since >= timedelta(seconds=UNPLUG_GRACE_SECONDS))
         if event == ChargerEvent.UNPLUGGED:
             self._hold_until = None
-        elif event == ChargerEvent.PLUGGED and self.car_present and self.mode != MODE_MANUAL:
+        elif event == ChargerEvent.PLUGGED and new_plug:
+            self._alerted.clear()
+            self._refresh_car()
+        if not new_plug and event == ChargerEvent.PLUGGED:
+            return
+        if event == ChargerEvent.PLUGGED and self.car_present and self.mode != MODE_MANUAL:
             if self.confirm_enabled and self.notify.targets:
                 self.awaiting_since = dt_util.now()
                 self._notify_pending = True
             elif self.info_enabled and self.notify.targets:
                 self._info_pending = True
-        elif event == ChargerEvent.MANUAL_START and self.car_present and self.mode not in (MODE_NOW, MODE_MANUAL):
-            # Started from the charger's app or the car: follow the user and charge now.
+        elif (event == ChargerEvent.MANUAL_START and self.car_present and not self.charge_desired
+              and self.mode not in (MODE_NOW, MODE_MANUAL)):
+            # Started from the charger's app or the car while the plan did not want to charge:
+            # follow the user and charge now.
             self.mode_before_now, self.mode = self.mode, MODE_NOW
             self.now_seen_connected = True
             self.controller.last_desired = True
@@ -583,11 +618,14 @@ class ChargePlanner:
             return
         state = self.charger_state
         self.status = self._status(state, desired)
-        if self.mode == MODE_MANUAL or not self.car_present:
+        self._alert(now)
+        # "Charge now" charges whichever car is plugged in; the plans only the car they belong to.
+        if self.mode == MODE_MANUAL or (not self.car_present and self.mode != MODE_NOW):
             return
-        if self.mode != MODE_NOW and (self._battery_soc() is None or not self.slot_count):
-            # Right after a restart the car or the price sensor may not be loaded yet: leave the
-            # charger as it is instead of acting on a plan made without them.
+        if (self.mode != MODE_NOW and (self._battery_soc() is None or not self.slot_count)
+                and not self._inputs_waited(now)):
+            # Right after a start the car or the price sensor may not be loaded yet: leave the charger
+            # as it is for a while instead of acting on a plan made without them.
             return
         if self._started_at and (dt_util.utcnow() - self._started_at).total_seconds() < STARTUP_GRACE_SECONDS:
             return
@@ -599,9 +637,43 @@ class ChargePlanner:
                     self._recheck = async_call_later(self.hass, wait.total_seconds() + 1, self._on_recheck)
             return
         _LOGGER.info("%s: %s charging (mode %s, charger %s)", self.entry.title, action, self.mode, state)
-        if action == Action.START:
-            self.status = STATUS_STARTING
+        if action == Action.START and self.controller.start_attempts <= self.controller.max_start_attempts:
+            self.status = STATUS_STARTING  # the slow retries after that keep showing "not responding"
         self.entry.async_create_task(self.hass, self.backend.async_command(action, state), "ev_smart_charge_command")
+
+    @callback
+    def _refresh_car(self) -> None:
+        """Ask the car's integration for fresh data when the cable goes in (plug and battery level)."""
+        entities = [entity for entity in (self.plugged_entity, self.battery_entity) if entity]
+        if entities and self.hass.services.has_service("homeassistant", "update_entity"):
+            self.entry.async_create_background_task(
+                self.hass,
+                self.hass.services.async_call("homeassistant", "update_entity", {"entity_id": entities}),
+                "ev_smart_charge_refresh_car")
+
+    @callback
+    def _alert(self, now: datetime) -> None:
+        """Tell the phones once when charging cannot follow the plan."""
+        if self.status in (STATUS_CHARGING, STATUS_DISCONNECTED, STATUS_DONE):
+            self._alerted.clear()
+            return
+        if not (self.info_enabled and self.notify.targets):
+            return
+        alerts = {
+            STATUS_NOT_RESPONDING: ("Laderen svarer ikke. Opladningen er ikke startet; "
+                                    "der prøves igen hvert kvarter."),
+            STATUS_OTHER_CAR: ("Laderen er tilsluttet, men det er ikke denne bil. "
+                               "Tryk Lad nu for at lade den alligevel."),
+        }
+        if self.status == STATUS_STOPPED_EXTERNALLY and self.controller.respects_stop:
+            alerts[STATUS_STOPPED_EXTERNALLY] = ("Opladningen blev stoppet af bilen eller appen og startes ikke igen "
+                                                 "af sig selv. Tryk Lad nu for at fortsætte.")
+        if (text := alerts.get(self.status)) and self.status not in self._alerted:
+            if self.status == STATUS_OTHER_CAR and self._disconnected_since is not None:
+                return
+            self._alerted.add(self.status)
+            self.entry.async_create_background_task(
+                self.hass, self.notify.async_send_alert(text), "ev_smart_charge_notify_alert")
 
     def _status(self, state: ChargerState, desired: bool) -> str:
         if self.mode == MODE_MANUAL:
@@ -612,13 +684,13 @@ class ChargePlanner:
             return STATUS_DISCONNECTED
         if state == ChargerState.UNKNOWN:
             return STATUS_UNKNOWN
-        if not self.car_present:
+        if not self.car_present and self.mode != MODE_NOW:
             return STATUS_OTHER_CAR
         if state == ChargerState.CHARGING:
             return STATUS_CHARGING
         if desired and self.controller.blocked:
             return STATUS_STOPPED_EXTERNALLY
-        if desired and self.controller.gave_up:
+        if desired and self.controller.gave_up and state != ChargerState.CHARGING:
             return STATUS_NOT_RESPONDING
         if self.mode == MODE_OFF:
             return STATUS_PAUSED

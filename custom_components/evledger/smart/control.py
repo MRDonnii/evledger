@@ -33,9 +33,11 @@ CONNECTED = (ChargerState.READY, ChargerState.CHARGING, ChargerState.PAUSED)
 
 @dataclass
 class Controller:
-    """Sends a command only when the charger is not already where the plan wants it, waits for the
-    charger to react before trying again, and gives up after a few attempts. A start or stop that
-    did not come from here is reported, so the plan can follow the user instead of fighting them."""
+    """Sends a command only when the charger is not already where the plan wants it and waits for the
+    charger to react before trying again. It never gives up for good: after a few quick attempts a
+    wanted start is retried every 15 minutes, and a charge stopped from outside is restarted once
+    after 10 minutes (a second outside stop is respected). A start or stop that did not come from
+    here is reported, so the plan can follow the user instead of fighting them."""
 
     retry_after: timedelta = timedelta(minutes=3)
     # A stop that did not take (e.g. sent seconds after a start) is repeated sooner than a start.
@@ -43,14 +45,19 @@ class Controller:
     # The plan must want charging this long before a start is sent, so a setting that is only
     # passed through for a moment (a time being typed) never starts the charger.
     start_delay: timedelta = timedelta(seconds=15)
-    own_command_window: timedelta = timedelta(minutes=5)
+    # A car that takes long to wake up can start drawing power minutes after the start command.
+    own_command_window: timedelta = timedelta(minutes=15)
     max_start_attempts: int = 3
+    slow_retry_after: timedelta = timedelta(minutes=15)
+    external_retry_after: timedelta = timedelta(minutes=10)
 
     state: ChargerState | None = None
     last_command: Action = Action.NONE
     last_command_at: datetime | None = None
     start_attempts: int = 0
-    blocked: bool = False  # the car or the user stopped the charging; do not restart on our own
+    blocked: bool = False  # the car, the app or a fault stopped the charging
+    blocked_at: datetime | None = None
+    external_stops: int = 0
     last_desired: bool | None = None
     desired_since: datetime | None = None
 
@@ -61,6 +68,8 @@ class Controller:
     def reset(self) -> None:
         self.start_attempts = 0
         self.blocked = False
+        self.blocked_at = None
+        self.external_stops = 0
 
     def observe(self, state: ChargerState, now: datetime) -> Event | None:
         previous, self.state = self.state, state
@@ -76,15 +85,24 @@ class Controller:
             return None
         if state == ChargerState.CHARGING:
             self.start_attempts = 0
+            self.blocked = False
             return None if self._own(Action.START, now) else Event.MANUAL_START
         if previous == ChargerState.CHARGING and not self._own(Action.STOP, now):
             self.blocked = True
+            self.blocked_at = now
+            self.external_stops += 1
             return Event.EXTERNAL_STOP
         return None
 
     @property
     def gave_up(self) -> bool:
+        """The quick attempts are used up; starts are now retried slowly."""
         return self.start_attempts >= self.max_start_attempts
+
+    @property
+    def respects_stop(self) -> bool:
+        """Stopped from outside twice: leave it stopped until the plan changes or the car is replugged."""
+        return self.blocked and self.external_stops >= 2
 
     def decide(self, desired: bool, now: datetime) -> Action:
         if desired != self.last_desired:
@@ -96,8 +114,11 @@ class Controller:
             return Action.NONE
         since = None if self.last_command_at is None else now - self.last_command_at
         if desired and state != ChargerState.CHARGING:
-            if self.blocked or self.gave_up or (since is not None and since < self.retry_after
-                                                 and self.last_command == Action.START):
+            if self.blocked and (self.respects_stop or self.blocked_at is None
+                                 or now - self.blocked_at < self.external_retry_after):
+                return Action.NONE
+            wait = self.slow_retry_after if self.gave_up else self.retry_after
+            if since is not None and since < wait and self.last_command == Action.START:
                 return Action.NONE
             if self.start_wait(now):
                 return Action.NONE

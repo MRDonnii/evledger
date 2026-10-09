@@ -105,6 +105,7 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "controls_charger": planner.controls_charger,
                 "car_plugged_in": planner.car_present if planner.controls_charger else None,
                 "trip_active": planner.trip_active,
+                "battery_level_assumed": planner.soc_assumed,
                 "vehicle_model": planner.vehicle.key if planner.vehicle else None,
                 "vehicle_name": planner.vehicle.name if planner.vehicle else None,
                 "vehicle_body": planner.vehicle.body if planner.vehicle else None,

@@ -44,6 +44,13 @@ DEFAULT_TRIP_RESERVE = 10.0
 
 # Wait this long after start-up before sending commands, so charger and car states have settled.
 STARTUP_GRACE_SECONDS = 60
+# A charger that reboots or loses its connection reports "disconnected" for a short while; only a
+# disconnect longer than this counts as the car being unplugged.
+UNPLUG_GRACE_SECONDS = 120
+# How long to wait for the car's battery level and the prices after a start before planning without
+# them (with the last known battery level, or an assumed low one, and estimated prices).
+INPUT_WAIT_SECONDS = 600
+ASSUMED_SOC = 20.0
 # The plan must want charging this long before a start is sent (see control.Controller).
 START_DELAY_SECONDS = 15
 

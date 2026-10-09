@@ -27,10 +27,13 @@ def test_starts_once_and_waits_for_the_charger():
     assert c.decide(True, minutes(2)) == A.NONE
 
 
-def test_retries_then_gives_up():
+def test_retries_quickly_then_slowly_but_never_gives_up():
     c = started(S.READY)
     assert [c.decide(True, minutes(m)) for m in (0, 3, 6, 9)] == [A.START, A.START, A.START, A.NONE]
     assert c.gave_up
+    assert c.decide(True, minutes(20)) == A.NONE
+    assert c.decide(True, minutes(21)) == A.START, "slow retry 15 min after the last attempt"
+    assert c.decide(True, minutes(37)) == A.START
 
 
 def test_stops_when_not_wanted():
@@ -46,13 +49,24 @@ def test_manual_start_is_reported():
     assert c.observe(S.CHARGING, minutes(10)) == E.MANUAL_START
 
 
-def test_external_stop_blocks_restart_until_the_plan_changes():
+def test_external_stop_is_retried_once_then_respected():
     c = started(S.CHARGING)
     c.decide(True, T0)
     assert c.observe(S.PAUSED, minutes(5)) == E.EXTERNAL_STOP
     assert c.decide(True, minutes(6)) == A.NONE
-    c.decide(False, minutes(7))
-    assert c.decide(True, minutes(15)) == A.START
+    assert c.decide(True, minutes(15)) == A.START, "a short fault: started again after 10 minutes"
+    assert c.observe(S.CHARGING, minutes(16)) is None
+    assert c.observe(S.PAUSED, minutes(30)) == E.EXTERNAL_STOP
+    assert c.respects_stop
+    assert c.decide(True, minutes(60)) == A.NONE, "stopped from outside twice: respected"
+    c.decide(False, minutes(61))
+    assert c.decide(True, minutes(62)) == A.START, "a new plan period starts again"
+
+
+def test_slow_car_start_is_still_ours():
+    c = started(S.PAUSED)
+    assert c.decide(True, T0) == A.START
+    assert c.observe(S.CHARGING, minutes(9)) is None, "drawing power 9 minutes after the start"
 
 
 def test_unplug_and_plug_are_reported_and_reset():

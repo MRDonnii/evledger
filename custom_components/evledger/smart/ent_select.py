@@ -25,6 +25,9 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
             if before in MODES:
                 self.planner.mode_before_now = before
             self.planner.now_seen_connected = bool(last.attributes.get("now_seen_connected"))
+            last_soc = last.attributes.get("last_soc")
+            if isinstance(last_soc, (int, float)):
+                self.planner.last_soc = float(last_soc)
             self.planner.async_set_mode(last.state, restore=True)
 
     @property
@@ -34,7 +37,8 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
     @property
     def extra_state_attributes(self) -> dict:
         return {"mode_before_now": self.planner.mode_before_now,
-                "now_seen_connected": self.planner.now_seen_connected}
+                "now_seen_connected": self.planner.now_seen_connected,
+                "last_soc": self.planner.last_soc}
 
     async def async_select_option(self, option: str) -> None:
         self.planner.async_set_mode(option)

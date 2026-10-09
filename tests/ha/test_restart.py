@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import mock_restore_cache_with_extra_data
 
-from .test_smart_charge import MODE, setup, state
+from .test_smart_charge import MODE, later, setup, state
 
 
 def restore(hass, states: list[State], numbers: dict[str, float] | None = None):
@@ -56,14 +56,15 @@ async def test_charge_now_survives_while_plugged_in(hass: HomeAssistant, request
     assert not calls["switch.turn_off"]
 
 
-async def test_unplugged_while_down_ends_charge_now(hass: HomeAssistant, request):
+async def test_unplugged_while_down_ends_charge_now(hass: HomeAssistant, request, freezer):
     restore(hass, [State("select.bil_charge_mode", "now",
                          {"mode_before_now": "fixed", "now_seen_connected": True})])
     await setup(hass, request, charger_state="disconnected")
+    await later(hass, freezer)
     assert state(hass, "select.bil_charge_mode") == "smart", "a temporary plan that has run returns to the cheapest"
 
 
-async def test_charge_now_set_before_plugging_in_waits_for_the_car(hass: HomeAssistant, request):
+async def test_charge_now_set_before_plugging_in_waits_for_the_car(hass: HomeAssistant, request, freezer):
     restore(hass, [State("select.bil_charge_mode", "now",
                          {"mode_before_now": "smart", "now_seen_connected": False})])
     await setup(hass, request, charger_state="disconnected")
@@ -72,6 +73,7 @@ async def test_charge_now_set_before_plugging_in_waits_for_the_car(hass: HomeAss
     await hass.async_block_till_done()
     hass.states.async_set(MODE, "disconnected")
     await hass.async_block_till_done()
+    await later(hass, freezer)
     assert state(hass, "select.bil_charge_mode") == "smart"
 
 
@@ -126,3 +128,12 @@ async def test_open_phone_question_survives(hass: HomeAssistant, request):
     assert state(hass, "switch.bil_confirm_plan_on_phone") == "on"
     assert state(hass, "sensor.bil_charge_status") == "awaiting_confirmation"
     assert not calls["button.press"]
+
+
+
+async def test_last_battery_level_survives_a_restart(hass: HomeAssistant, request, freezer):
+    restore(hass, [State("select.bil_charge_mode", "smart", {"last_soc": 64})])
+    await setup(hass, request, charger_state="connected_finished", soc="unavailable")
+    await later(hass, freezer, 11)
+    assert hass.data["evledger"][next(iter(hass.data["evledger"]))].smart.last_soc == 64
+    assert hass.states.get("sensor.bil_charge_status").attributes["battery_level_assumed"] is True

@@ -92,7 +92,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         charger_providers=charger_providers,
         store=store,
     )
-    await coordinator.async_config_entry_first_refresh()
+    # A failing first ledger update (e.g. the car's cloud is down right after a restart) must not hold
+    # back the charger control; the ledger sensors catch up on the next update.
+    await coordinator.async_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 

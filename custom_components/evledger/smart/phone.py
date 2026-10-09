@@ -147,6 +147,17 @@ class PhoneNotifier:
         for service in self.recipients():
             await self._call(service, data)
 
+    async def async_send_alert(self, text: str) -> None:
+        """Something stands in the way of the plan; the same tag replaces the plan message."""
+        data = {
+            "title": f"{self.entry.title}: opladning",
+            "message": text,
+            "data": {**self._tap(), "tag": self.tag,
+                     "actions": [{"action": f"{self.prefix}NOW", "title": "Lad nu"}]},
+        }
+        for service in self.recipients():
+            await self._call(service, data)
+
     async def async_send_plan(self, planner: ChargePlanner) -> None:
         data = {
             "title": f"{self.entry.title} er sat til opladning",
