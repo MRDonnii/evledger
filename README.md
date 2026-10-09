@@ -5,7 +5,8 @@
 <h1 align="center">EV Ledger</h1>
 
 <p align="center">
-  Track every trip and every charge — home or public — as one unified cost ledger in Home Assistant.
+  Track every trip and every charge — home or public — as one unified cost ledger in Home Assistant,
+  and (optionally) let it charge the car in the cheapest hours before you leave.
 </p>
 
 <p align="center">
@@ -38,9 +39,16 @@ their raw entity states into a proper **trip and charging ledger**:
 - **Efficiency vs. rated consumption** — real-world Wh/km, bucketed by outside
   temperature (cold/mild/warm) at trip time, compared against your vehicle's
   official WLTP-rated consumption. See "Efficiency comparison" below.
+- **Smart charging (optional, off by default)** — charge plans (cheapest before
+  departure, fixed time, price cap, charge now, pause, manual) with a default
+  plan, a temporary trip with an address, start/stop of the charger (Zaptec or
+  any switch), plan messages and questions on your phones, and a plan that keeps
+  being followed through charger reboots and Home Assistant restarts. See
+  "Smart charging" below.
 
 EV Ledger never talks to a vehicle or charger vendor's API directly — it only
-reads entities that another integration already created. That's deliberate:
+reads (and, with smart charging, operates) entities that another integration
+already created. That's deliberate:
 it means EV Ledger has **zero extra dependencies**, works with whatever
 combination of integrations you already run, and can't get you rate-limited
 or logged out anywhere.
@@ -54,6 +62,7 @@ or logged out anywhere.
 | Charger (actual cost) | [Monta](https://github.com/erlendsellie/monta_ha) | actual cost of the last completed session |
 | Charger (estimated cost) | Any electricity-price sensor (Nordpool, Energi Data Service, Strømligning, ...) | kWh × current price — used when Monta isn't configured or isn't fresh enough |
 | Charger (anywhere) | Manual entry | one service call: kWh + price + location |
+| Charger (control) | Zaptec, or any switch that starts/stops charging | smart charging starts and stops the charger |
 
 More vehicle and charger providers are meant to be added over time — the
 provider interface (`custom_components/evledger/providers/`) is intentionally
@@ -254,16 +263,19 @@ New entities on the car's device:
 |---|---|
 | `select.<car>_charge_mode` | Cheapest before departure, Fixed time, Charge now, Price cap, Pause, Manual. A plugged-in car runs the default plan; any other plan returns to it when the car is unplugged. |
 | `select.<car>_default_plan` | The default plan: Cheapest before departure (out of the box), Fixed time, Price cap, Charge now or Manual. When it changes, a plan that was running as the old default follows; a temporary plan is kept until it has run. |
-| `number.<car>_target_soc`, `time.<car>_ready_by` | Target and ready-by time for the cheapest plan. |
-| `time.<car>_fixed_charging_start/end`, `number.<car>_price_cap`, `number.<car>_minimum_soc` | Fixed time charges in the cheapest quarters inside the window and is done by its end; Price cap charges only below the cap (and always up to the minimum). |
+| `number.<car>_target_soc`, `time.<car>_ready_by` | Target and ready-by time for the cheapest plan and the price cap. The target is never higher than the charge limit set in the car (Tesla Custom, Tesla Fleet, Teslemetry, Tessie). |
+| `time.<car>_fixed_charging_start/end` | Fixed time charges in the cheapest quarters inside the window and is done by its end. |
+| `number.<car>_price_cap`, `number.<car>_minimum_soc`, `switch.<car>_exceed_price_cap` | Price cap charges below the cap (and always up to the minimum). When that cannot reach the target by the ready-by time, the phones are asked first (**Approve** / **Stop above the cap**, with the level the cap reaches, the energy above it, the highest price and the extra cost); without an answer it charges on to the target. The switch shows and changes the answer; it is on again at the next plug-in. |
 | `datetime.<car>_temporary_departure`, `text.<car>_trip_destination`, `switch.<car>_round_trip` | Temporary plan: departure and destination (address, `lat,lon` or `zone.*`); the road distance comes from OpenStreetMap and the plan charges for the trip plus margin and reserve. |
-| `switch.<car>_confirm_plan_on_phone`, `button.<car>_confirm_plan` | When on, a plugged-in car waits for an answer on the phones (Confirm / Charge now / Pause); without an answer the plan runs after 60 minutes. |
+| `switch.<car>_confirm_plan_on_phone`, `button.<car>_confirm_plan` | When on, a plugged-in car waits for an answer on the phones (Confirm / Charge now / Pause); without an answer the plan runs after 60 minutes. Confirm keeps the plan that waits (e.g. the default plan). |
+| `switch.<car>_notify_plan_on_phone`, `button.<car>_send_plan_to_phone` | Phone messages: the active plan with time, price and Charge now / Pause when the car is plugged in or the plan changes; a warning once when the target cannot be reached in time (plugged in late, fixed window too short, a trip above the car's charge limit). |
 | `sensor.<car>_charge_status`, `..._next_charge_start/end`, `..._planned_charge_cost/energy` | The plan. `planned_charge_cost` has an `alternatives` attribute with the price of every plan. |
 | `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
 
 Prices without a published value yet (e.g. tomorrow's before 13:00) are estimated from the same
 time on earlier days. A start waits until the plan has wanted charging for 15 s; a stop the
-charger did not act on is repeated after 45 s. Settings, the chosen plan, a temporary plan and an
+charger did not act on is repeated after 45 s. A car that stops at its own charge limit is done:
+it is neither started again nor reported as stopped from outside. Settings, the chosen plan, a temporary plan and an
 open phone question all survive a restart. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)
 shows and controls all of it with `smart_charge: select.<car>_charge_mode`.

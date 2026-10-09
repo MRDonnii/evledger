@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import mock_restore_cache_with_extra_data
 
-from .test_smart_charge import MODE, later, setup, state
+from .test_smart_charge import MODE, later, phones, setup, state, with_phone
 
 
 def restore(hass, states: list[State], numbers: dict[str, float] | None = None):
@@ -153,3 +153,15 @@ async def test_last_battery_level_survives_a_restart(hass: HomeAssistant, reques
 async def test_unknown_battery_is_not_shown_as_target_reached(hass: HomeAssistant, request):
     await setup(hass, request, charger_state="connected_finished", soc="unavailable")
     assert state(hass, "sensor.bil_charge_status") == "unknown"
+
+
+async def test_price_cap_question_is_not_asked_again_after_a_restart(hass: HomeAssistant, request, freezer):
+    ready = (dt_util.now() + timedelta(hours=8)).strftime("%H:%M:00")
+    restore(hass, [State("select.bil_charge_mode", "price_cap", {"warned": ["cap"]}),
+                   State("time.bil_ready_by", ready)])
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, cheap_now=False)
+    await with_phone(hass, entry)
+    await later(hass, freezer, 5)
+    assert hass.states.get("switch.bil_exceed_price_cap").attributes["over_cap_kwh"] > 0
+    assert not [data for _, data in sent if "prisloftet" in data.get("title", "")]

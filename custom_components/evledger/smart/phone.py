@@ -21,7 +21,7 @@ from .const import (
     DEFAULT_NOTIFY_ICON,
     NOTIFY_COLOR,
 )
-from .plan import MODE_FIXED, MODE_NOW, MODE_OFF, MODE_PRICE_CAP, MODE_SMART
+from .plan import MODE_FIXED, MODE_MANUAL, MODE_NOW, MODE_OFF, MODE_PRICE_CAP, MODE_SMART, fixed_window
 
 if TYPE_CHECKING:
     from .planner import ChargePlanner
@@ -29,7 +29,9 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 ACTION_EVENT = "mobile_app_notification_action"
-ANSWERS = {"CONFIRM": MODE_SMART, "NOW": MODE_NOW, "OFF": MODE_OFF}
+ANSWERS = {"NOW": MODE_NOW, "OFF": MODE_OFF}
+NAMES = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft",
+         MODE_MANUAL: "Manuel"}
 
 
 def tracker_for(service: str) -> str:
@@ -69,8 +71,15 @@ class PhoneNotifier:
         @callback
         def on_action(event: Event) -> None:
             action = str(event.data.get("action", ""))
-            if action.startswith(self.prefix) and (mode := ANSWERS.get(action.removeprefix(self.prefix))):
-                _LOGGER.debug("Phone answered %s", mode)
+            if not action.startswith(self.prefix):
+                return
+            answer = action.removeprefix(self.prefix)
+            _LOGGER.debug("Phone answered %s", answer)
+            if answer == "CONFIRM":
+                planner.async_answer(planner.mode)  # the plan that waits for the answer, e.g. the default plan
+            elif answer in ("CAP_OK", "CAP_STOP"):
+                planner.async_set_cap_override(answer == "CAP_OK")
+            elif mode := ANSWERS.get(answer):
                 planner.async_answer(mode)
 
         return self.hass.bus.async_listen(ACTION_EVENT, on_action)
@@ -92,10 +101,9 @@ class PhoneNotifier:
             day = {0: "", 1: "i morgen "}.get(days, local.strftime("%d.%m. "))
             return f"{day}{local.strftime('%H:%M')}"
 
-        names = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft"}
         if planner.mode == MODE_OFF:
             return "Plan: Pause\nBilen lades ikke."
-        lines = [f"Plan: {names.get(planner.mode, planner.mode)}"]
+        lines = [f"Plan: {NAMES.get(planner.mode, planner.mode)}"]
         if not schedule.blocks:
             lines.append("Batteriet er allerede ladet til målet.")
             return "\n".join(lines)
@@ -117,9 +125,47 @@ class PhoneNotifier:
         if schedule.target_soc is not None:
             energy += f" · mål {schedule.target_soc:.0f} %"
         lines.append(energy)
-        if planner.deadline and planner.mode == MODE_SMART:
+        if planner.deadline and planner.mode in (MODE_SMART, MODE_PRICE_CAP):
             lines.append(f"Klar senest: {when(planner.deadline)}")
         return "\n".join(lines)
+
+    def money(self, planner: ChargePlanner, value: float, per_kwh: bool = False) -> str:
+        unit = planner.price_unit or "kr"
+        return f"{value:.2f} {unit}{'/kWh' if per_kwh else ''}".replace(".", ",")
+
+    @staticmethod
+    def when(value) -> str:
+        local = dt_util.as_local(value)
+        days = (local.date() - dt_util.now().date()).days
+        day = {0: "kl. ", 1: "i morgen kl. "}.get(days, local.strftime("%d.%m. kl. "))
+        return f"{day}{local.strftime('%H:%M')}"
+
+    def cap_text(self, planner: ChargePlanner, now) -> str:
+        """The price cap cannot reach the target in time: what the cap reaches, and what exceeding it costs."""
+        schedule = planner.schedule
+        goal = planner.goal_time(now)
+        by = f" {self.when(goal)}" if goal else ""
+        lines = [
+            f"Under prisloftet ({self.money(planner, planner.settings['price_cap'], True)}) når bilen ca. "
+            f"{schedule.cap_soc or 0:.0f} %{' inden' + by if by else ''}.",
+            f"For at nå {schedule.target_soc or planner.target:.0f} % skal der lades "
+            f"{schedule.over_cap_kwh:.1f} kWh over loftet".replace(".", ",")
+            + (f", til op til {self.money(planner, schedule.over_cap_max_price, True)}"
+               if schedule.over_cap_max_price is not None else "")
+            + f" (ca. {self.money(planner, schedule.over_cap_extra)} ekstra).",
+            "Uden svar lader den videre til målet.",
+        ]
+        return "\n".join(lines)
+
+    def short_text(self, planner: ChargePlanner, now, reach: float, target: float) -> str:
+        """The plan cannot reach its target in time (plugged in late, fixed window too short)."""
+        if planner.mode == MODE_FIXED:
+            begin, end = fixed_window(now, planner.times["fixed_start"], planner.times["fixed_end"])
+            return (f"Fast tid {dt_util.as_local(begin).strftime('%H:%M')}–{dt_util.as_local(end).strftime('%H:%M')} "
+                    f"er for kort: bilen når ca. {reach:.0f} % af målet {target:.0f} %.")
+        goal = planner.goal_time(now)
+        return (f"Bilen når ca. {reach:.0f} % af målet {target:.0f} %{' ' + self.when(goal) if goal else ''}. "
+                "Planen lader så meget, den kan.")
 
     def _tap(self) -> dict:
         """Open a dashboard page when the notification itself is tapped (iOS: url, Android: clickAction),
@@ -158,6 +204,21 @@ class PhoneNotifier:
         for service in self.recipients():
             await self._call(service, data)
 
+    async def async_send_warning(self, kind: str, text: str) -> None:
+        """A warning under its own tag, so it does not replace the plan message. The price cap question
+        has Approve / Stop above the cap; the others Charge now."""
+        if kind == "cap":
+            title = f"{self.entry.title}: prisloftet rækker ikke"
+            actions = [{"action": f"{self.prefix}CAP_OK", "title": "Godkend"},
+                       {"action": f"{self.prefix}CAP_STOP", "title": "Stop over loftet"}]
+        else:
+            title = f"{self.entry.title}: når ikke målet"
+            actions = [{"action": f"{self.prefix}NOW", "title": "Lad nu"}] if kind == "short" else []
+        data = {"title": title, "message": text,
+                "data": {**self._tap(), "tag": f"{self.tag}_{kind}", "actions": actions}}
+        for service in self.recipients():
+            await self._call(service, data)
+
     async def async_send_plan(self, planner: ChargePlanner) -> None:
         data = {
             "title": f"{self.entry.title} er sat til opladning",
@@ -166,7 +227,7 @@ class PhoneNotifier:
                 **self._tap(),
                 "tag": self.tag,
                 "actions": [
-                    {"action": f"{self.prefix}CONFIRM", "title": "Bekræft billigst"},
+                    {"action": f"{self.prefix}CONFIRM", "title": f"Bekræft {NAMES.get(planner.mode, 'plan').lower()}"},
                     {"action": f"{self.prefix}NOW", "title": "Lad nu"},
                     {"action": f"{self.prefix}OFF", "title": "Pause"},
                 ],

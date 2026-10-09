@@ -222,6 +222,98 @@ async def test_default_plan_is_used_and_returned_to(hass: HomeAssistant, request
         await choose("select.bil_default_plan", "off")
 
 
+def car_with_limit(hass, limit: float) -> None:
+    """The car's battery sensor and charge limit on one device, like Tesla Custom makes them."""
+    tesla = MockConfigEntry(domain="tesla_custom")
+    tesla.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(config_entry_id=tesla.entry_id,
+                                                    identifiers={("tesla_custom", "vin")})
+    registry = er.async_get(hass)
+    for domain, unique, object_id in (("sensor", "vin_battery", "car_battery"),
+                                      ("number", "vin_charge_limit", "car_charge_limit")):
+        registry.async_get_or_create(domain, "tesla_custom", unique, device_id=device.id, config_entry=tesla,
+                                     suggested_object_id=object_id)
+    hass.states.async_set("number.car_charge_limit", str(limit), {"unit_of_measurement": "%"})
+
+
+def phones(hass) -> list:
+    sent = []
+
+    async def fake_notify(call):
+        sent.append((call.service, dict(call.data)))
+
+    hass.services.async_register("notify", "mobile_app_a", fake_notify)
+    return sent
+
+
+async def with_phone(hass, entry):
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "smart_charge": {
+        **entry.data["smart_charge"], "notify_services": ["mobile_app_a"]}})
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_car_limit_caps_the_plan_target(hass: HomeAssistant, request):
+    car_with_limit(hass, 70)
+    await setup(hass, request, cheap_now=False)
+    assert float(state(hass, "sensor.bil_plan_target_soc")) == 70
+    assert hass.states.get("select.bil_charge_mode").attributes["car_limit"] == 70
+
+
+async def test_full_car_is_done_not_stopped_from_outside(hass: HomeAssistant, request, freezer):
+    sent = phones(hass)
+    car_with_limit(hass, 80)
+    entry, calls = await setup(hass, request, charger_state="connected_charging", soc="78")
+    await with_phone(hass, entry)
+    await hass.services.async_call("select", "select_option",
+                                   {"entity_id": "select.bil_charge_mode", "option": "now"}, blocking=True)
+    # The car reaches its own limit and stops drawing power.
+    hass.states.async_set("sensor.car_battery", "80", {"unit_of_measurement": "%"})
+    hass.states.async_set(MODE, "connected_finished")
+    hass.states.async_set(SWITCH, "off")
+    await hass.async_block_till_done()
+    for _ in range(4):
+        await later(hass, freezer, 10)
+    assert not calls["switch.turn_on"], "a full car is not started again"
+    assert state(hass, "sensor.bil_charge_status") == "done"
+    assert not [data for _, data in sent if "stoppet" in data.get("message", "")]
+
+
+async def test_price_cap_asks_before_exceeding_it(hass: HomeAssistant, request, freezer):
+    sent = phones(hass)
+    entry, calls = await setup(hass, request, cheap_now=False)
+    await with_phone(hass, entry)
+    ready = (dt_util.now() + timedelta(hours=8)).strftime("%H:%M:00")
+    await hass.services.async_call("time", "set_value", {"entity_id": "time.bil_ready_by", "time": ready},
+                                   blocking=True)
+    await hass.services.async_call("select", "select_option",
+                                   {"entity_id": "select.bil_charge_mode", "option": "price_cap"}, blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    cap = [data for _, data in sent if "prisloftet" in data.get("title", "")]
+    assert len(cap) == 1
+    # 20 kWh to 80 %: 11 kWh in the 0.5 kr hour, 9 kWh above the 1.5 kr cap at 3 kr
+    text = cap[0]["message"]
+    assert "66 %" in text and "9,0 kWh over loftet" in text and "3,00 kr/kWh" in text and "13,50 kr ekstra" in text
+    assert [action["title"] for action in cap[0]["data"]["actions"]] == ["Godkend", "Stop over loftet"]
+    switch = hass.states.get("switch.bil_exceed_price_cap")
+    assert switch.state == "on", "without an answer the plan goes on above the cap"
+    assert switch.attributes["over_cap_kwh"] == 9.0
+    await later(hass, freezer, 5)
+    assert len([1 for _, data in sent if "prisloftet" in data.get("title", "")]) == 1, "asked once"
+    stop = cap[0]["data"]["actions"][1]["action"]
+    hass.bus.async_fire("mobile_app_notification_action", {"action": stop})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert state(hass, "switch.bil_exceed_price_cap") == "off"
+    assert hass.states.get("switch.bil_exceed_price_cap").attributes["over_cap_kwh"] == 0
+
+
+async def test_confirm_keeps_the_default_plan(hass: HomeAssistant, request):
+    await setup(hass, request, cheap_now=False)
+    await hass.services.async_call("select", "select_option",
+                                   {"entity_id": "select.bil_default_plan", "option": "fixed"}, blocking=True)
+    await hass.services.async_call("button", "press", {"entity_id": "button.bil_confirm_plan"}, blocking=True)
+    assert state(hass, "select.bil_charge_mode") == "fixed"
+
+
 async def test_confirm_on_phone(hass: HomeAssistant, request, freezer):
     sent = []
 
@@ -326,7 +418,6 @@ async def test_charger_reboot_keeps_the_plan_and_sends_no_new_message(hass: Home
 
 
 async def test_charger_offline_and_back_resumes_the_plan(hass: HomeAssistant, request, freezer):
-    freezer.move_to(dt_util.now().replace(minute=0, second=5))  # the cheap hour lasts the whole test
     _, calls = await setup(hass, request, charger_state="connected_charging", cheap_now=True)
     hass.states.async_set(MODE, "unavailable")
     await hass.async_block_till_done()
@@ -340,7 +431,6 @@ async def test_charger_offline_and_back_resumes_the_plan(hass: HomeAssistant, re
 
 
 async def test_command_errors_are_retried_without_end(hass: HomeAssistant, request, freezer):
-    freezer.move_to(dt_util.now().replace(minute=0, second=5))  # the cheap hour lasts the whole test
     _, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=True)
     for _ in range(6):  # the charger never reacts
         await later(hass, freezer, 4)

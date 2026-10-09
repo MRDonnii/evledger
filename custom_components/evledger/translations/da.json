@@ -266,6 +266,9 @@
       },
       "notify_plan": {
         "name": "Besked om ladeplan på mobil"
+      },
+      "price_cap_override": {
+        "name": "Overskrid prisloftet ved behov"
       }
     },
     "button": {

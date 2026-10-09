@@ -23,7 +23,8 @@ def schedule(mode="smart", soc=50.0, target=80.0, now=NIGHT, known=None, horizon
         mode=mode, soc=soc, target_soc=target, capacity_kwh=kw.get("capacity", 60), efficiency=1.0,
         power_kw=kw.get("power", 12), price_factor=kw.get("factor", 1.0),
         timeline=plan.build_timeline(now, known, horizon), constraints=tuple(kw.get("constraints", ())),
-        window=kw.get("window"), price_cap=kw.get("price_cap"), min_soc=kw.get("min_soc"))
+        window=kw.get("window"), price_cap=kw.get("price_cap"), min_soc=kw.get("min_soc"),
+        cap_override=kw.get("cap_override", True))
     return plan.build_schedule(data, now)
 
 
@@ -84,6 +85,32 @@ def test_price_cap_only_uses_known_cheap_slots():
     result = schedule(mode="price_cap", price_cap=0.55)
     assert [(b.start.hour, b.end.hour) for b in result.blocks] == [(1, 2)]
     assert result.energy_kwh == 12.0  # not enough cheap power for the whole target
+
+
+def test_price_cap_is_exceeded_only_to_reach_the_target_in_time():
+    # 18 kWh to 80 %; below the cap only the 01-02 hour (12 kWh) lies before the ready-by time
+    result = schedule(mode="price_cap", price_cap=0.55, constraints=[deadline(10)])
+    assert result.energy_kwh == 18.0
+    assert result.over_cap_kwh == 6.0
+    assert result.over_cap_max_price == 0.6  # the next cheapest hour, 02-03
+    assert result.over_cap_extra == 0.3
+    assert result.cap_soc == 70.0  # 50 % + 12 kWh of 60
+    strict = schedule(mode="price_cap", price_cap=0.55, constraints=[deadline(10)], cap_override=False)
+    assert strict.energy_kwh == 12.0
+    assert strict.over_cap_kwh == 0
+    assert strict.shortfall_kwh == 6.0
+
+
+def test_price_cap_minimum_is_not_counted_as_over_the_cap():
+    result = schedule(mode="price_cap", soc=10, price_cap=0.55, min_soc=20)
+    assert result.over_cap_kwh == 0
+
+
+def test_fixed_window_too_short_reports_the_shortfall():
+    window = plan.fixed_window(NIGHT, time(23, 0), time(0, 0))  # one hour: 12 of the 18 kWh
+    result = schedule(mode="fixed", window=window)
+    assert result.energy_kwh == 12.0
+    assert result.shortfall_kwh == 6.0
 
 
 def test_price_cap_charges_to_minimum_right_away():

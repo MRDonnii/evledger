@@ -86,6 +86,9 @@ from .plan import (
 _LOGGER = logging.getLogger(__name__)
 
 PLUGGED_STATES = (STATE_ON, "true", "plugged", "connected", "plugged_in")
+# The car's own charge limit (a number on the car's device): Tesla Custom "_charge_limit", Tesla Fleet,
+# Teslemetry and Tessie "charge_state_charge_limit_soc".
+CHARGE_LIMIT_SUFFIXES = ("_charge_limit", "charge_limit_soc")
 HOLD_MODES = (MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)
 LOOKUP_RETRY = timedelta(minutes=5)
 
@@ -141,6 +144,11 @@ class ChargePlanner:
         self.awaiting_since: datetime | None = None
         # Tell the phones which plan is active (when the car is plugged in or the plan changes).
         self.info_enabled = True
+        # Price cap: slots above the cap may be used to reach the target in time (until the phone says no).
+        self.cap_override = True
+        # Warnings already sent for this plug-in and these settings (target out of reach, price cap).
+        self.warned: set[str] = set()
+        self._limit_id: str | None = None
         self.trip = TripState()
         self.result = PlanResult(None, None, None, None, None, None)
         self.schedule = Schedule()
@@ -289,11 +297,15 @@ class ChargePlanner:
 
     @callback
     def async_set_setting(self, key: str, value: float) -> None:
+        if self.settings.get(key) != value:
+            self._rewarn()
         self.settings[key] = value
         self.async_recalculate()
 
     @callback
     def async_set_time(self, key: str, value: time) -> None:
+        if self.times.get(key) != value:
+            self._rewarn()
         self.times[key] = value
         self.async_recalculate()
 
@@ -308,6 +320,8 @@ class ChargePlanner:
                 self.mode_before_now = self.mode
             self.now_seen_connected = False
             self.awaiting_since = None  # choosing a plan answers a pending confirmation
+            self.cap_override = True
+            self.warned.clear()
             if self.info_enabled and self.notify.targets and self.charger_state in CONNECTED and self.car_present:
                 self._info_pending = True
         self.mode = mode
@@ -327,13 +341,27 @@ class ChargePlanner:
         else:
             self.async_recalculate()
 
+    def _rewarn(self) -> None:
+        """New settings: warn again if they cannot be met either (not while restoring after a restart)."""
+        if self._started_at is not None:
+            self.warned.clear()
+
+    @callback
+    def async_set_cap_override(self, value: bool) -> None:
+        """Allow (or not) charging above the price cap to reach the target in time."""
+        self.cap_override = value
+        self.warned.add("cap")  # answered: not asked again for this plug-in
+        self.async_recalculate()
+
     @callback
     def async_set_trip_departure(self, value: datetime | None) -> None:
+        self._rewarn()
         self.trip.departure = value
         self.async_recalculate()
 
     @callback
     def async_set_trip_round_trip(self, value: bool) -> None:
+        self._rewarn()
         self.trip.round_trip = value
         self.async_recalculate()
 
@@ -464,14 +492,57 @@ class ChargePlanner:
             return False
         return state.state.lower() in PLUGGED_STATES or state.state in ("unknown", "unavailable")
 
+    def _limit_entity(self) -> str | None:
+        """The car's charge limit entity on the battery sensor's device, found once (again after a plug-in)."""
+        if self._limit_id is None:
+            self._limit_id = ""
+            registry = er.async_get(self.hass)
+            battery = registry.async_get(self.battery_entity)
+            if battery is not None and battery.device_id is not None:
+                for other in er.async_entries_for_device(registry, battery.device_id):
+                    if (other.domain == "number" and not other.disabled_by
+                            and other.unique_id.endswith(CHARGE_LIMIT_SUFFIXES)):
+                        self._limit_id = other.entity_id
+                        break
+        return self._limit_id or None
+
+    def car_limit(self) -> float | None:
+        """The charge limit set in the car: it stops there whatever the plan says."""
+        if not (entity_id := self._limit_entity()) or (state := self.hass.states.get(entity_id)) is None:
+            return None
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            return None
+        return value if 50 <= value <= 100 else None
+
+    @property
+    def target(self) -> float:
+        """The daily target, no higher than the car's own charge limit."""
+        limit = self.car_limit()
+        return min(self.settings["target_soc"], limit) if limit else self.settings["target_soc"]
+
+    @property
+    def car_full(self) -> bool:
+        """The car has reached its own charge limit (or 100 %): it will not take more, so a charger that
+        stopped is done, not stopped by someone."""
+        soc = self._battery_soc()
+        if soc is None:
+            return False
+        limit = self.car_limit()
+        return soc >= 99.5 or (limit is not None and soc >= limit - 1)
+
     def constraints(self, now: datetime, mode: str | None = None) -> tuple[Constraint, ...]:
-        target = self.settings["target_soc"]
+        target = self.target
         result = []
-        if (mode or self.mode) in (MODE_SMART, MODE_MANUAL):
+        # The price cap is ready by the same time: above the cap only what is needed for that (and only
+        # while the phones have not said no).
+        if (mode or self.mode) in (MODE_SMART, MODE_MANUAL, MODE_PRICE_CAP):
             result.append(Constraint(self.deadline, target))
         if self.trip_active and self.trip.departure > now:
             trip_target = self.trip_target_soc
-            result.append(Constraint(self.trip.departure, min(max(target, trip_target or 0.0), 100.0)))
+            limit = self.car_limit() or 100.0
+            result.append(Constraint(self.trip.departure, min(max(target, trip_target or 0.0), limit)))
         return tuple(result)
 
     @callback
@@ -531,7 +602,7 @@ class ChargePlanner:
             self.soc_assumed = True
         self.result = calculate(PlanInput(
             soc=soc,
-            target_soc=self.settings["target_soc"],
+            target_soc=self.target,
             capacity_kwh=self.capacity,
             efficiency=self.settings["efficiency"],
             power_kw=self.settings["charge_power_kw"],
@@ -549,7 +620,7 @@ class ChargePlanner:
             return build_schedule(ScheduleInput(
                 mode=mode,
                 soc=soc,
-                target_soc=self.settings["target_soc"],
+                target_soc=self.target,
                 capacity_kwh=self.capacity,
                 efficiency=self.settings["efficiency"],
                 power_kw=self.settings["charge_power_kw"],
@@ -559,6 +630,7 @@ class ChargePlanner:
                 window=window if mode == MODE_FIXED else None,
                 price_cap=self.settings["price_cap"],
                 min_soc=self.settings["min_soc"],
+                cap_override=self.cap_override,
             ), now)
 
         self.schedule = plan_for(self.mode)
@@ -567,6 +639,7 @@ class ChargePlanner:
                              for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)}
 
         self._control(now)
+        self._warn(now)
         if self._info_pending and not self._notify_pending:
             self._info_pending = False
             self.entry.async_create_background_task(
@@ -595,6 +668,9 @@ class ChargePlanner:
             self._hold_until = None
         elif event == ChargerEvent.PLUGGED and new_plug:
             self._alerted.clear()
+            self.warned.clear()
+            self.cap_override = True
+            self._limit_id = None
             self._new_plug = True
             self._refresh_car()
         if not new_plug and event == ChargerEvent.PLUGGED:
@@ -616,6 +692,9 @@ class ChargePlanner:
     def desired(self, now: datetime) -> bool:
         """Should the car charge right now according to the plan."""
         if self.mode in (MODE_OFF, MODE_MANUAL) or self.awaiting_since:
+            return False
+        if self.car_full and self.charger_state != ChargerState.CHARGING:
+            # Full to the car's own limit: starting again would only be refused (and look like a fault).
             return False
         if self.schedule.charge_now:
             if self.charger_state == ChargerState.CHARGING and self.mode in HOLD_MODES:
@@ -693,6 +772,48 @@ class ChargePlanner:
             self.entry.async_create_background_task(
                 self.hass, self.notify.async_send_alert(text), "ev_smart_charge_notify_alert")
 
+    def goal_time(self, now: datetime) -> datetime | None:
+        """When the target has to be reached: the ready-by time, or an earlier temporary departure."""
+        times = [self.deadline] if self.deadline else []
+        if self.trip_active and self.trip.departure > now:
+            times.append(self.trip.departure)
+        return min(times) if times else None
+
+    def _soc_after(self, kwh: float, soc: float) -> float:
+        return min(soc + kwh * self.settings["efficiency"] / self.capacity * 100, 100.0)
+
+    @callback
+    def _warn(self, now: datetime) -> None:
+        """Tell the phones once (per plug-in and settings) when the plan cannot reach its target in time,
+        and ask before the price cap is exceeded to reach it. Without an answer the plan goes on."""
+        if not (self.backend and self.charger_state in CONNECTED and self.car_present
+                and self.info_enabled and self.notify.targets) or self.awaiting_since:
+            return
+        soc = self._battery_soc()
+        if soc is None or not self.slot_count:
+            return  # judged on real values only
+        if self._started_at and (dt_util.utcnow() - self._started_at).total_seconds() < STARTUP_GRACE_SECONDS:
+            return
+        schedule = self.schedule
+        target = schedule.target_soc or self.target
+        found: dict[str, str] = {}
+        if self.mode == MODE_PRICE_CAP and self.cap_override and schedule.over_cap_kwh >= 0.5:
+            found["cap"] = self.notify.cap_text(self, now)
+        elif self.mode in (MODE_SMART, MODE_FIXED) and schedule.shortfall_kwh >= 0.5:
+            reach = max(target - schedule.shortfall_kwh * self.settings["efficiency"] / self.capacity * 100, soc)
+            found["short"] = self.notify.short_text(self, now, reach, target)
+        limit = self.car_limit()
+        need = self.trip_target_soc if self.trip_active else None
+        if limit is not None and need is not None and need > limit + 0.5:
+            found["limit"] = (f"Turen kræver {min(need, 100):.0f} %, men bilens ladegrænse er {limit:.0f} %. "
+                              "Hæv grænsen i bilens app, så lader planen nok.")
+        for key, text in found.items():
+            if key in self.warned:
+                continue
+            self.warned.add(key)
+            self.entry.async_create_background_task(
+                self.hass, self.notify.async_send_warning(key, text), f"ev_smart_charge_warn_{key}")
+
     def _status(self, state: ChargerState, desired: bool) -> str:
         if self.mode == MODE_MANUAL:
             return STATUS_MANUAL
@@ -716,6 +837,6 @@ class ChargePlanner:
             return STATUS_STARTING
         if self._battery_soc() is None and not self.soc_assumed:
             return STATUS_UNKNOWN  # not "target reached" just because the car has not reported yet
-        if self.schedule.energy_kwh <= 0 and self.mode != MODE_NOW:
+        if (self.schedule.energy_kwh <= 0 and self.mode != MODE_NOW) or self.car_full:
             return STATUS_DONE
         return STATUS_WAITING

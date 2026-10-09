@@ -1,4 +1,5 @@
-"""Switches: round trip for the temporary trip, and confirming new plans on the phone."""
+"""Switches: round trip for the temporary trip, confirming new plans on the phone, plan messages and
+exceeding the price cap to reach the target."""
 
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ from .entity import EvSmartChargeListenerEntity
 def build(planner) -> list:
     return list([TripRoundTrip(planner, "trip_round_trip"),
                         ConfirmOnPhone(planner, "confirm_on_phone"),
-                        NotifyPlan(planner, "notify_plan")])
+                        NotifyPlan(planner, "notify_plan"),
+                        ExceedPriceCap(planner, "price_cap_override")])
 
 
 class TripRoundTrip(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -89,3 +91,37 @@ class NotifyPlan(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.planner.async_set_info(False)
+
+
+class ExceedPriceCap(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
+    """Price cap: when the slots below the cap cannot reach the target by the ready-by time, the plan also
+    charges above it (the phones are asked first; without an answer it goes on). Off keeps to the cap for
+    this plug-in; plugging in again turns it back on."""
+
+    _attr_icon = "mdi:cash-lock-open"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in ("on", "off"):
+            self.planner.cap_override = last.state == "on"
+
+    @property
+    def is_on(self) -> bool:
+        return self.planner.cap_override
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        schedule = self.planner.schedule
+        return {
+            "over_cap_kwh": schedule.over_cap_kwh,
+            "over_cap_max_price": schedule.over_cap_max_price,
+            "over_cap_extra": schedule.over_cap_extra,
+            "cap_soc": round(schedule.cap_soc, 1) if schedule.cap_soc is not None else None,
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.planner.async_set_cap_override(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.planner.async_set_cap_override(False)

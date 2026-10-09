@@ -207,6 +207,8 @@ class ScheduleInput:
     window: tuple[datetime, datetime] | None = None
     price_cap: float | None = None
     min_soc: float | None = None
+    # Price cap: may slots above the cap be used when the slots below it cannot reach the target in time?
+    cap_override: bool = True
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,12 @@ class Schedule:
     estimated: bool = False
     target_soc: float | None = None
     shortfall_kwh: float = 0.0
+    # Price cap: the energy planned above the cap to reach the target in time, the highest price paid
+    # for it, what it costs more than at the cap, and the battery level the slots below the cap reach.
+    over_cap_kwh: float = 0.0
+    over_cap_max_price: float | None = None
+    over_cap_extra: float = 0.0
+    cap_soc: float | None = None
 
     def next_block(self, now: datetime) -> ChargeBlock | None:
         return next((block for block in self.blocks if block.end > now), None)
@@ -334,6 +342,12 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         return (round(slot.price, 6), -slot.start.timestamp())
 
     need = 0.0
+    shortfall = 0.0
+    capped = data.mode == MODE_PRICE_CAP and data.price_cap is not None
+
+    def under_cap(slot: TimelineSlot) -> bool:
+        return not slot.estimated and slot.price * data.price_factor <= data.price_cap + 1e-9
+
     if data.mode == MODE_NOW:
         need = wall(data.target_soc)
         take(usable, need, chronological)
@@ -349,15 +363,17 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
                 chosen.clear()
                 chosen.update({slot.start: slot for slot in window})
+        # A window too short for the target: as much as fits, and how much is missing.
+        shortfall = need - energy()
     elif data.mode == MODE_PRICE_CAP:
         if data.min_soc is not None and data.soc < data.min_soc:
             take(usable, wall(data.min_soc), chronological)
         if data.price_cap is not None:
             need = wall(data.target_soc)
-            cheap = [slot for slot in usable
-                     if not slot.estimated and slot.price * data.price_factor <= data.price_cap + 1e-9]
-            take(cheap, need, chronological)
+            take([slot for slot in usable if under_cap(slot)], need, chronological)
         need = max(need, wall(data.min_soc))
+    # Slots taken for the minimum level are charged whatever the price; they never count as over the cap.
+    for_minimum = set(chosen) if capped and data.min_soc is not None and data.soc < data.min_soc else set()
 
     # A later deadline that asks for no more than an earlier one is already met by it.
     constraints: list[Constraint] = []
@@ -365,12 +381,13 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         if not constraints or constraint.target_soc > max(item.target_soc for item in constraints):
             constraints.append(constraint)
 
-    shortfall = 0.0
     top = data.target_soc if data.mode != MODE_PRICE_CAP or data.price_cap is not None else data.min_soc
     if data.mode != MODE_NOW:
         for constraint in constraints:
             target_kwh = wall(constraint.target_soc)
             before = [slot for slot in usable if slot.end <= constraint.deadline]
+            if capped and not data.cap_override:
+                before = [slot for slot in before if under_cap(slot)]
             take(before, target_kwh, cheapest, constraint.deadline)
             shortfall = max(shortfall, target_kwh - energy(constraint.deadline))
             need = max(need, target_kwh)
@@ -388,11 +405,18 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
     # Charging happens in time order and stops when the energy is in the battery.
     remaining = need
     planned: list[PlannedSlot] = []
+    over_kwh = over_extra = 0.0
+    over_max: float | None = None
     for slot in sorted(chosen.values(), key=lambda item: item.start):
         if remaining <= 1e-9:
             break
         amount = min(kwh[slot.start], remaining)
         remaining -= amount
+        if capped and slot.start not in for_minimum and not under_cap(slot):
+            price = slot.price * data.price_factor
+            over_kwh += amount
+            over_extra += amount * max(price - data.price_cap, 0.0)
+            over_max = price if over_max is None else max(over_max, price)
         begin = max(slot.start, now)
         finish = begin + timedelta(hours=amount / data.power_kw)
         planned.append(PlannedSlot(begin, min(finish, slot.end), amount, slot.price, slot.estimated))
@@ -419,6 +443,11 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         estimated=any(slot.estimated for slot in planned),
         target_soc=top,
         shortfall_kwh=round(max(shortfall, 0.0), 2),
+        over_cap_kwh=round(over_kwh, 2),
+        over_cap_max_price=round(over_max, 4) if over_max is not None else None,
+        over_cap_extra=round(over_extra, 2),
+        cap_soc=(min(data.soc + (total - over_kwh) * data.efficiency / data.capacity_kwh * 100, 100.0)
+                 if capped else None),
     )
 
 

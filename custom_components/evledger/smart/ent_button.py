@@ -5,7 +5,6 @@ from __future__ import annotations
 from homeassistant.components.button import ButtonEntity
 
 from .entity import EvSmartChargeEntity
-from .plan import MODE_SMART
 
 
 def build(planner) -> list:
@@ -23,7 +22,7 @@ class ConfirmPlan(EvSmartChargeEntity, ButtonEntity):
     _attr_icon = "mdi:check-circle-outline"
 
     async def async_press(self) -> None:
-        self.planner.async_answer(MODE_SMART)
+        self.planner.async_answer(self.planner.mode)  # the plan waiting for the answer, e.g. the default
 
 
 class SendPlan(EvSmartChargeEntity, ButtonEntity):

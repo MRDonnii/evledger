@@ -266,6 +266,9 @@
       },
       "notify_plan": {
         "name": "Notify plan on phone"
+      },
+      "price_cap_override": {
+        "name": "Exceed price cap"
       }
     },
     "button": {
