@@ -30,6 +30,11 @@ TESLA_MODEL_SPECS: dict[str, TeslaModelSpec] = {
         "battery_kwh": 55.0,
         "wltp_wh_per_km": 149,
     },
+    "model3_2021_rwd": {
+        "label": "Model 3 RWD LFP (2021-2023)",
+        "battery_kwh": 57.5,
+        "wltp_wh_per_km": 144,
+    },
     "model3_2017_lr_awd": {
         "label": "Model 3 Long Range AWD (2019-2023)",
         "battery_kwh": 75.0,

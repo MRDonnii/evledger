@@ -234,6 +234,39 @@ efficiency tile, a "needs price" nag banner, month-over-month statistics
 graphs, and Jinja-templated recent-trips/recent-charges tables. See
 [`dashboards/README.md`](dashboards/README.md) for how to use it.
 
+## Smart charging (optional)
+
+EV Ledger can also plan the charging by electricity price and start/stop the charger itself
+(formerly the separate [EV Smart Charge](https://github.com/MRDonnii/ha-ev-smart-charge)
+integration). It is **off by default**; nothing changes for existing setups until it is switched on.
+
+Settings → Devices & services → EV Ledger → **Configure** → (first page unchanged) → **Smart charging**:
+
+- **Smart charging** on. Everything else is optional and filled in from the ledger: the car's
+  battery, the spot price sensor, the Zaptec charger (its "Charger mode" sensor is found next to
+  the charge power sensor) and the car's own plug sensor.
+- **Charger control**: Zaptec, or any switch that starts/stops charging (OCPP, Monta, Easee, …).
+- **Phones to confirm the plan on** and **Only phones that are home** (Companion app).
+
+New entities on the car's device:
+
+| Entity | What it does |
+|---|---|
+| `select.<car>_charge_mode` | Cheapest before departure (default), Fixed time, Charge now, Price cap, Pause, Manual. A plugged-in car runs the cheapest plan; any other plan returns to it when the car is unplugged. |
+| `number.<car>_target_soc`, `time.<car>_ready_by` | Target and ready-by time for the cheapest plan. |
+| `time.<car>_fixed_charging_start/end`, `number.<car>_price_cap`, `number.<car>_minimum_soc` | Settings for Fixed time and Price cap. |
+| `datetime.<car>_temporary_departure`, `text.<car>_trip_destination`, `switch.<car>_round_trip` | Temporary plan: departure and destination (address, `lat,lon` or `zone.*`); the road distance comes from OpenStreetMap and the plan charges for the trip plus margin and reserve. |
+| `switch.<car>_confirm_plan_on_phone`, `button.<car>_confirm_plan` | When on, a plugged-in car waits for an answer on the phones (Confirm / Charge now / Pause); without an answer the cheapest plan runs after 60 minutes. |
+| `sensor.<car>_charge_status`, `..._next_charge_start/end`, `..._planned_charge_cost/energy` | The plan. `planned_charge_cost` has an `alternatives` attribute with the price of every plan. |
+| `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
+
+Prices without a published value yet (e.g. tomorrow's before 13:00) are estimated from the same
+time on earlier days. A start waits until the plan has wanted charging for 15 s; a stop the
+charger did not act on is repeated after 45 s. Settings, the chosen plan, a temporary plan and an
+open phone question all survive a restart. The
+[`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)
+shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
+
 ## Roadmap
 
 - [ ] MQTT export of ledger data (for anyone who wants to build a standalone

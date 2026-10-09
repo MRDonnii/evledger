@@ -3,6 +3,8 @@ from __future__ import annotations
 
 DOMAIN = "evledger"
 PLATFORMS = ["sensor"]
+# Added when smart charging is switched on in the options.
+SMART_PLATFORMS = ["binary_sensor", "button", "datetime", "number", "select", "switch", "text", "time"]
 
 STORAGE_VERSION = 1
 STORAGE_KEY_TEMPLATE = "evledger_{entry_id}"

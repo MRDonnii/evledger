@@ -1,12 +1,14 @@
 {
   "domain": "evledger",
   "name": "EV Ledger",
-  "codeowners": ["@MRDonnii"],
+  "codeowners": [
+    "@MRDonnii"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/MRDonnii/evledger",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/MRDonnii/evledger/issues",
   "requirements": [],
-  "version": "0.2.0-beta12"
+  "version": "0.3.0-beta1"
 }

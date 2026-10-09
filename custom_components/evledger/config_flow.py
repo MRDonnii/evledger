@@ -44,6 +44,22 @@ from .device_resolve import (
     resolve_tesla_vehicle_entities,
     resolve_zaptec_charger_entities,
 )
+from .smart.const import (
+    CHARGER_SWITCH as SC_CHARGER_SWITCH,
+    CHARGER_TYPES as SC_CHARGER_TYPES,
+    CHARGER_ZAPTEC as SC_CHARGER_ZAPTEC,
+    CONF_CAR_PLUGGED_ENTITY as SC_CAR_PLUGGED_ENTITY,
+    CONF_CHARGE_SWITCH as SC_CHARGE_SWITCH,
+    CONF_CHARGER_TYPE as SC_CHARGER_TYPE,
+    CONF_NOTIFY_ONLY_HOME as SC_NOTIFY_ONLY_HOME,
+    CONF_NOTIFY_SERVICES as SC_NOTIFY_SERVICES,
+    CONF_PRICE_ENTITIES as SC_PRICE_ENTITIES,
+    CONF_SMART_CHARGE,
+    CONF_SMART_ENABLED,
+    CONF_ZAPTEC_MODE_ENTITY as SC_ZAPTEC_MODE_ENTITY,
+)
+from .smart.plan import parse_price_attributes
+from .smart.setup import planner_options_from
 from .tesla_models import CUSTOM_MODEL_KEY, TESLA_MODEL_SPECS
 
 SKIP_MODEL_KEY = "skip"
@@ -453,8 +469,65 @@ class EvLedgerOptionsFlow(OptionsFlow):
 
             self._data[CONF_CHARGER_PROVIDERS] = providers
             _process_efficiency(self._data, user_input)
-
-            self.hass.config_entries.async_update_entry(self._entry, data=self._data)
-            return self.async_create_entry(title="", data={})
+            return await self.async_step_smart_charge()
 
         return self.async_show_form(step_id="init", data_schema=_options_schema(self._data))
+
+    async def async_step_smart_charge(self, user_input: dict[str, Any] | None = None):
+        """Optional smart charging: charge plans by price and control of the charger."""
+        errors: dict[str, str] = {}
+        current = dict(self._data.get(CONF_SMART_CHARGE) or {})
+        if user_input is not None:
+            settings = {key: value for key, value in user_input.items() if value not in (None, "", [])}
+            if settings.get(CONF_SMART_ENABLED):
+                errors = _validate_smart(self.hass, self._data, settings)
+            if not errors:
+                self._data[CONF_SMART_CHARGE] = settings
+                self.hass.config_entries.async_update_entry(self._entry, data=self._data)
+                return self.async_create_entry(title="", data={})
+            current = settings
+        return self.async_show_form(step_id="smart_charge", data_schema=_smart_schema(self.hass, current),
+                                    errors=errors)
+
+
+def _smart_schema(hass, defaults: dict[str, Any]) -> vol.Schema:
+    def suggested(key):
+        return {"suggested_value": defaults.get(key)}
+
+    phones = sorted(name for name in hass.services.async_services().get("notify", {}) if name.startswith("mobile_app_"))
+    phones = sorted(set(phones) | set(defaults.get(SC_NOTIFY_SERVICES) or []))
+    return vol.Schema({
+        vol.Optional(CONF_SMART_ENABLED, default=bool(defaults.get(CONF_SMART_ENABLED, False))): selector.BooleanSelector(),
+        vol.Optional(SC_PRICE_ENTITIES, description=suggested(SC_PRICE_ENTITIES)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=["sensor", "binary_sensor"], multiple=True)),
+        vol.Optional(SC_CHARGER_TYPE, description=suggested(SC_CHARGER_TYPE)): selector.SelectSelector(
+            selector.SelectSelectorConfig(options=SC_CHARGER_TYPES, translation_key=SC_CHARGER_TYPE,
+                                          mode=selector.SelectSelectorMode.LIST)),
+        vol.Optional(SC_ZAPTEC_MODE_ENTITY, description=suggested(SC_ZAPTEC_MODE_ENTITY)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", integration="zaptec")),
+        vol.Optional(SC_CHARGE_SWITCH, description=suggested(SC_CHARGE_SWITCH)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="switch")),
+        vol.Optional(SC_CAR_PLUGGED_ENTITY, description=suggested(SC_CAR_PLUGGED_ENTITY)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=["binary_sensor", "sensor"])),
+        vol.Optional(SC_NOTIFY_SERVICES, description=suggested(SC_NOTIFY_SERVICES)): selector.SelectSelector(
+            selector.SelectSelectorConfig(options=phones, multiple=True, custom_value=True,
+                                          mode=selector.SelectSelectorMode.DROPDOWN)),
+        vol.Optional(SC_NOTIFY_ONLY_HOME, default=bool(defaults.get(SC_NOTIFY_ONLY_HOME, False))):
+            selector.BooleanSelector(),
+    })
+
+
+def _validate_smart(hass, data: dict[str, Any], settings: dict[str, Any]) -> dict[str, str]:
+    """Check what smart charging needs, with the ledger's own setup filling the gaps."""
+    options = planner_options_from(hass, data, settings)
+    errors: dict[str, str] = {}
+    if not any(
+        (state := hass.states.get(entity_id)) and parse_price_attributes(dict(state.attributes))
+        for entity_id in options.get(SC_PRICE_ENTITIES) or []
+    ):
+        errors[SC_PRICE_ENTITIES] = "no_prices"
+    if options.get(SC_CHARGER_TYPE) == SC_CHARGER_ZAPTEC and not options.get(SC_ZAPTEC_MODE_ENTITY):
+        errors[SC_ZAPTEC_MODE_ENTITY] = "required_for_zaptec"
+    elif options.get(SC_CHARGER_TYPE) == SC_CHARGER_SWITCH and not options.get(SC_CHARGE_SWITCH):
+        errors[SC_CHARGE_SWITCH] = "required_for_switch"
+    return errors

@@ -1,0 +1,14 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# The ledger's original modules predate the linter; new code (smart charging, tests) is checked.
+include = ["tests/**/*.py", "custom_components/evledger/smart/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

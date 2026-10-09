@@ -18,6 +18,7 @@ from .const import (
     TEMP_BUCKET_COLD_MAX_C,
     TEMP_BUCKET_MILD_MAX_C,
 )
+from .smart.ent_sensor import build as build_smart_sensors
 from .coordinator import EvLedgerCoordinator
 from .models import ChargeSession, Trip
 
@@ -45,6 +46,8 @@ async def async_setup_entry(
         entities.append(EvLedgerEfficiencySensor(coordinator, entry))
         entities.append(EvLedgerBatteryEfficiencyScoreSensor(coordinator, entry))
         entities.append(EvLedgerMonthlyPerformanceSensor(coordinator, entry))
+    if getattr(coordinator, "smart", None) is not None:
+        entities.extend(build_smart_sensors(coordinator.smart))
     async_add_entities(entities)
 
 

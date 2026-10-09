@@ -66,7 +66,32 @@
           "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
           "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')"
         }
+      },
+      "smart_charge": {
+        "title": "Smart opladning",
+        "description": "Lad når strømmen er billigst, og lad EV Ledger starte og stoppe laderen. Bil, batteri og elpris kommer fra ledger-opsætningen; tomme felter findes automatisk (Zaptec-laderens tilstandssensor, bilens stik-sensor).",
+        "data": {
+          "enabled": "Smart opladning",
+          "price_entities": "Elpris-sensorer (i dag og i morgen)",
+          "charger_type": "Styring af laderen",
+          "zaptec_mode_entity": "Zaptec-laderens tilstandssensor",
+          "charge_switch": "Ladekontakt",
+          "car_plugged_entity": "Bilens tilslutnings-sensor",
+          "notify_services": "Mobiler der skal bekræfte planen",
+          "notify_only_home": "Kun mobiler der er hjemme"
+        },
+        "data_description": {
+          "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
+          "price_entities": "Tom: ledgerens spotpris-sensor.",
+          "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
+          "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke."
+        }
       }
+    },
+    "error": {
+      "no_prices": "Ingen af sensorerne har en prisliste i attributterne.",
+      "required_for_zaptec": "Vælg Zaptec-laderens tilstandssensor.",
+      "required_for_switch": "Vælg ladekontakten."
     }
   },
   "entity": {
@@ -111,7 +136,147 @@
       },
       "battery_efficiency_score": {
         "name": "Batteri-effektivitetsscore"
+      },
+      "next_charge_start": {
+        "name": "Næste ladestart"
+      },
+      "next_charge_end": {
+        "name": "Næste ladeslut"
+      },
+      "planned_cost": {
+        "name": "Planlagt ladepris"
+      },
+      "planned_energy": {
+        "name": "Planlagt energi"
+      },
+      "plan_target_soc": {
+        "name": "Planens mål-SOC"
+      },
+      "trip_distance": {
+        "name": "Turens afstand"
+      },
+      "trip_energy": {
+        "name": "Turens energiforbrug"
+      },
+      "trip_target_soc": {
+        "name": "SOC turen kræver"
+      },
+      "charge_status": {
+        "name": "Ladestatus",
+        "state": {
+          "plan_only": "Kun plan",
+          "manual": "Manuel",
+          "disconnected": "Ikke tilsluttet",
+          "other_car": "En anden bil er tilsluttet",
+          "unknown": "Ukendt",
+          "charging": "Lader",
+          "stopped_externally": "Stoppet af bilen eller appen",
+          "not_responding": "Laderen svarer ikke",
+          "paused": "På pause",
+          "starting": "Starter",
+          "done": "Mål nået",
+          "waiting": "Venter på billig strøm",
+          "awaiting_confirmation": "Venter på bekræftelse"
+        }
       }
+    },
+    "number": {
+      "target_soc": {
+        "name": "Mål-SOC"
+      },
+      "charge_power_kw": {
+        "name": "Ladeeffekt"
+      },
+      "efficiency": {
+        "name": "Ladevirkningsgrad"
+      },
+      "price_factor": {
+        "name": "Prisfaktor"
+      },
+      "price_cap": {
+        "name": "Prisloft"
+      },
+      "min_soc": {
+        "name": "Minimum-SOC"
+      },
+      "consumption": {
+        "name": "Forbrug"
+      },
+      "trip_margin": {
+        "name": "Sikkerhedsmargin på tur"
+      },
+      "trip_reserve": {
+        "name": "Reserve ved ankomst"
+      }
+    },
+    "time": {
+      "ready_by_time": {
+        "name": "Klar senest"
+      },
+      "fixed_start": {
+        "name": "Fast ladestart"
+      },
+      "fixed_end": {
+        "name": "Fast ladeslut"
+      }
+    },
+    "select": {
+      "charge_mode": {
+        "name": "Ladeplan",
+        "state": {
+          "smart": "Billigst inden afgang",
+          "fixed": "Fast tidspunkt",
+          "now": "Lad nu",
+          "price_cap": "Prisloft",
+          "off": "Pause",
+          "manual": "Manuel (styres ikke)"
+        }
+      }
+    },
+    "datetime": {
+      "trip_departure": {
+        "name": "Midlertidig afgang"
+      }
+    },
+    "text": {
+      "trip_destination": {
+        "name": "Turens destination"
+      }
+    },
+    "switch": {
+      "trip_round_trip": {
+        "name": "Tur/retur"
+      },
+      "confirm_on_phone": {
+        "name": "Bekræft plan på mobil"
+      }
+    },
+    "button": {
+      "trip_clear": {
+        "name": "Ryd midlertidig plan"
+      },
+      "confirm_plan": {
+        "name": "Bekræft plan"
+      }
+    },
+    "binary_sensor": {
+      "charge_now": {
+        "name": "Lad nu-signal"
+      }
+    }
+  },
+  "selector": {
+    "charger_type": {
+      "options": {
+        "none": "Ingen (kun plan)",
+        "zaptec": "Zaptec",
+        "switch": "Kontakt (OCPP, Monta, ...)"
+      }
+    }
+  },
+  "exceptions": {
+    "departure_out_of_range": {
+      "message": "Afgangen skal ligge ude i fremtiden og højst 14 dage frem."
     }
   }
 }

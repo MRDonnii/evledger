@@ -66,7 +66,32 @@
           "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
           "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')"
         }
+      },
+      "smart_charge": {
+        "title": "Smart charging",
+        "description": "Charge when power is cheapest and let EV Ledger start and stop the charger. The car, the battery and the price sensor come from the ledger setup; fields left empty are found automatically (the Zaptec charger's mode sensor, the car's plug sensor).",
+        "data": {
+          "enabled": "Smart charging",
+          "price_entities": "Price sensors (today and tomorrow)",
+          "charger_type": "Charger control",
+          "zaptec_mode_entity": "Zaptec charger mode sensor",
+          "charge_switch": "Charging switch",
+          "car_plugged_entity": "Car plugged-in sensor",
+          "notify_services": "Phones to confirm the plan on",
+          "notify_only_home": "Only phones that are home"
+        },
+        "data_description": {
+          "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
+          "price_entities": "Empty: the ledger's spot price sensor.",
+          "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
+          "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone."
+        }
       }
+    },
+    "error": {
+      "no_prices": "None of the sensors has a price list in its attributes.",
+      "required_for_zaptec": "Pick the Zaptec charger mode sensor.",
+      "required_for_switch": "Pick the charging switch."
     }
   },
   "entity": {
@@ -111,7 +136,147 @@
       },
       "battery_efficiency_score": {
         "name": "Battery efficiency score"
+      },
+      "next_charge_start": {
+        "name": "Next charge start"
+      },
+      "next_charge_end": {
+        "name": "Next charge end"
+      },
+      "planned_cost": {
+        "name": "Planned charge cost"
+      },
+      "planned_energy": {
+        "name": "Planned charge energy"
+      },
+      "plan_target_soc": {
+        "name": "Plan target SOC"
+      },
+      "trip_distance": {
+        "name": "Trip distance"
+      },
+      "trip_energy": {
+        "name": "Trip energy"
+      },
+      "trip_target_soc": {
+        "name": "Trip SOC needed"
+      },
+      "charge_status": {
+        "name": "Charge status",
+        "state": {
+          "plan_only": "Plan only",
+          "manual": "Manual",
+          "disconnected": "Not plugged in",
+          "other_car": "Another car is plugged in",
+          "unknown": "Unknown",
+          "charging": "Charging",
+          "stopped_externally": "Stopped by the car or app",
+          "not_responding": "Charger does not respond",
+          "paused": "Paused",
+          "starting": "Starting",
+          "done": "Target reached",
+          "waiting": "Waiting for cheap power",
+          "awaiting_confirmation": "Waiting for confirmation"
+        }
       }
+    },
+    "number": {
+      "target_soc": {
+        "name": "Target SOC"
+      },
+      "charge_power_kw": {
+        "name": "Charging power"
+      },
+      "efficiency": {
+        "name": "Charging efficiency"
+      },
+      "price_factor": {
+        "name": "Price factor"
+      },
+      "price_cap": {
+        "name": "Price cap"
+      },
+      "min_soc": {
+        "name": "Minimum SOC"
+      },
+      "consumption": {
+        "name": "Consumption"
+      },
+      "trip_margin": {
+        "name": "Trip safety margin"
+      },
+      "trip_reserve": {
+        "name": "Arrival reserve"
+      }
+    },
+    "time": {
+      "ready_by_time": {
+        "name": "Ready by"
+      },
+      "fixed_start": {
+        "name": "Fixed charging start"
+      },
+      "fixed_end": {
+        "name": "Fixed charging end"
+      }
+    },
+    "select": {
+      "charge_mode": {
+        "name": "Charge mode",
+        "state": {
+          "smart": "Cheapest before departure",
+          "fixed": "Fixed time",
+          "now": "Charge now",
+          "price_cap": "Price cap",
+          "off": "Pause",
+          "manual": "Manual (not controlled)"
+        }
+      }
+    },
+    "datetime": {
+      "trip_departure": {
+        "name": "Temporary departure"
+      }
+    },
+    "text": {
+      "trip_destination": {
+        "name": "Trip destination"
+      }
+    },
+    "switch": {
+      "trip_round_trip": {
+        "name": "Round trip"
+      },
+      "confirm_on_phone": {
+        "name": "Confirm plan on phone"
+      }
+    },
+    "button": {
+      "trip_clear": {
+        "name": "Clear temporary plan"
+      },
+      "confirm_plan": {
+        "name": "Confirm plan"
+      }
+    },
+    "binary_sensor": {
+      "charge_now": {
+        "name": "Charge now"
+      }
+    }
+  },
+  "selector": {
+    "charger_type": {
+      "options": {
+        "none": "None (plan only)",
+        "zaptec": "Zaptec",
+        "switch": "Switch (OCPP, Monta, ...)"
+      }
+    }
+  },
+  "exceptions": {
+    "departure_out_of_range": {
+      "message": "The departure must be in the future and at most 14 days ahead."
     }
   }
 }

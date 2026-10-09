@@ -23,6 +23,7 @@ from .const import (
     DOMAIN,
     LOCATION_PUBLIC,
     PLATFORMS,
+    SMART_PLATFORMS,
     SERVICE_DELETE_CHARGE,
     SERVICE_DELETE_TRIP,
     SERVICE_LOG_PUBLIC_CHARGE,
@@ -31,6 +32,8 @@ from .const import (
 from .coordinator import EvLedgerCoordinator
 from .models import ChargeSession
 from .providers.registry import build_charger_providers, build_vehicle_provider
+from .smart.planner import ChargePlanner
+from .smart.setup import ledger_vehicle, planner_options, smart_enabled
 from .store import EvLedgerStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,7 +96,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Smart charging (charge plans and charger control) is optional and off by default.
+    coordinator.smart = None
+    coordinator.platforms = list(PLATFORMS)
+    if smart_enabled(entry):
+        options = planner_options(hass, entry)
+        coordinator.smart = ChargePlanner(hass, entry, options=lambda: options, vehicle=lambda: ledger_vehicle(entry))
+        coordinator.platforms += SMART_PLATFORMS
+
+    await hass.config_entries.async_forward_entry_setups(entry, coordinator.platforms)
+    if coordinator.smart:
+        coordinator.smart.async_start()
+        entry.async_on_unload(coordinator.smart.async_stop)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     _async_register_services(hass)
@@ -107,7 +121,9 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload an EV Ledger config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    platforms = getattr(coordinator, "platforms", PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unloaded:
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
         if not hass.data.get(DOMAIN):
