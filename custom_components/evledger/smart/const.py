@@ -64,6 +64,8 @@ DEFAULT_REMINDER_SOC = 50.0
 REMINDER_WINDOW_HOURS = 3
 # A charger offline this long while the plan wants to charge is reported at once.
 CHARGER_OFFLINE_ALERT_MINUTES = 10
+# A charge saved before a restart counts in the done message only if its last period ended this recently.
+CHARGE_RUN_KEEP_HOURS = 24
 # Preconditioning: the car's climate is turned on this long before the ready-by time (or a trip's departure),
 # and turned off again this long after it if the car is still plugged in at home.
 DEFAULT_PRECONDITION_MINUTES = 20.0

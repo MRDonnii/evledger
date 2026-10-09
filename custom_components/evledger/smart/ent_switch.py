@@ -46,6 +46,8 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             checked = dt_util.parse_date(str(last.attributes.get("checked_on") or ""))
             if checked:
                 self.planner.routines.evening_checked = checked
+        if last and self._attr_translation_key == "notify_done":
+            self.planner.routines.restore_run(last.attributes.get("charge_run"))
 
     @property
     def is_on(self) -> bool:
@@ -56,6 +58,9 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         routines = self.planner.routines
         if self._attr_translation_key == "plug_reminder":
             return {"checked_on": routines.evening_checked.isoformat() if routines.evening_checked else None}
+        if self._attr_translation_key == "notify_done":
+            # The periods of the charge so far, for the done message after a restart.
+            return {"charge_run": routines.run.as_dict() if routines.run.sessions else None}
         if self._attr_translation_key == "precondition":
             # The car's climate entity (needs a car integration that can send commands to the car).
             return {"climate_entity": routines.climate_entity()}

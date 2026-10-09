@@ -208,3 +208,37 @@ async def test_cleared_calendar_trip_stays_cleared_after_a_restart(hass: HomeAss
     planner = await with_options(hass, entry, trip_calendar="calendar.familie", trip_calendar_keyword="tur")
     await later(hass, freezer, 1)
     assert planner.trip.departure is None, "cleared by hand before the restart: not added again"
+
+
+async def test_done_message_counts_periods_from_before_a_restart(hass: HomeAssistant, request, freezer):
+    from .test_routines import phones as all_phones
+    from .test_routines import session, with_options
+    start = dt_util.now() - timedelta(hours=3)
+    run = {"kwh": 6.0, "price": 2.5, "price_known": True, "sessions": 1, "start_soc": 60, "end_soc": 70,
+           "started": start.isoformat(), "ended": (start + timedelta(hours=1)).isoformat()}
+    restore(hass, [State("switch.bil_message_when_charging_is_done", "on", {"charge_run": run})])
+    sent = all_phones(hass)
+    entry, _ = await setup(hass, request, charger_state="connected_charging", cheap_now=True, soc="70")
+    planner = await with_options(hass, entry)
+    planner.routines.charge_finished(session(4.0, 1.5, start + timedelta(hours=2), 45, (70, 80)))
+    hass.states.async_set("sensor.car_battery", "80")
+    hass.states.async_set(MODE, "connected_finished")
+    await later(hass, freezer, 1)
+    done = [m for m in sent if m["title"] == "Bil: opladning færdig"]
+    assert len(done) == 1, sent
+    assert done[0]["message"].startswith("10,0 kWh for 4,00 kr (0,40 kr/kWh)\nBatteri 60 % → 80 %"), done[0]
+    assert "(2 perioder)" in done[0]["message"]
+
+
+async def test_an_old_saved_charge_is_not_counted(hass: HomeAssistant, request, freezer):
+    from .test_routines import session, with_options
+    start = dt_util.now() - timedelta(days=3)
+    run = {"kwh": 6.0, "price": 2.5, "price_known": True, "sessions": 1, "start_soc": 60, "end_soc": 70,
+           "started": start.isoformat(), "ended": (start + timedelta(hours=1)).isoformat()}
+    restore(hass, [State("switch.bil_message_when_charging_is_done", "on", {"charge_run": run})])
+    entry, _ = await setup(hass, request, charger_state="connected_charging", cheap_now=True, soc="70")
+    planner = await with_options(hass, entry)
+    assert planner.routines.run.sessions == 0
+    planner.routines.charge_finished(session(4.0, 1.5, dt_util.now() - timedelta(hours=1), 45, (70, 80)))
+    await later(hass, freezer, 1)
+    assert hass.states.get("switch.bil_message_when_charging_is_done").attributes["charge_run"]["sessions"] == 1

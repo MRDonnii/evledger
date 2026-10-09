@@ -288,8 +288,8 @@ charger did not act on is repeated after 45 s. Right after a restart the last ba
 loaded again the charging periods planned before the restart are followed, so a restart at the
 planned start does not lose the charge. A charger that is offline for 10 minutes while the plan
 wants to charge is reported on the phones at once; the charge starts as soon as it answers again. A car that stops at its own charge limit is done:
-it is neither started again nor reported as stopped from outside. Settings, the chosen plan, a temporary plan and an
-open phone question all survive a restart. Messages that only tell what happens (the active plan,
+it is neither started again nor reported as stopped from outside. Settings, the chosen plan, a temporary plan, an
+open phone question and the periods charged so far (for the done message) all survive a restart. Messages that only tell what happens (the active plan,
 charging started, charge done) arrive without sound between 22:00 and 07:00 (iOS "passive"); questions
 and warnings keep their sound. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)

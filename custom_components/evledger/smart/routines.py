@@ -19,6 +19,7 @@ from .const import (
     CALENDAR_LOOKAHEAD_HOURS,
     CALENDAR_MARGIN_MINUTES,
     CALENDAR_REFRESH_MINUTES,
+    CHARGE_RUN_KEEP_HOURS,
     CHARGER_OFFLINE_ALERT_MINUTES,
     CONF_CAR_CLIMATE,
     CONF_TRIP_CALENDAR,
@@ -50,6 +51,26 @@ class ChargeRun:
     end_soc: float | None = None
     started: datetime | None = None
     ended: datetime | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Kept on the done message switch, so periods that ended before a restart still count."""
+        return {"kwh": round(self.kwh, 3), "price": round(self.price, 4), "price_known": self.price_known,
+                "sessions": self.sessions, "start_soc": self.start_soc, "end_soc": self.end_soc,
+                "started": self.started.isoformat() if self.started else None,
+                "ended": self.ended.isoformat() if self.ended else None}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ChargeRun:
+        def when(key: str) -> datetime | None:
+            return dt_util.parse_datetime(str(data.get(key) or ""))
+
+        def soc(key: str) -> float | None:
+            value = data.get(key)
+            return float(value) if isinstance(value, (int, float)) else None
+
+        return cls(kwh=float(data.get("kwh") or 0.0), price=float(data.get("price") or 0.0),
+                   price_known=bool(data.get("price_known", True)), sessions=int(data.get("sessions") or 0),
+                   start_soc=soc("start_soc"), end_soc=soc("end_soc"), started=when("started"), ended=when("ended"))
 
     def add(self, charge: Any) -> None:
         self.sessions += 1
@@ -128,6 +149,14 @@ class Routines:
 
     def new_plug(self) -> None:
         self.run = ChargeRun()
+
+    def restore_run(self, data: Any) -> None:
+        """The charge saved before a restart (or a reload of the settings); a run that ended long ago is dropped."""
+        if self.run.sessions or not isinstance(data, dict):
+            return
+        run = ChargeRun.from_dict(data)
+        if run.sessions and run.ended and dt_util.utcnow() - run.ended < timedelta(hours=CHARGE_RUN_KEEP_HOURS):
+            self.run = run
 
     def check_done(self, now: datetime) -> None:
         """Send the whole charge once the plan is done (or the cable is out) and the last session is closed."""
