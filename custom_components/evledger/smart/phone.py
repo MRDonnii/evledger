@@ -13,7 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_NOTIFY_ONLY_HOME, CONF_NOTIFY_SERVICES, CONFIRM_TIMEOUT_MINUTES
-from .plan import MODE_NOW, MODE_OFF, MODE_SMART
+from .plan import MODE_FIXED, MODE_NOW, MODE_OFF, MODE_PRICE_CAP, MODE_SMART
 
 if TYPE_CHECKING:
     from .planner import ChargePlanner
@@ -84,6 +84,53 @@ class PhoneNotifier:
             lines.append(f"Klar {dt_util.as_local(planner.deadline).strftime('%H:%M')}")
         lines.append(f"Uden svar kører Billigst om {CONFIRM_TIMEOUT_MINUTES} min.")
         return "\n".join(lines)
+
+    def plan_text(self, planner: ChargePlanner) -> str:
+        """The active plan in one or two lines: what, when, what it costs."""
+        unit = planner.price_unit or "kr"
+        schedule = planner.schedule
+
+        def money(value: float) -> str:
+            return f"{value:.2f} {unit}".replace(".", ",")
+
+        def clock(value) -> str:
+            return dt_util.as_local(value).strftime("%H:%M")
+
+        names = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft"}
+        if planner.mode == MODE_OFF:
+            return "Pause: bilen lades ikke."
+        if not schedule.blocks:
+            return f"{names.get(planner.mode, planner.mode)}: batteriet er allerede ladet til målet."
+        span = f"{clock(schedule.blocks[0].start)}–{clock(schedule.blocks[-1].end)}"
+        if len(schedule.blocks) > 1:
+            span += f" ({len(schedule.blocks)} perioder)"
+        line = f"{names.get(planner.mode, planner.mode)}: {span} · {money(schedule.cost or 0)}"
+        now = planner.alternatives.get(MODE_NOW)
+        saving = now.cost - schedule.cost if now and now.cost and schedule.cost is not None else 0
+        if planner.mode != MODE_NOW and saving >= 0.5:
+            line += f" (spar {money(saving)})"
+        details = [f"{schedule.energy_kwh:.1f} kWh".replace(".", ",")]
+        if schedule.target_soc is not None:
+            details.append(f"mål {schedule.target_soc:.0f} %")
+        if planner.deadline and planner.mode == MODE_SMART:
+            details.append(f"klar {clock(planner.deadline)}")
+        return f"{line}\n" + " · ".join(details)
+
+    async def async_send_info(self, planner: ChargePlanner) -> None:
+        """Tell the phones which plan is active, with times and price; the same tag replaces an older one."""
+        data = {
+            "title": f"{self.entry.title}: ladeplan aktiv",
+            "message": self.plan_text(planner),
+            "data": {
+                "tag": self.tag,
+                "actions": [
+                    {"action": f"{self.prefix}NOW", "title": "Lad nu"},
+                    {"action": f"{self.prefix}OFF", "title": "Pause"},
+                ],
+            },
+        }
+        for service in self.recipients():
+            await self._call(service, data)
 
     async def async_send_plan(self, planner: ChargePlanner) -> None:
         data = {

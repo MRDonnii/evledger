@@ -133,6 +133,8 @@ class ChargePlanner:
         # Confirmation on the phone: on/off, and since when a new plan waits for an answer.
         self.confirm_enabled = False
         self.awaiting_since: datetime | None = None
+        # Tell the phones which plan is active (when the car is plugged in or the plan changes).
+        self.info_enabled = True
         self.trip = TripState()
         self.result = PlanResult(None, None, None, None, None, None)
         self.schedule = Schedule()
@@ -149,6 +151,7 @@ class ChargePlanner:
         self._hold_until: datetime | None = None
         self._recheck: CALLBACK_TYPE | None = None
         self._notify_pending = False
+        self._info_pending = False
         self.notify = PhoneNotifier(hass, entry, lambda: self.options)
         self._guessed: vehicles.Vehicle | None = None
         self._started_at: datetime | None = None
@@ -293,6 +296,8 @@ class ChargePlanner:
                 self.mode_before_now = self.mode
             self.now_seen_connected = False
             self.awaiting_since = None  # choosing a plan answers a pending confirmation
+            if self.info_enabled and self.notify.targets and self.charger_state in CONNECTED and self.car_present:
+                self._info_pending = True
         self.mode = mode
         self._hold_until = None
         if not restore:
@@ -327,6 +332,11 @@ class ChargePlanner:
             self.hass, self._async_lookup(self.trip.destination), "ev_smart_charge_route")
 
     @callback
+    def async_set_info(self, enabled: bool) -> None:
+        self.info_enabled = enabled
+        self.async_recalculate()
+
+    @callback
     def async_set_confirm(self, enabled: bool) -> None:
         self.confirm_enabled = enabled
         if not enabled:
@@ -336,12 +346,15 @@ class ChargePlanner:
     @callback
     def async_answer(self, mode: str) -> None:
         """An answer from the phone or the card: confirm the cheapest plan, charge now or pause."""
+        if self.awaiting_since is not None:
+            # The question is answered: remove it from the other phones before a new plan message is sent.
+            self.entry.async_create_background_task(
+                self.hass, self.notify.async_clear(), "ev_smart_charge_notify_clear")
         self.awaiting_since = None
         if mode != self.mode:
             self.async_set_mode(mode)
         else:
             self.async_recalculate()
-        self.entry.async_create_background_task(self.hass, self.notify.async_clear(), "ev_smart_charge_notify_clear")
 
     @callback
     def async_clear_trip(self) -> None:
@@ -516,8 +529,13 @@ class ChargePlanner:
                              for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)}
 
         self._control(now)
+        if self._info_pending and not self._notify_pending:
+            self._info_pending = False
+            self.entry.async_create_background_task(
+                self.hass, self.notify.async_send_info(self), "ev_smart_charge_notify_info")
         if self._notify_pending:
             self._notify_pending = False
+            self._info_pending = False
             self.entry.async_create_background_task(
                 self.hass, self.notify.async_send_plan(self), "ev_smart_charge_notify")
         for update in list(self._listeners):
@@ -534,6 +552,8 @@ class ChargePlanner:
             if self.confirm_enabled and self.notify.targets:
                 self.awaiting_since = dt_util.now()
                 self._notify_pending = True
+            elif self.info_enabled and self.notify.targets:
+                self._info_pending = True
         elif event == ChargerEvent.MANUAL_START and self.car_present and self.mode not in (MODE_NOW, MODE_MANUAL):
             # Started from the charger's app or the car: follow the user and charge now.
             self.mode_before_now, self.mode = self.mode, MODE_NOW

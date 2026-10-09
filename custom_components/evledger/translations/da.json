@@ -249,6 +249,9 @@
       },
       "confirm_on_phone": {
         "name": "Bekræft plan på mobil"
+      },
+      "notify_plan": {
+        "name": "Besked om ladeplan på mobil"
       }
     },
     "button": {

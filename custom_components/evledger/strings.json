@@ -249,6 +249,9 @@
       },
       "confirm_on_phone": {
         "name": "Confirm plan on phone"
+      },
+      "notify_plan": {
+        "name": "Notify plan on phone"
       }
     },
     "button": {

@@ -216,3 +216,29 @@ async def test_confirm_on_phone(hass: HomeAssistant, request):
     assert state(hass, "sensor.bil_charge_status") != "awaiting_confirmation"
     assert calls["button.press"], "confirmed: the cheapest plan runs (cheap now)"
     assert sent[-1][1]["message"] == "clear_notification"
+
+
+async def test_plan_info_on_phone_with_charge_now(hass: HomeAssistant, request):
+    sent = []
+
+    async def fake_notify(call):
+        sent.append(call.data)
+
+    hass.services.async_register("notify", "mobile_app_a", fake_notify)
+    entry, calls = await setup(hass, request, charger_state="disconnected", cheap_now=False)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "smart_charge": {
+        **entry.data["smart_charge"], "notify_services": ["mobile_app_a"]}})
+    await hass.async_block_till_done()
+    assert state(hass, "switch.bil_notify_plan_on_phone") == "on"
+    hass.states.async_set(MODE, "connected_requesting")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(sent) == 1
+    assert sent[0]["title"] == "Bil: ladeplan aktiv"
+    assert sent[0]["message"].startswith("Billigst: ")
+    assert " kr (spar " in sent[0]["message"]
+    actions = {action["title"]: action["action"] for action in sent[0]["data"]["actions"]}
+    hass.bus.async_fire("mobile_app_notification_action", {"action": actions["Lad nu"]})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert state(hass, "select.bil_charge_mode") == "now"
+    assert calls["button.press"], "Lad nu from the phone starts the charger"
+    assert sent[-1]["message"].startswith("Lad nu: "), "the changed plan is sent again"

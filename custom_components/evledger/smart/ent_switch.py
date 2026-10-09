@@ -13,7 +13,8 @@ from .entity import EvSmartChargeListenerEntity
 
 def build(planner) -> list:
     return list([TripRoundTrip(planner, "trip_round_trip"),
-                        ConfirmOnPhone(planner, "confirm_on_phone")])
+                        ConfirmOnPhone(planner, "confirm_on_phone"),
+                        NotifyPlan(planner, "notify_plan")])
 
 
 class TripRoundTrip(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -66,3 +67,25 @@ class ConfirmOnPhone(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.planner.async_set_confirm(False)
+
+
+class NotifyPlan(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
+    """When on, the phones are told which plan is active, with times and price (and Charge now / Pause)."""
+
+    _attr_icon = "mdi:cellphone-message"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in ("on", "off"):
+            self.planner.info_enabled = last.state == "on"
+
+    @property
+    def is_on(self) -> bool:
+        return self.planner.info_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.planner.async_set_info(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.planner.async_set_info(False)
