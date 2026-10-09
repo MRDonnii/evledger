@@ -167,6 +167,8 @@ MODE_PRICE_CAP = "price_cap"
 MODE_OFF = "off"
 MODE_MANUAL = "manual"
 MODES = (MODE_SMART, MODE_FIXED, MODE_NOW, MODE_PRICE_CAP, MODE_OFF, MODE_MANUAL)
+# Plans that can be the default: used when a car is plugged in and returned to after another plan has run.
+DEFAULT_MODES = (MODE_SMART, MODE_FIXED, MODE_PRICE_CAP, MODE_NOW, MODE_MANUAL)
 
 # How many days back an unknown price may be borrowed from (same clock time).
 ESTIMATE_DAYS_BACK = 7

@@ -62,6 +62,7 @@ from .control import CONNECTED, Action, ChargerState, Controller
 from .control import Event as ChargerEvent
 from .phone import PhoneNotifier
 from .plan import (
+    DEFAULT_MODES,
     MODE_FIXED,
     MODE_MANUAL,
     MODE_NOW,
@@ -127,10 +128,12 @@ class ChargePlanner:
             "fixed_start": time.fromisoformat(DEFAULT_FIXED_START),
             "fixed_end": time.fromisoformat(DEFAULT_FIXED_END),
         }
+        # The default plan runs when a car is plugged in; any other plan returns to it once it has run.
+        self.default_mode = MODE_SMART
         self.mode = MODE_SMART
         self.mode_before_now = MODE_SMART
-        # Set once the charger has been connected while a temporary plan (anything but the cheapest plan
-        # and manual) is chosen; unplugging after that returns to the cheapest plan. Stored with the
+        # Set once the charger has been connected while a temporary plan (anything but the default plan
+        # and manual) is chosen; unplugging after that returns to the default plan. Stored with the
         # select entity, so an unplug while Home Assistant was down is noticed too.
         self.now_seen_connected = False
         # Confirmation on the phone: on/off, and since when a new plan waits for an answer.
@@ -314,6 +317,17 @@ class ChargePlanner:
         self.async_recalculate()
 
     @callback
+    def async_set_default_mode(self, mode: str, restore: bool = False) -> None:
+        """Choose the default plan. A plan that was running as the old default follows the new one."""
+        if mode not in DEFAULT_MODES:
+            return
+        previous, self.default_mode = self.default_mode, mode
+        if not restore and mode != previous and self.mode == previous:
+            self.async_set_mode(mode)
+        else:
+            self.async_recalculate()
+
+    @callback
     def async_set_trip_departure(self, value: datetime | None) -> None:
         self.trip.departure = value
         self.async_recalculate()
@@ -478,12 +492,13 @@ class ChargePlanner:
                 self._disconnected_since = None
             unplugged = (self._disconnected_since is not None
                          and now - self._disconnected_since >= timedelta(seconds=UNPLUG_GRACE_SECONDS))
-            if self.mode not in (MODE_SMART, MODE_MANUAL):
+            if self.mode not in (self.default_mode, MODE_MANUAL):
                 if self.charger_state in CONNECTED:
                     self.now_seen_connected = True
                 elif unplugged and self.now_seen_connected:
-                    _LOGGER.debug("Car unplugged, %s has run, back to the cheapest plan", self.mode)
-                    self.mode = MODE_SMART
+                    _LOGGER.debug("Car unplugged, %s has run, back to the default plan %s", self.mode,
+                                  self.default_mode)
+                    self.mode = self.default_mode
                     self.now_seen_connected = False
             if unplugged:
                 self.awaiting_since = None

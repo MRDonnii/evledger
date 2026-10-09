@@ -64,6 +64,16 @@ async def test_unplugged_while_down_ends_charge_now(hass: HomeAssistant, request
     assert state(hass, "select.bil_charge_mode") == "smart", "a temporary plan that has run returns to the cheapest"
 
 
+async def test_default_plan_survives_and_is_returned_to(hass: HomeAssistant, request, freezer):
+    restore(hass, [State("select.bil_charge_mode", "now", {"mode_before_now": "fixed", "now_seen_connected": True}),
+                   State("select.bil_default_plan", "fixed")])
+    await setup(hass, request, charger_state="disconnected")
+    assert state(hass, "select.bil_default_plan") == "fixed"
+    assert state(hass, "select.bil_charge_mode") == "now", "restoring the default does not touch the plan"
+    await later(hass, freezer)
+    assert state(hass, "select.bil_charge_mode") == "fixed"
+
+
 async def test_charge_now_set_before_plugging_in_waits_for_the_car(hass: HomeAssistant, request, freezer):
     restore(hass, [State("select.bil_charge_mode", "now",
                          {"mode_before_now": "smart", "now_seen_connected": False})])

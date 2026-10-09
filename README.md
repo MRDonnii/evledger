@@ -252,11 +252,12 @@ New entities on the car's device:
 
 | Entity | What it does |
 |---|---|
-| `select.<car>_charge_mode` | Cheapest before departure (default), Fixed time, Charge now, Price cap, Pause, Manual. A plugged-in car runs the cheapest plan; any other plan returns to it when the car is unplugged. |
+| `select.<car>_charge_mode` | Cheapest before departure, Fixed time, Charge now, Price cap, Pause, Manual. A plugged-in car runs the default plan; any other plan returns to it when the car is unplugged. |
+| `select.<car>_default_plan` | The default plan: Cheapest before departure (out of the box), Fixed time, Price cap, Charge now or Manual. When it changes, a plan that was running as the old default follows; a temporary plan is kept until it has run. |
 | `number.<car>_target_soc`, `time.<car>_ready_by` | Target and ready-by time for the cheapest plan. |
 | `time.<car>_fixed_charging_start/end`, `number.<car>_price_cap`, `number.<car>_minimum_soc` | Fixed time charges in the cheapest quarters inside the window and is done by its end; Price cap charges only below the cap (and always up to the minimum). |
 | `datetime.<car>_temporary_departure`, `text.<car>_trip_destination`, `switch.<car>_round_trip` | Temporary plan: departure and destination (address, `lat,lon` or `zone.*`); the road distance comes from OpenStreetMap and the plan charges for the trip plus margin and reserve. |
-| `switch.<car>_confirm_plan_on_phone`, `button.<car>_confirm_plan` | When on, a plugged-in car waits for an answer on the phones (Confirm / Charge now / Pause); without an answer the cheapest plan runs after 60 minutes. |
+| `switch.<car>_confirm_plan_on_phone`, `button.<car>_confirm_plan` | When on, a plugged-in car waits for an answer on the phones (Confirm / Charge now / Pause); without an answer the plan runs after 60 minutes. |
 | `sensor.<car>_charge_status`, `..._next_charge_start/end`, `..._planned_charge_cost/energy` | The plan. `planned_charge_cost` has an `alternatives` attribute with the price of every plan. |
 | `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
 

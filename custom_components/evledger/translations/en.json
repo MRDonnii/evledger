@@ -235,6 +235,16 @@
           "off": "Pause",
           "manual": "Manual (not controlled)"
         }
+      },
+      "default_charge_mode": {
+        "name": "Default plan",
+        "state": {
+          "smart": "Cheapest before departure",
+          "fixed": "Fixed time",
+          "price_cap": "Price cap",
+          "now": "Charge now",
+          "manual": "Manual (not controlled)"
+        }
       }
     },
     "datetime": {

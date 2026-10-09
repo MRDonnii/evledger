@@ -199,6 +199,29 @@ async def test_any_temporary_plan_returns_to_cheapest_after_unplug(hass: HomeAss
     assert state(hass, "select.bil_charge_mode") == "fixed"
 
 
+async def test_default_plan_is_used_and_returned_to(hass: HomeAssistant, request, freezer):
+    await setup(hass, request, cheap_now=False)
+    assert state(hass, "select.bil_default_plan") == "smart"
+
+    async def choose(entity_id, option):
+        await hass.services.async_call("select", "select_option", {"entity_id": entity_id, "option": option},
+                                       blocking=True)
+
+    await choose("select.bil_default_plan", "fixed")
+    assert state(hass, "select.bil_charge_mode") == "fixed", "the plan that ran as the default follows it"
+    assert hass.states.get("select.bil_charge_mode").attributes["default_mode"] == "fixed"
+    await choose("select.bil_charge_mode", "now")
+    hass.states.async_set(MODE, "disconnected")
+    await hass.async_block_till_done()
+    await later(hass, freezer)
+    assert state(hass, "select.bil_charge_mode") == "fixed", "back to the default plan, not the cheapest"
+    await choose("select.bil_charge_mode", "price_cap")
+    await choose("select.bil_default_plan", "smart")
+    assert state(hass, "select.bil_charge_mode") == "price_cap", "a chosen temporary plan is kept"
+    with pytest.raises(Exception):
+        await choose("select.bil_default_plan", "off")
+
+
 async def test_confirm_on_phone(hass: HomeAssistant, request, freezer):
     sent = []
 
@@ -303,6 +326,7 @@ async def test_charger_reboot_keeps_the_plan_and_sends_no_new_message(hass: Home
 
 
 async def test_charger_offline_and_back_resumes_the_plan(hass: HomeAssistant, request, freezer):
+    freezer.move_to(dt_util.now().replace(minute=0, second=5))  # the cheap hour lasts the whole test
     _, calls = await setup(hass, request, charger_state="connected_charging", cheap_now=True)
     hass.states.async_set(MODE, "unavailable")
     await hass.async_block_till_done()
@@ -316,6 +340,7 @@ async def test_charger_offline_and_back_resumes_the_plan(hass: HomeAssistant, re
 
 
 async def test_command_errors_are_retried_without_end(hass: HomeAssistant, request, freezer):
+    freezer.move_to(dt_util.now().replace(minute=0, second=5))  # the cheap hour lasts the whole test
     _, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=True)
     for _ in range(6):  # the charger never reacts
         await later(hass, freezer, 4)
