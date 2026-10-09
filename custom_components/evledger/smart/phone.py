@@ -12,7 +12,7 @@ from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_NOTIFY_ONLY_HOME, CONF_NOTIFY_SERVICES, CONFIRM_TIMEOUT_MINUTES
+from .const import CONF_NOTIFY_ONLY_HOME, CONF_NOTIFY_SERVICES, CONF_NOTIFY_URL, CONFIRM_TIMEOUT_MINUTES
 from .plan import MODE_FIXED, MODE_NOW, MODE_OFF, MODE_PRICE_CAP, MODE_SMART
 
 if TYPE_CHECKING:
@@ -68,53 +68,52 @@ class PhoneNotifier:
         return self.hass.bus.async_listen(ACTION_EVENT, on_action)
 
     def message(self, planner: ChargePlanner) -> str:
-        cheapest = planner.alternatives.get(MODE_SMART)
-        now = planner.alternatives.get(MODE_NOW)
-        unit = planner.price_unit or "kr"
-        lines = []
-        if cheapest and cheapest.blocks:
-            start = dt_util.as_local(cheapest.blocks[0].start).strftime("%H:%M")
-            end = dt_util.as_local(cheapest.blocks[-1].end).strftime("%H:%M")
-            lines.append(f"Billigst: {start}–{end}, {cheapest.cost:.2f} {unit}".replace(".", ","))
-        elif cheapest:
-            lines.append("Billigst: batteriet er allerede ladet til målet")
-        if now and now.cost is not None:
-            lines.append(f"Lad nu: {now.cost:.2f} {unit}".replace(".", ","))
-        if planner.deadline:
-            lines.append(f"Klar {dt_util.as_local(planner.deadline).strftime('%H:%M')}")
-        lines.append(f"Uden svar kører Billigst om {CONFIRM_TIMEOUT_MINUTES} min.")
-        return "\n".join(lines)
+        return f"{self.plan_text(planner)}\nUden svar kører planen om {CONFIRM_TIMEOUT_MINUTES} min."
 
     def plan_text(self, planner: ChargePlanner) -> str:
-        """The active plan in one or two lines: what, when, what it costs."""
+        """The active plan, one fact per line: plan, time, price, energy and target."""
         unit = planner.price_unit or "kr"
         schedule = planner.schedule
 
         def money(value: float) -> str:
             return f"{value:.2f} {unit}".replace(".", ",")
 
-        def clock(value) -> str:
-            return dt_util.as_local(value).strftime("%H:%M")
+        def when(value) -> str:
+            local = dt_util.as_local(value)
+            days = (local.date() - dt_util.now().date()).days
+            day = {0: "", 1: "i morgen "}.get(days, local.strftime("%d.%m. "))
+            return f"{day}{local.strftime('%H:%M')}"
 
         names = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft"}
         if planner.mode == MODE_OFF:
-            return "Pause: bilen lades ikke."
+            return "Plan: Pause\nBilen lades ikke."
+        lines = [f"Plan: {names.get(planner.mode, planner.mode)}"]
         if not schedule.blocks:
-            return f"{names.get(planner.mode, planner.mode)}: batteriet er allerede ladet til målet."
-        span = f"{clock(schedule.blocks[0].start)}–{clock(schedule.blocks[-1].end)}"
+            lines.append("Batteriet er allerede ladet til målet.")
+            return "\n".join(lines)
+        start = "nu" if schedule.blocks[0].start <= dt_util.now() else when(schedule.blocks[0].start)
+        time_line = f"Tid: {start} – {when(schedule.blocks[-1].end)}"
         if len(schedule.blocks) > 1:
-            span += f" ({len(schedule.blocks)} perioder)"
-        line = f"{names.get(planner.mode, planner.mode)}: {span} · {money(schedule.cost or 0)}"
+            time_line += f" ({len(schedule.blocks)} perioder)"
+        lines.append(time_line)
+        price = f"Pris: {money(schedule.cost or 0)}"
         now = planner.alternatives.get(MODE_NOW)
         saving = now.cost - schedule.cost if now and now.cost and schedule.cost is not None else 0
         if planner.mode != MODE_NOW and saving >= 0.5:
-            line += f" (spar {money(saving)})"
-        details = [f"{schedule.energy_kwh:.1f} kWh".replace(".", ",")]
+            price += f" (spar {money(saving)})"
+        lines.append(price)
+        energy = f"Energi: {schedule.energy_kwh:.1f} kWh".replace(".", ",")
         if schedule.target_soc is not None:
-            details.append(f"mål {schedule.target_soc:.0f} %")
+            energy += f" · mål {schedule.target_soc:.0f} %"
+        lines.append(energy)
         if planner.deadline and planner.mode == MODE_SMART:
-            details.append(f"klar {clock(planner.deadline)}")
-        return f"{line}\n" + " · ".join(details)
+            lines.append(f"Klar senest: {when(planner.deadline)}")
+        return "\n".join(lines)
+
+    def _tap(self) -> dict:
+        """Open a dashboard page when the notification itself is tapped (iOS: url, Android: clickAction)."""
+        url = self.options.get(CONF_NOTIFY_URL)
+        return {"url": url, "clickAction": url} if url else {}
 
     async def async_send_info(self, planner: ChargePlanner) -> None:
         """Tell the phones which plan is active, with times and price; the same tag replaces an older one."""
@@ -122,6 +121,7 @@ class PhoneNotifier:
             "title": f"{self.entry.title}: ladeplan aktiv",
             "message": self.plan_text(planner),
             "data": {
+                **self._tap(),
                 "tag": self.tag,
                 "actions": [
                     {"action": f"{self.prefix}NOW", "title": "Lad nu"},
@@ -137,6 +137,7 @@ class PhoneNotifier:
             "title": f"{self.entry.title} er sat til opladning",
             "message": self.message(planner),
             "data": {
+                **self._tap(),
                 "tag": self.tag,
                 "actions": [
                     {"action": f"{self.prefix}CONFIRM", "title": "Bekræft billigst"},

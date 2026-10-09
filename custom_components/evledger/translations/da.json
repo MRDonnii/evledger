@@ -78,13 +78,15 @@
           "charge_switch": "Ladekontakt",
           "car_plugged_entity": "Bilens tilslutnings-sensor",
           "notify_services": "Mobiler der skal bekræfte planen",
-          "notify_only_home": "Kun mobiler der er hjemme"
+          "notify_only_home": "Kun mobiler der er hjemme",
+          "notify_url": "Side der åbnes ved tryk"
         },
         "data_description": {
           "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
           "price_entities": "Tom: ledgerens spotpris-sensor.",
           "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
-          "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke."
+          "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke.",
+          "notify_url": "Dashboard-sti der åbnes, når man trykker på beskeden, fx /teknik-overblik/tesla."
         }
       }
     },

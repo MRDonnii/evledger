@@ -14,6 +14,8 @@ CONF_CAR_PLUGGED_ENTITY = "car_plugged_entity"
 CONF_CAR_DEVICE = "car_device"
 CONF_NOTIFY_SERVICES = "notify_services"
 CONF_NOTIFY_ONLY_HOME = "notify_only_home"
+# Dashboard path opened when the notification itself is tapped, e.g. /dashboard-ev/car.
+CONF_NOTIFY_URL = "notify_url"
 CONF_VEHICLE_MODEL = "vehicle_model"
 VEHICLE_AUTO = "auto"
 

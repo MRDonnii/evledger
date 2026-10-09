@@ -53,6 +53,7 @@ from .smart.const import (
     CONF_CHARGER_TYPE as SC_CHARGER_TYPE,
     CONF_NOTIFY_ONLY_HOME as SC_NOTIFY_ONLY_HOME,
     CONF_NOTIFY_SERVICES as SC_NOTIFY_SERVICES,
+    CONF_NOTIFY_URL as SC_NOTIFY_URL,
     CONF_PRICE_ENTITIES as SC_PRICE_ENTITIES,
     CONF_SMART_CHARGE,
     CONF_SMART_ENABLED,
@@ -514,6 +515,7 @@ def _smart_schema(hass, defaults: dict[str, Any]) -> vol.Schema:
                                           mode=selector.SelectSelectorMode.DROPDOWN)),
         vol.Optional(SC_NOTIFY_ONLY_HOME, default=bool(defaults.get(SC_NOTIFY_ONLY_HOME, False))):
             selector.BooleanSelector(),
+        vol.Optional(SC_NOTIFY_URL, description=suggested(SC_NOTIFY_URL)): selector.TextSelector(),
     })
 
 
