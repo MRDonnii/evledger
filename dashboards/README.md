@@ -15,7 +15,7 @@ tables.
 
 1. Find your vehicle's entity slug — Settings → Devices & services → EV
    Ledger → your vehicle → any entity's ID is `sensor.<slug>_something`.
-2. Copy the file's contents, replace every `energitte` with your slug.
+2. Copy the file's contents, replace every `my_car` with your slug.
 3. Either paste the whole thing as a masonry view's `cards:` list (dashboard
    → Edit → raw configuration editor), or copy individual cards into an
    existing view.
