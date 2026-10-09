@@ -256,6 +256,10 @@ Settings → Devices & services → EV Ledger → **Configure** → (first page 
   the charge power sensor) and the car's own plug sensor.
 - **Charger control**: Zaptec, or any switch that starts/stops charging (OCPP, Monta, Easee, …).
 - **Phones to confirm the plan on** and **Only phones that are home** (Companion app).
+- **Car climate (preconditioning)**: empty finds the car's `climate.*` next to its battery sensor;
+  choose one when another integration sends the commands (see *Controlling the car* below).
+- **Trip calendar** and **Calendar keyword**: events in the next 36 hours become the temporary plan
+  (see *Trips from a calendar* below).
 
 New entities on the car's device:
 
@@ -271,16 +275,46 @@ New entities on the car's device:
 | `switch.<car>_notify_plan_on_phone`, `button.<car>_send_plan_to_phone` | Phone messages: the active plan with time, price and Charge now / Pause when the car is plugged in or the plan changes; a warning once when the target cannot be reached in time (plugged in late, fixed window too short, a trip above the car's charge limit). |
 | `sensor.<car>_charge_status`, `..._next_charge_start/end`, `..._planned_charge_cost/energy` | The plan. `planned_charge_cost` has an `alternatives` attribute with the price of every plan. |
 | `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
+| `switch.<car>_message_when_charging_is_done` | When the plan is done (or the cable comes out), one message with the whole charge: kWh, price and price per kWh, the battery before and after, and when it charged – summed over all periods of a split plan, from the ledger's sessions. On by default. |
+| `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. |
+| `switch.<car>_another_time_at_the_weekend`, `time.<car>_ready_by_at_the_weekend` | Another ready-by time on Saturdays and Sundays (09:00 by default), e.g. later than on workdays. |
+| `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | Turns the car's climate on 20 minutes (by default) before the ready-by time or a trip's departure while the car is home; if it is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
 
 Prices without a published value yet (e.g. tomorrow's before 13:00) are estimated from the same
 time on earlier days. A start waits until the plan has wanted charging for 15 s; a stop the
 charger did not act on is repeated after 45 s. Right after a restart the last battery level is used at once, and until the prices are
 loaded again the charging periods planned before the restart are followed, so a restart at the
-planned start does not lose the charge. A car that stops at its own charge limit is done:
+planned start does not lose the charge. A charger that is offline for 10 minutes while the plan
+wants to charge is reported on the phones at once; the charge starts as soon as it answers again. A car that stops at its own charge limit is done:
 it is neither started again nor reported as stopped from outside. Settings, the chosen plan, a temporary plan and an
 open phone question all survive a restart. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)
 shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
+
+### Trips from a calendar
+
+With a **trip calendar**, EV Ledger reads the next 36 hours every 15 minutes. The first event with
+the **keyword** in its title or description (or, without a keyword, the first event with an
+address) becomes the temporary plan: its address is the destination, and the car leaves so it is
+there at the event's start (the drive time plus 10 minutes, or 45 minutes before when there is no
+address). Moving or deleting the event moves or clears the plan. A trip set by hand is never
+replaced, and a calendar trip cleared by hand is not added again. All-day events are skipped.
+
+### Controlling the car
+
+Preconditioning (and the charge limit the plan respects) needs a car integration that can send
+commands to the car. Tesla now only accepts commands signed with a *virtual key*:
+
+1. **Tesla Fleet** (built into Home Assistant): add the integration, then pair its virtual key
+   with the car (the integration shows a link; open it on the phone with the Tesla app and
+   approve the key in the car). Or **Teslemetry** / **Tessie**, which handle the key for you.
+2. Check `sensor.<car>_charge_status`: `car_climate_entity` names the climate entity EV Ledger
+   will use, `car_charge_limit_entity` the charge limit, `car_at_home` the car's location.
+3. If the commands come from another integration than the battery sensor, choose the climate
+   entity under **Smart charging → Car climate**.
+
+Every home session that ends also fires the event `evledger_charge_finished` (the vehicle and the
+ledger entry: kWh, price, start and end, battery before and after) for your own automations.
 
 ## Roadmap
 

@@ -265,6 +265,9 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self.store.async_upsert_charge(charge)
         self._last_known_session_kwh = None
+        self.hass.bus.async_fire(f"{DOMAIN}_charge_finished", {"vehicle": self.vehicle_name, **charge.to_dict()})
+        if (smart := getattr(self, "smart", None)) is not None:
+            smart.routines.charge_finished(charge)  # the message when the whole charge is done
         _LOGGER.info(
             "%s: home charging ended, %.2f kWh, %s %.2f",
             self.vehicle_name,

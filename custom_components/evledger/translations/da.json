@@ -80,7 +80,10 @@
           "notify_services": "Mobiler der skal bekræfte planen",
           "notify_only_home": "Kun mobiler der er hjemme",
           "notify_url": "Side der åbnes ved tryk",
-          "notify_icon": "Ikon på beskederne"
+          "notify_icon": "Ikon på beskederne",
+          "car_climate_entity": "Bilens klima (forvarmning)",
+          "trip_calendar": "Kalender med ture",
+          "trip_calendar_keyword": "Kodeord i kalenderen"
         },
         "data_description": {
           "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
@@ -88,7 +91,10 @@
           "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
           "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke.",
           "notify_url": "Dashboard-sti der åbnes, når man trykker på beskeden, fx /teknik-overblik/tesla.",
-          "notify_icon": "Material Design-ikon, der vises ved beskederne. Tom: mdi:ev-station."
+          "notify_icon": "Material Design-ikon, der vises ved beskederne. Tom: mdi:ev-station.",
+          "car_climate_entity": "Tom: bilens klima-entity findes på samme enhed som batteri-sensoren. Kræver en bil-integration, der kan sende kommandoer til bilen (Tesla Fleet med virtuel nøgle, Teslemetry eller Tessie).",
+          "trip_calendar": "Begivenheder de næste 36 timer bliver til en midlertidig plan: bilen er ladet nok til turen og kører hjemmefra i tide til begivenhedens start.",
+          "trip_calendar_keyword": "Kun begivenheder med ordet i titlen eller beskrivelsen, fx 'bil'. Tom: alle begivenheder med en adresse."
         }
       }
     },
@@ -211,6 +217,12 @@
       },
       "trip_reserve": {
         "name": "Reserve ved ankomst"
+      },
+      "reminder_soc": {
+        "name": "Påmind under"
+      },
+      "precondition_minutes": {
+        "name": "Forvarm minutter før"
       }
     },
     "time": {
@@ -222,6 +234,12 @@
       },
       "fixed_end": {
         "name": "Fast ladeslut"
+      },
+      "ready_by_weekend": {
+        "name": "Klar senest i weekenden"
+      },
+      "reminder_time": {
+        "name": "Aftentjek kl."
       }
     },
     "select": {
@@ -269,6 +287,18 @@
       },
       "price_cap_override": {
         "name": "Overskrid prisloftet ved behov"
+      },
+      "notify_done": {
+        "name": "Besked når opladningen er færdig"
+      },
+      "plug_reminder": {
+        "name": "Påmindelse om at sætte bilen til"
+      },
+      "weekend_ready_by": {
+        "name": "Anden tid i weekenden"
+      },
+      "precondition": {
+        "name": "Forvarm bilen til Klar senest"
       }
     },
     "button": {

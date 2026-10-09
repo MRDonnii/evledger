@@ -1,4 +1,5 @@
-"""Plan settings: target SOC, charging power, efficiency, price factor, price cap and trip settings."""
+"""Plan settings: target SOC, charging power, efficiency, price factor, price cap, trip settings, the plug-in
+reminder's battery level and how long before the ready-by time the car's climate starts."""
 
 from __future__ import annotations
 
@@ -7,7 +8,7 @@ from homeassistant.components.number import (
     NumberMode,
     RestoreNumber,
 )
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfPower
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfPower, UnitOfTime
 
 from .entity import EvSmartChargeEntity
 from .planner import ChargePlanner
@@ -43,6 +44,14 @@ NUMBERS: tuple[NumberEntityDescription, ...] = (
     NumberEntityDescription(key="trip_reserve", icon="mdi:battery-lock",
                             native_min_value=0, native_max_value=50, native_step=1,
                             native_unit_of_measurement=PERCENTAGE,
+                            mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG),
+    NumberEntityDescription(key="reminder_soc", icon="mdi:battery-alert",
+                            native_min_value=0, native_max_value=100, native_step=5,
+                            native_unit_of_measurement=PERCENTAGE,
+                            mode=NumberMode.SLIDER, entity_category=EntityCategory.CONFIG),
+    NumberEntityDescription(key="precondition_minutes", icon="mdi:timer-cog-outline",
+                            native_min_value=5, native_max_value=60, native_step=5,
+                            native_unit_of_measurement=UnitOfTime.MINUTES,
                             mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG),
 )
 

@@ -1,11 +1,13 @@
-"""Switches: round trip for the temporary trip, confirming new plans on the phone, plan messages and
-exceeding the price cap to reach the target."""
+"""Switches: round trip for the temporary trip, confirming new plans on the phone, plan messages, exceeding the
+price cap to reach the target, and the everyday helpers (done message, plug-in reminder, weekend ready-by time,
+preconditioning)."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
@@ -16,7 +18,53 @@ def build(planner) -> list:
     return list([TripRoundTrip(planner, "trip_round_trip"),
                         ConfirmOnPhone(planner, "confirm_on_phone"),
                         NotifyPlan(planner, "notify_plan"),
-                        ExceedPriceCap(planner, "price_cap_override")])
+                        ExceedPriceCap(planner, "price_cap_override"),
+                        *(PlanFlag(planner, key) for key in FLAG_ICONS)])
+
+
+FLAG_ICONS = {"notify_done": "mdi:battery-check", "plug_reminder": "mdi:power-plug-outline",
+              "weekend_ready_by": "mdi:calendar-weekend", "precondition": "mdi:car-defrost-front"}
+
+
+class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
+    """An on/off setting of the planner (planner.flags)."""
+
+    def __init__(self, planner, key: str) -> None:
+        super().__init__(planner, key)
+        self._attr_icon = FLAG_ICONS[key]
+        if key in ("notify_done", "plug_reminder"):
+            self._attr_entity_category = EntityCategory.CONFIG
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in ("on", "off"):
+            self.planner.flags[self._attr_translation_key] = last.state == "on"
+        if last and self._attr_translation_key == "plug_reminder":
+            # The evening check is made once a day, also across a restart in its window.
+            checked = dt_util.parse_date(str(last.attributes.get("checked_on") or ""))
+            if checked:
+                self.planner.routines.evening_checked = checked
+
+    @property
+    def is_on(self) -> bool:
+        return self.planner.flags[self._attr_translation_key]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        routines = self.planner.routines
+        if self._attr_translation_key == "plug_reminder":
+            return {"checked_on": routines.evening_checked.isoformat() if routines.evening_checked else None}
+        if self._attr_translation_key == "precondition":
+            # The car's climate entity (needs a car integration that can send commands to the car).
+            return {"climate_entity": routines.climate_entity()}
+        return None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.planner.async_set_flag(self._attr_translation_key, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.planner.async_set_flag(self._attr_translation_key, False)
 
 
 class TripRoundTrip(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):

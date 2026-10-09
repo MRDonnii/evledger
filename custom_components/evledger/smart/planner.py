@@ -23,6 +23,7 @@ from .const import (
     CONF_BATTERY_ENTITY,
     CONF_CAPACITY,
     CONF_CAR_PLUGGED_ENTITY,
+    CONF_CAR_TRACKER,
     CONF_PRICE_ENTITIES,
     CONF_VEHICLE_MODEL,
     CONFIRM_TIMEOUT_MINUTES,
@@ -33,9 +34,13 @@ from .const import (
     DEFAULT_FIXED_START,
     DEFAULT_MIN_SOC,
     DEFAULT_POWER_KW,
+    DEFAULT_PRECONDITION_MINUTES,
     DEFAULT_PRICE_CAP,
     DEFAULT_PRICE_FACTOR,
     DEFAULT_READY_BY,
+    DEFAULT_READY_BY_WEEKEND,
+    DEFAULT_REMINDER_SOC,
+    DEFAULT_REMINDER_TIME,
     DEFAULT_TARGET_SOC,
     DEFAULT_TRIP_MARGIN,
     DEFAULT_TRIP_RESERVE,
@@ -82,6 +87,7 @@ from .plan import (
     next_deadline,
     parse_price_attributes,
 )
+from .routines import Routines
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -102,6 +108,10 @@ class TripState:
     error: str | None = None
     looking_up: bool = False
     last_lookup: datetime | None = None
+    # "calendar" when the trip comes from an event in the trip calendar (then kept in step with the event).
+    source: str = ""
+    event_key: str = ""
+    event_start: datetime | None = None
 
 
 class ChargePlanner:
@@ -109,12 +119,15 @@ class ChargePlanner:
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry,
                  options: Callable[[], dict] | None = None,
-                 vehicle: Callable[[], vehicles.Vehicle | None] | None = None) -> None:
+                 vehicle: Callable[[], vehicles.Vehicle | None] | None = None,
+                 open_charge: Callable[[], bool] | None = None) -> None:
         self.hass = hass
         self.entry = entry
         # EV Ledger supplies the settings from its own vehicle and charger setup.
         self._options = options or (lambda: dict(entry.options or entry.data))
         self._vehicle = vehicle
+        # Whether the ledger has a home charging session open (its kWh and price come when it closes).
+        self.open_charge = open_charge or (lambda: False)
         self.settings: dict[str, float] = {
             "target_soc": DEFAULT_TARGET_SOC,
             "charge_power_kw": DEFAULT_POWER_KW,
@@ -125,12 +138,20 @@ class ChargePlanner:
             "consumption": DEFAULT_CONSUMPTION,
             "trip_margin": DEFAULT_TRIP_MARGIN,
             "trip_reserve": DEFAULT_TRIP_RESERVE,
+            "reminder_soc": DEFAULT_REMINDER_SOC,
+            "precondition_minutes": DEFAULT_PRECONDITION_MINUTES,
         }
         self.times: dict[str, time] = {
             "ready_by_time": time.fromisoformat(DEFAULT_READY_BY),
+            "ready_by_weekend": time.fromisoformat(DEFAULT_READY_BY_WEEKEND),
             "fixed_start": time.fromisoformat(DEFAULT_FIXED_START),
             "fixed_end": time.fromisoformat(DEFAULT_FIXED_END),
+            "reminder_time": time.fromisoformat(DEFAULT_REMINDER_TIME),
         }
+        # On/off settings: the message when a charge is done, the evening reminder, another ready-by time at the
+        # weekend and the car's climate before the ready-by time.
+        self.flags: dict[str, bool] = {"notify_done": True, "plug_reminder": True, "weekend_ready_by": False,
+                                       "precondition": False}
         # The default plan runs when a car is plugged in; any other plan returns to it once it has run.
         self.default_mode = MODE_SMART
         self.mode = MODE_SMART
@@ -176,6 +197,7 @@ class ChargePlanner:
         # loaded again, so a restart right at the planned start does not lose the start.
         self.restored_blocks: list[tuple[datetime, datetime]] = []
         self.notify = PhoneNotifier(hass, entry, lambda: self.options)
+        self.routines = Routines(self)
         self._guessed: vehicles.Vehicle | None = None
         self._started_at: datetime | None = None
         self._listeners: list[Callable[[], None]] = []
@@ -246,6 +268,11 @@ class ChargePlanner:
         return self.times["ready_by_time"]
 
     @property
+    def ready_by_weekend(self) -> time | None:
+        """The ready-by time on Saturdays and Sundays, when it differs from the workdays'."""
+        return self.times["ready_by_weekend"] if self.flags["weekend_ready_by"] else None
+
+    @property
     def controls_charger(self) -> bool:
         return self.backend is not None
 
@@ -296,7 +323,13 @@ class ChargePlanner:
                 and trip_state.error == "lookup_failed" and trip_state.last_lookup
                 and dt_util.utcnow() - trip_state.last_lookup >= LOOKUP_RETRY):
             self._start_lookup()
+        now = dt_util.now()
+        if self.routines.calendar_due(now):
+            self.entry.async_create_background_task(self.hass, self.routines.async_calendar(now),
+                                                    "ev_smart_charge_calendar")
         self.async_recalculate()
+        self.routines.evening(now)
+        self.routines.precondition(now)
 
     # -- setters used by the entities ----------------------------------------------------------
 
@@ -359,9 +392,18 @@ class ChargePlanner:
         self.async_recalculate()
 
     @callback
-    def async_set_trip_departure(self, value: datetime | None) -> None:
+    def async_set_flag(self, key: str, value: bool) -> None:
+        if self.flags.get(key) != value and key == "weekend_ready_by":
+            self._rewarn()
+        self.flags[key] = value
+        self.async_recalculate()
+
+    @callback
+    def async_set_trip_departure(self, value: datetime | None, manual: bool = True) -> None:
         self._rewarn()
         self.trip.departure = value
+        if manual:
+            self.trip.source = ""  # set by hand: the calendar no longer moves it
         self.async_recalculate()
 
     @callback
@@ -371,8 +413,10 @@ class ChargePlanner:
         self.async_recalculate()
 
     @callback
-    def async_set_trip_destination(self, value: str, route: trip.Route | None = None) -> None:
+    def async_set_trip_destination(self, value: str, route: trip.Route | None = None, manual: bool = True) -> None:
         """Set the destination. A route restored from before a restart is used as is, without a lookup."""
+        if manual and (value or "").strip() != self.trip.destination:
+            self.trip.source = ""
         self.trip.destination = (value or "").strip()
         self.trip.route = route
         self.trip.error = None
@@ -414,8 +458,46 @@ class ChargePlanner:
 
     @callback
     def async_clear_trip(self) -> None:
+        if self.trip.source == "calendar":
+            self.routines.dismissed.add(self.trip.event_key)  # cleared by hand: the event is not added again
         self.trip = TripState()
         self.async_recalculate()
+
+    @callback
+    def async_calendar_trip(self, event: dict | None) -> None:
+        """The next trip in the calendar: becomes the temporary plan unless one was set by hand."""
+        current = self.trip
+        if event is None:
+            if current.source == "calendar":
+                _LOGGER.debug("The calendar event %s is gone, clearing its trip", current.event_key)
+                self.trip = TripState()
+                self.async_recalculate()
+            return
+        if current.departure is not None and current.source != "calendar":
+            return  # a trip set by hand wins
+        if current.source == "calendar" and current.event_key == event["key"]:
+            if current.destination != event["location"]:
+                self.async_set_trip_destination(event["location"], manual=False)
+            self._calendar_departure()
+            self.async_recalculate()
+            return
+        departure = self.routines.departure(event["start"], None)
+        if departure <= dt_util.now():
+            return
+        _LOGGER.debug("Trip from the calendar: %s at %s", event["summary"], event["start"])
+        self._rewarn()
+        self.trip = TripState(departure=departure, source="calendar", event_key=event["key"],
+                              event_start=event["start"])
+        self.async_set_trip_destination(event["location"], manual=False)
+
+    def _calendar_departure(self) -> None:
+        """A trip from the calendar leaves early enough to be there at the event's start."""
+        current = self.trip
+        if current.source != "calendar" or current.event_start is None:
+            return
+        departure = self.routines.departure(current.event_start, current.route.duration_min if current.route else None)
+        if departure > dt_util.now():
+            current.departure = departure
 
     # -- trip ------------------------------------------------------------------------------------
 
@@ -435,6 +517,7 @@ class ChargePlanner:
         if text != self.trip.destination:
             return  # the destination changed while we were looking up
         self.trip.route, self.trip.error, self.trip.looking_up = route, error, False
+        self._calendar_departure()
         self.async_recalculate()
 
     async def _async_route(self, text: str) -> trip.Route | None:
@@ -555,6 +638,8 @@ class ChargePlanner:
         now = dt_util.now()
         if self.trip.departure is not None and self.trip.departure <= now:
             _LOGGER.debug("Trip departure passed, clearing the temporary plan")
+            if self.trip.source == "calendar":
+                self.routines.dismissed.add(self.trip.event_key)
             self.trip = TripState()
 
         if self.backend:
@@ -566,8 +651,7 @@ class ChargePlanner:
                 self._disconnected_since = self._disconnected_since or now
             elif self.charger_state in CONNECTED:
                 self._disconnected_since = None
-            unplugged = (self._disconnected_since is not None
-                         and now - self._disconnected_since >= timedelta(seconds=UNPLUG_GRACE_SECONDS))
+            unplugged = self.unplugged(now)
             if self.mode not in (self.default_mode, MODE_MANUAL):
                 if self.charger_state in CONNECTED:
                     self.now_seen_connected = True
@@ -596,7 +680,7 @@ class ChargePlanner:
         unique = {slot.start: slot for slot in slots}
         ordered = [unique[key] for key in sorted(unique)]
         self.slot_count = len(ordered)
-        self.deadline = next_deadline(now, self.ready_by)
+        self.deadline = next_deadline(now, self.ready_by, self.ready_by_weekend)
         soc = self._battery_soc()
         self.soc_assumed = False
         if soc is not None:
@@ -646,6 +730,8 @@ class ChargePlanner:
 
         self._control(now)
         self._warn(now)
+        self.routines.check_offline(now)
+        self.routines.check_done(now)
         if self._info_pending and not self._notify_pending:
             self._info_pending = False
             self.entry.async_create_background_task(
@@ -678,6 +764,7 @@ class ChargePlanner:
             self.cap_override = True
             self._limit_id = None
             self._new_plug = True
+            self.routines.new_plug()
             self._refresh_car()
         if not new_plug and event == ChargerEvent.PLUGGED:
             return
@@ -694,6 +781,35 @@ class ChargePlanner:
             self.mode_before_now, self.mode = self.mode, MODE_NOW
             self.now_seen_connected = True
             self.controller.last_desired = True
+
+    def unplugged(self, now: datetime) -> bool:
+        """The charger has been disconnected longer than a reboot or a lost connection takes."""
+        return (self._disconnected_since is not None
+                and now - self._disconnected_since >= timedelta(seconds=UNPLUG_GRACE_SECONDS))
+
+    def car_home(self) -> bool | None:
+        """Whether the car is at home by its location tracker (None when there is none or it is not known)."""
+        tracker = self.options.get(CONF_CAR_TRACKER)
+        state = self.hass.states.get(tracker) if tracker else None
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        return state.state == "home"
+
+    def car_plugged(self) -> bool | None:
+        """Whether this car is plugged in: the charger and the car's own plug sensor, None when not known."""
+        if self.backend is not None and self.charger_state != ChargerState.UNKNOWN:
+            return self.charger_state in CONNECTED and self.car_present
+        if self.plugged_entity and (state := self.hass.states.get(self.plugged_entity)) is not None:
+            if state.state.lower() in PLUGGED_STATES:
+                return True
+            if state.state not in ("unknown", "unavailable"):
+                return False
+        return None
+
+    @callback
+    def notify_listeners(self) -> None:
+        for update in list(self._listeners):
+            update()
 
     def _restored_ahead(self, now: datetime) -> bool:
         """The plan from before a restart still has a charging period that has not ended."""

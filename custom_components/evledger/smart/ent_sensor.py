@@ -110,6 +110,11 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "vehicle_name": planner.vehicle.name if planner.vehicle else None,
                 "vehicle_body": planner.vehicle.body if planner.vehicle else None,
                 "battery_capacity_kwh": planner.capacity,
+                # What EV Ledger can do with the car itself: its climate (preconditioning) and charge limit need a
+                # car integration that sends commands (Tesla Fleet with the virtual key, Teslemetry, Tessie).
+                "car_climate_entity": planner.routines.climate_entity(),
+                "car_charge_limit_entity": planner._limit_entity(),
+                "car_at_home": planner.car_home(),
             }
         if key == "next_charge_start":
             schedule = planner.schedule
