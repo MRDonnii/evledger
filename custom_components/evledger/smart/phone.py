@@ -91,8 +91,11 @@ class PhoneNotifier:
         if not schedule.blocks:
             lines.append("Batteriet er allerede ladet til målet.")
             return "\n".join(lines)
-        start = "nu" if schedule.blocks[0].start <= dt_util.now() else when(schedule.blocks[0].start)
-        time_line = f"Tid: {start} – {when(schedule.blocks[-1].end)}"
+        first, last = schedule.blocks[0].start, schedule.blocks[-1].end
+        start = "nu" if first <= dt_util.now() else when(first)
+        same_day = dt_util.as_local(first).date() == dt_util.as_local(last).date()
+        end = dt_util.as_local(last).strftime("%H:%M") if same_day else when(last)
+        time_line = f"Tid: {start} – {end}"
         if len(schedule.blocks) > 1:
             time_line += f" ({len(schedule.blocks)} perioder)"
         lines.append(time_line)
