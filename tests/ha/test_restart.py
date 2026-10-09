@@ -137,3 +137,9 @@ async def test_last_battery_level_survives_a_restart(hass: HomeAssistant, reques
     await later(hass, freezer, 11)
     assert hass.data["evledger"][next(iter(hass.data["evledger"]))].smart.last_soc == 64
     assert hass.states.get("sensor.bil_charge_status").attributes["battery_level_assumed"] is True
+
+
+
+async def test_unknown_battery_is_not_shown_as_target_reached(hass: HomeAssistant, request):
+    await setup(hass, request, charger_state="connected_finished", soc="unavailable")
+    assert state(hass, "sensor.bil_charge_status") == "unknown"

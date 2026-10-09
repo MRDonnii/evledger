@@ -157,6 +157,7 @@ class ChargePlanner:
         self._info_pending = False
         self._disconnected_since: datetime | None = None
         self._alerted: set[str] = set()
+        self._new_plug = False  # a car was plugged in while running (not just found plugged in at start-up)
         # The last battery level seen (restored with the charge mode), used while the car is not reporting.
         self.last_soc: float | None = None
         self.soc_assumed = False
@@ -486,6 +487,7 @@ class ChargePlanner:
                     self.now_seen_connected = False
             if unplugged:
                 self.awaiting_since = None
+                self._new_plug = False
             elif self.awaiting_since and now - self.awaiting_since >= timedelta(minutes=CONFIRM_TIMEOUT_MINUTES):
                 _LOGGER.debug("No answer on the phone, the plan runs")
                 self.awaiting_since = None
@@ -578,6 +580,7 @@ class ChargePlanner:
             self._hold_until = None
         elif event == ChargerEvent.PLUGGED and new_plug:
             self._alerted.clear()
+            self._new_plug = True
             self._refresh_car()
         if not new_plug and event == ChargerEvent.PLUGGED:
             return
@@ -669,8 +672,8 @@ class ChargePlanner:
             alerts[STATUS_STOPPED_EXTERNALLY] = ("Opladningen blev stoppet af bilen eller appen og startes ikke igen "
                                                  "af sig selv. Tryk Lad nu for at fortsætte.")
         if (text := alerts.get(self.status)) and self.status not in self._alerted:
-            if self.status == STATUS_OTHER_CAR and self._disconnected_since is not None:
-                return
+            if self.status == STATUS_OTHER_CAR and not self._new_plug:
+                return  # only when a car is plugged in, not at every restart while it stands there
             self._alerted.add(self.status)
             self.entry.async_create_background_task(
                 self.hass, self.notify.async_send_alert(text), "ev_smart_charge_notify_alert")
@@ -696,6 +699,8 @@ class ChargePlanner:
             return STATUS_PAUSED
         if desired:
             return STATUS_STARTING
+        if self._battery_soc() is None and not self.soc_assumed:
+            return STATUS_UNKNOWN  # not "target reached" just because the car has not reported yet
         if self.schedule.energy_kwh <= 0 and self.mode != MODE_NOW:
             return STATUS_DONE
         return STATUS_WAITING
