@@ -179,6 +179,10 @@ ESTIMATE_DAYS_BACK = 7
 # A plan split into several blocks must be at least this much cheaper than the best single block;
 # every extra block is another start/stop of the charger and another wake-up of the car.
 SPLIT_MIN_SAVING = 0.05
+# Charging windows whose cost differs by less than this share of the cheapest (and at least WINDOW_TIE_MIN in
+# money) are equally cheap: prices a fraction of a cent apart must not move or stop a planned charge.
+WINDOW_TIE = 0.005
+WINDOW_TIE_MIN = 0.02
 
 
 @dataclass(frozen=True)
@@ -213,6 +217,9 @@ class ScheduleInput:
     min_soc: float | None = None
     # Price cap: may slots above the cap be used when the slots below it cannot reach the target in time?
     cap_override: bool = True
+    # The start of the plan already running or announced: kept while it is still among the cheapest windows, so a
+    # charge is neither stopped nor moved for a difference of a fraction of a cent.
+    keep_start: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -361,7 +368,7 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         need = wall(data.target_soc)
         inside = [slot for slot in usable if slot.end > begin and slot.start < finish]
         take(inside, need, cheapest)
-        window = _cheapest_window(inside, need, kwh, data.price_factor)
+        window = _cheapest_window(inside, need, kwh, data.price_factor, data.keep_start)
         if chosen and window and not _contiguous(chosen.values()):
             split_cost = _allocation_cost(chosen.values(), need, kwh, data.price_factor)
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
@@ -400,7 +407,7 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
     if data.mode in (MODE_SMART, MODE_MANUAL) and len(constraints) == 1 and chosen:
         deadline = constraints[0].deadline
         window = _cheapest_window([slot for slot in usable if slot.end <= deadline], need, kwh,
-                                  data.price_factor)
+                                  data.price_factor, data.keep_start)
         if window and not _contiguous(chosen.values()):
             split_cost = _allocation_cost(chosen.values(), need, kwh, data.price_factor)
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
@@ -472,10 +479,12 @@ def _allocation_cost(slots, need: float, kwh: dict, factor: float) -> float:
     return cost
 
 
-def _cheapest_window(slots: list[TimelineSlot], need: float, kwh: dict, factor: float) -> list[TimelineSlot] | None:
-    """The cheapest run of consecutive slots that holds need kWh; the later one wins a tie."""
-    best: list[TimelineSlot] | None = None
-    best_cost = math.inf
+def _cheapest_window(slots: list[TimelineSlot], need: float, kwh: dict, factor: float,
+                     keep_start: datetime | None = None) -> list[TimelineSlot] | None:
+    """The cheapest run of consecutive slots that holds need kWh. Runs within WINDOW_TIE of the cheapest count as
+    equally cheap: the one starting at keep_start (the charge running or announced) is kept, otherwise the latest
+    wins (the battery sits full for the shortest time). So the plan does not jump for a fraction of a cent."""
+    runs: list[tuple[float, list[TimelineSlot]]] = []
     for index in range(len(slots)):
         have, run = 0.0, []
         for slot in slots[index:]:
@@ -484,8 +493,14 @@ def _cheapest_window(slots: list[TimelineSlot], need: float, kwh: dict, factor: 
             run.append(slot)
             have += kwh[slot.start]
             if have >= need - 1e-9:
-                cost = _allocation_cost(run, need, kwh, factor)
-                if cost <= best_cost + 1e-9:
-                    best, best_cost = list(run), cost
+                runs.append((_allocation_cost(run, need, kwh, factor), list(run)))
                 break
-    return best
+    if not runs:
+        return None
+    cheapest = min(cost for cost, _ in runs)
+    near = [run for cost, run in runs if cost <= cheapest + max(cheapest * WINDOW_TIE, WINDOW_TIE_MIN) + 1e-9]
+    if keep_start is not None:
+        kept = next((run for run in near if run[0].start <= keep_start < run[0].end), None)
+        if kept is not None:
+            return kept
+    return near[-1]

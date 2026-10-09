@@ -707,6 +707,13 @@ class ChargePlanner:
         horizon = max([self.deadline, window[1], *(c.deadline for c in constraints)])
         timeline = build_timeline(now, ordered, horizon)
 
+        # The charge running now, or the start already announced, stays while it is still among the cheapest.
+        keep: datetime | None = None
+        if self.charger_state == ChargerState.CHARGING and self.mode in HOLD_MODES:
+            keep = now
+        elif (announced := self.schedule.next_block(now)) is not None:
+            keep = max(announced.start, now)
+
         def plan_for(mode: str) -> Schedule:
             return build_schedule(ScheduleInput(
                 mode=mode,
@@ -722,6 +729,7 @@ class ChargePlanner:
                 price_cap=self.settings["price_cap"],
                 min_soc=self.settings["min_soc"],
                 cap_override=self.cap_override,
+                keep_start=keep if mode == self.mode else None,
             ), now)
 
         self.schedule = plan_for(self.mode)

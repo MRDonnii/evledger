@@ -185,3 +185,28 @@ def test_small_saving_does_not_split_the_plan():
 def test_later_deadline_with_lower_target_is_ignored():
     with_trip = schedule(soc=60, constraints=[deadline(8, 90), deadline(10, 50)])
     assert with_trip == schedule(soc=60, constraints=[deadline(8, 90)])
+
+
+def _tonight(now):
+    # 9-10 Oct 2026: three hours a tenth of a cent apart, the cheapest at 05.
+    start = datetime(2026, 10, 10, 0, 0, tzinfo=TZ)
+    return hourly(start, [0.393263, 0.392002, 0.394221, 0.400503, 0.413489, 0.391698, 0.690464, 0.844427])
+
+
+def test_near_equal_windows_do_not_move_the_plan():
+    """A window a fraction of a cent cheaper at the next quarter must not move (or stop) the plan."""
+    deadline_c = plan.Constraint(datetime(2026, 10, 10, 6, 45, tzinfo=TZ), 100.0)
+
+    def plan_at(now, keep=None):
+        timeline = plan.build_timeline(now, _tonight(now), now + timedelta(hours=9))
+        data = plan.ScheduleInput(mode="smart", soc=75.0, target_soc=100.0, capacity_kwh=60, efficiency=1.0,
+                                  power_kw=11, price_factor=1.0, timeline=timeline, constraints=(deadline_c,),
+                                  keep_start=keep)
+        return plan.build_schedule(data, now)
+    evening = plan_at(datetime(2026, 10, 9, 22, 0, tzinfo=TZ))
+    first = evening.blocks[0].start
+    later = plan_at(datetime(2026, 10, 10, 0, 30, 28, tzinfo=TZ), keep=first)
+    assert later.blocks[0].start == first, "the announced start is kept"
+    running = datetime(2026, 10, 10, 0, 32, tzinfo=TZ)
+    kept = plan_at(running, keep=running)
+    assert kept.charge_now, "a charge already running is not stopped for a fraction of a cent"
