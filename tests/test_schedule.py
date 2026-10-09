@@ -210,3 +210,21 @@ def test_near_equal_windows_do_not_move_the_plan():
     running = datetime(2026, 10, 10, 0, 32, tzinfo=TZ)
     kept = plan_at(running, keep=running)
     assert kept.charge_now, "a charge already running is not stopped for a fraction of a cent"
+
+
+def test_a_running_charge_is_not_stopped_when_the_cheap_hours_lie_together():
+    """10 Oct 01:13, 88 %: the rest fitted into 05:15-05:55 (0.3917 kr) instead of going on now (0.3920 kr)."""
+    now = datetime(2026, 10, 10, 1, 13, tzinfo=TZ)
+    deadline_c = plan.Constraint(datetime(2026, 10, 10, 6, 45, tzinfo=TZ), 100.0)
+    timeline = plan.build_timeline(now, _tonight(now), now + timedelta(hours=6))
+
+    def plan_at(keep):
+        data = plan.ScheduleInput(mode="smart", soc=88.0, target_soc=100.0, capacity_kwh=60, efficiency=1.0,
+                                  power_kw=11, price_factor=1.0, timeline=timeline, constraints=(deadline_c,),
+                                  keep_start=keep)
+        return plan.build_schedule(data, now)
+
+    assert not plan_at(None).charge_now, "without a running charge the cheapest hour later is fine"
+    kept = plan_at(now)
+    assert kept.charge_now, "a running charge goes on"
+    assert kept.blocks[0].start == now

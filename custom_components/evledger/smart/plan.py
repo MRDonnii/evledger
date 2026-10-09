@@ -374,6 +374,10 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
                 chosen.clear()
                 chosen.update({slot.start: slot for slot in window})
+        kept = _keep_running(list(chosen.values()), inside, need, kwh, data.price_factor, data.keep_start)
+        if kept:
+            chosen.clear()
+            chosen.update({slot.start: slot for slot in kept})
         # A window too short for the target: as much as fits, and how much is missing.
         shortfall = need - energy()
     elif data.mode == MODE_PRICE_CAP:
@@ -412,6 +416,10 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             split_cost = _allocation_cost(chosen.values(), need, kwh, data.price_factor)
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
                 chosen = {slot.start: slot for slot in window}
+        kept = _keep_running(list(chosen.values()), [slot for slot in usable if slot.end <= deadline], need, kwh,
+                             data.price_factor, data.keep_start)
+        if kept:
+            chosen = {slot.start: slot for slot in kept}
 
     # Charging happens in time order and stops when the energy is in the battery.
     remaining = need
@@ -477,6 +485,33 @@ def _allocation_cost(slots, need: float, kwh: dict, factor: float) -> float:
         cost += amount * slot.price * factor
         remaining -= amount
     return cost
+
+
+def _keep_running(chosen: list[TimelineSlot], slots: list[TimelineSlot], need: float, kwh: dict, factor: float,
+                  keep_start: datetime | None) -> list[TimelineSlot] | None:
+    """The charge running now (or the start already announced) as one run from keep_start, when the new choice is not
+    clearly cheaper than going on with it (WINDOW_TIE). On 10 Oct a running charge stopped at 01:15 to finish at
+    05:15 for 0.2 øre; a charge must not stop or move for that."""
+    if keep_start is None or not chosen:
+        return None
+    run: list[TimelineSlot] = []
+    have = 0.0
+    for slot in slots:
+        if not run and not (slot.start <= keep_start < slot.end):
+            continue
+        if run and run[-1].end != slot.start:
+            return None
+        run.append(slot)
+        have += kwh.get(slot.start, 0.0)
+        if have >= need - 1e-9:
+            break
+    if not run or have < need - 1e-9:
+        return None
+    new_cost = _allocation_cost(chosen, need, kwh, factor)
+    kept_cost = _allocation_cost(run, need, kwh, factor)
+    if kept_cost <= new_cost + max(new_cost * WINDOW_TIE, WINDOW_TIE_MIN) + 1e-9:
+        return run
+    return None
 
 
 def _cheapest_window(slots: list[TimelineSlot], need: float, kwh: dict, factor: float,
