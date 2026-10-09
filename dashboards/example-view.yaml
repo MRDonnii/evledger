@@ -5,7 +5,7 @@
 # uses only built-in Home Assistant card types — no extra HACS cards
 # required.
 #
-# Before using: replace every `energitte` with your own vehicle's entity
+# Before using: replace every `my_car` with your own vehicle's entity
 # slug (whatever comes after `sensor.` on your EV Ledger entities — check
 # Settings → Devices & services → EV Ledger → your vehicle to find it).
 #
@@ -13,7 +13,7 @@
 # `cards:` list of a masonry-type view if you just want everything at once.
 
 - type: heading
-  heading: EnerGitte
+  heading: My car
   heading_style: title
   icon: mdi:car-electric
 
@@ -23,19 +23,19 @@
   square: false
   cards:
     - type: tile
-      entity: sensor.energitte_charging_status
+      entity: sensor.my_car_charging_status
       name: Charging
       icon: mdi:ev-station
     - type: tile
-      entity: sensor.energitte_cost_per_km
+      entity: sensor.my_car_cost_per_km
       name: Cost per km
       icon: mdi:cash-multiple
     - type: tile
-      entity: sensor.energitte_total_charging_cost
+      entity: sensor.my_car_total_charging_cost
       name: Total spent
       icon: mdi:cash-multiple
     - type: tile
-      entity: sensor.energitte_total_distance
+      entity: sensor.my_car_total_distance
       name: Total driven
       icon: mdi:map-marker-distance
 
@@ -45,23 +45,23 @@
   square: false
   cards:
     - type: tile
-      entity: sensor.energitte_last_trip
+      entity: sensor.my_car_last_trip
       name: Last trip
       icon: mdi:map-marker-path
     - type: tile
-      entity: sensor.energitte_last_charge
+      entity: sensor.my_car_last_charge
       name: Last charge
       icon: mdi:battery-charging-100
 
 # --- Efficiency vs. rated consumption (only if you configured it) ---
 - type: tile
-  entity: sensor.energitte_efficiency_vs_rated
+  entity: sensor.my_car_efficiency_vs_rated
   name: Efficiency vs. rated
   icon: mdi:thermometer-lines
 
 # --- Performance score (only if efficiency comparison is configured) ---
 - type: tile
-  entity: sensor.energitte_monthly_performance
+  entity: sensor.my_car_monthly_performance
   name: This month's score
   icon: mdi:calendar-month
 
@@ -70,7 +70,7 @@
 - type: markdown
   title: Month by month
   content: >
-    {% set months = state_attr('sensor.energitte_monthly_performance', 'months') or [] %}
+    {% set months = state_attr('sensor.my_car_monthly_performance', 'months') or [] %}
     {% if months %}
     | Month | Distance | Wh/km | Score | Cost |
     |---|---|---|---|---|
@@ -85,12 +85,12 @@
 - type: conditional
   conditions:
     - condition: numeric_state
-      entity: sensor.energitte_charges_needing_price
+      entity: sensor.my_car_charges_needing_price
       above: 0
   card:
     type: markdown
     content: >
-      ⚠️ **{{ states('sensor.energitte_charges_needing_price') }} charge(s)
+      ⚠️ **{{ states('sensor.my_car_charges_needing_price') }} charge(s)
       need a price.** Call `evledger.log_public_charge` (or your phone
       shortcut for it) to fill them in.
 
@@ -100,14 +100,14 @@
 - type: statistics-graph
   title: Charging cost by month
   entities:
-    - sensor.energitte_total_charging_cost
+    - sensor.my_car_total_charging_cost
   period: month
   stat_types:
     - change
 - type: statistics-graph
   title: Distance driven by month
   entities:
-    - sensor.energitte_total_distance
+    - sensor.my_car_total_distance
   period: month
   stat_types:
     - change
@@ -116,7 +116,7 @@
 - type: markdown
   title: Recent trips
   content: >
-    {% set trips = state_attr('sensor.energitte_trips', 'trips') or [] %}
+    {% set trips = state_attr('sensor.my_car_trips', 'trips') or [] %}
     {% if trips %}
     | Date | Distance | Battery used |
     |---|---|---|
@@ -131,7 +131,7 @@
 - type: markdown
   title: Recent charges
   content: >
-    {% set charges = state_attr('sensor.energitte_charges', 'charges') or [] %}
+    {% set charges = state_attr('sensor.my_car_charges', 'charges') or [] %}
     {% if charges %}
     | Date | Where | kWh | Price |
     |---|---|---|---|
