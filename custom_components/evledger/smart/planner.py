@@ -172,6 +172,9 @@ class ChargePlanner:
         # The last battery level seen (restored with the charge mode), used while the car is not reporting.
         self.last_soc: float | None = None
         self.soc_assumed = False
+        # The charging periods of the last plan (kept across a restart): followed until the prices are
+        # loaded again, so a restart right at the planned start does not lose the start.
+        self.restored_blocks: list[tuple[datetime, datetime]] = []
         self.notify = PhoneNotifier(hass, entry, lambda: self.options)
         self._guessed: vehicles.Vehicle | None = None
         self._started_at: datetime | None = None
@@ -265,6 +268,8 @@ class ChargePlanner:
         self._unsubs.append(async_track_state_change_event(self.hass, list(dict.fromkeys(watched)), self._on_state))
         self._unsubs.append(async_track_time_interval(self.hass, self._on_tick, timedelta(minutes=1)))
         self._unsubs.append(self.notify.async_listen(self))
+        # Act as soon as the first minute after a start is over, not at the next minute tick.
+        self._unsubs.append(async_call_later(self.hass, STARTUP_GRACE_SECONDS + 1, self._on_recheck))
         self.async_recalculate()
 
     @callback
@@ -596,8 +601,9 @@ class ChargePlanner:
         self.soc_assumed = False
         if soc is not None:
             self.last_soc = soc
-        elif self._inputs_waited(now):
-            # The car is not reporting (asleep, cloud down): plan with what we know rather than not at all.
+        elif self.last_soc is not None or self._inputs_waited(now):
+            # The car is not reporting (asleep, cloud down, not loaded yet after a restart): plan with the
+            # last level it reported (kept across restarts) right away, or after a while with a low guess.
             soc = self.last_soc if self.last_soc is not None else ASSUMED_SOC
             self.soc_assumed = True
         self.result = calculate(PlanInput(
@@ -689,6 +695,10 @@ class ChargePlanner:
             self.now_seen_connected = True
             self.controller.last_desired = True
 
+    def _restored_ahead(self, now: datetime) -> bool:
+        """The plan from before a restart still has a charging period that has not ended."""
+        return any(end > now for _, end in self.restored_blocks)
+
     def desired(self, now: datetime) -> bool:
         """Should the car charge right now according to the plan."""
         if self.mode in (MODE_OFF, MODE_MANUAL) or self.awaiting_since:
@@ -696,6 +706,9 @@ class ChargePlanner:
         if self.car_full and self.charger_state != ChargerState.CHARGING:
             # Full to the car's own limit: starting again would only be refused (and look like a fault).
             return False
+        if not self.slot_count and self._restored_ahead(now) and self.mode != MODE_NOW:
+            # No prices yet (just restarted): follow the plan from before the restart.
+            return any(start <= now < end for start, end in self.restored_blocks)
         if self.schedule.charge_now:
             if self.charger_state == ChargerState.CHARGING and self.mode in HOLD_MODES:
                 # Keep going to the end of the quarter, so small plan changes do not toggle the charger.
@@ -719,10 +732,11 @@ class ChargePlanner:
         # "Charge now" charges whichever car is plugged in; the plans only the car they belong to.
         if self.mode == MODE_MANUAL or (not self.car_present and self.mode != MODE_NOW):
             return
-        if (self.mode != MODE_NOW and (self._battery_soc() is None or not self.slot_count)
-                and not self._inputs_waited(now)):
-            # Right after a start the car or the price sensor may not be loaded yet: leave the charger
-            # as it is for a while instead of acting on a plan made without them.
+        missing = ((self._battery_soc() is None and self.last_soc is None)
+                   or (not self.slot_count and not self._restored_ahead(now)))
+        if self.mode != MODE_NOW and missing and not self._inputs_waited(now):
+            # Right after a start the car or the price sensor may not be loaded yet and nothing is known
+            # from before: leave the charger as it is for a while instead of acting on a plan without them.
             return
         if self._started_at and (dt_util.utcnow() - self._started_at).total_seconds() < STARTUP_GRACE_SECONDS:
             return

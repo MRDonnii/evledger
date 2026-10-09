@@ -31,13 +31,15 @@ def prices(cheap_now: bool) -> list[dict]:
 
 
 async def setup(hass: HomeAssistant, request, charger_state="connected_finished", charger=True, cheap_now=True,
-                soc="50", grace=0, start_delay=0):
+                soc="50", grace=0, start_delay=0, prices=True):
     """An EV Ledger entry for the car "Bil" with smart charging on (and a simulated Zaptec charger)."""
     hass.states.async_set("sensor.car_battery", soc, {"unit_of_measurement": "%"})
     hass.states.async_set("sensor.car_odometer", "1000", {"unit_of_measurement": "km"})
     hass.states.async_set("device_tracker.car", "home", {"latitude": 56.0, "longitude": 10.0})
     hass.states.async_set("binary_sensor.car_charging", "off")
-    hass.states.async_set("sensor.price", "1.0", {"prices": prices(cheap_now), "unit_of_measurement": "kr/kWh"})
+    if prices:
+        hass.states.async_set("sensor.price", "1.0", {"prices": globals()["prices"](cheap_now),
+                                                      "unit_of_measurement": "kr/kWh"})
     data = {"vehicle_name": "Bil", "vehicle_provider": "tesla_custom", "currency": "DKK",
             "battery_entity": "sensor.car_battery", "odometer_entity": "sensor.car_odometer",
             "device_tracker_entity": "device_tracker.car", "charging_binary_entity": "binary_sensor.car_charging",

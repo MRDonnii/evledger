@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import mock_restore_cache_with_extra_data
 
-from .test_smart_charge import MODE, later, phones, setup, state, with_phone
+from .test_smart_charge import MODE, SWITCH, later, phones, setup, state, with_phone
 
 
 def restore(hass, states: list[State], numbers: dict[str, float] | None = None):
@@ -165,3 +165,27 @@ async def test_price_cap_question_is_not_asked_again_after_a_restart(hass: HomeA
     await later(hass, freezer, 5)
     assert hass.states.get("switch.bil_exceed_price_cap").attributes["over_cap_kwh"] > 0
     assert not [data for _, data in sent if "prisloftet" in data.get("title", "")]
+
+
+def saved_plan(start_minutes: float, end_minutes: float) -> list:
+    now = dt_util.now()
+    return [[(now + timedelta(minutes=start_minutes)).isoformat(), (now + timedelta(minutes=end_minutes)).isoformat()]]
+
+
+async def test_restart_at_the_planned_start_still_starts(hass: HomeAssistant, request):
+    """Neither the car nor the prices are loaded yet: the plan from before the restart is followed."""
+    restore(hass, [State("select.bil_charge_mode", "smart", {"last_soc": 50, "planned": saved_plan(-2, 90)})])
+    _, calls = await setup(hass, request, soc="unavailable", prices=False)
+    assert calls["switch.turn_on"] == [SWITCH]
+
+
+async def test_last_battery_level_is_used_at_once_after_a_restart(hass: HomeAssistant, request):
+    restore(hass, [State("select.bil_charge_mode", "smart", {"last_soc": 50})])
+    _, calls = await setup(hass, request, soc="unavailable", cheap_now=True)
+    assert calls["switch.turn_on"] == [SWITCH], "no ten minute wait when the level from before is known"
+
+
+async def test_an_ended_saved_plan_is_not_followed(hass: HomeAssistant, request):
+    restore(hass, [State("select.bil_charge_mode", "smart", {"last_soc": 50, "planned": saved_plan(-90, -30)})])
+    _, calls = await setup(hass, request, soc="unavailable", prices=False)
+    assert not calls["switch.turn_on"]

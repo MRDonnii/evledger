@@ -274,7 +274,9 @@ New entities on the car's device:
 
 Prices without a published value yet (e.g. tomorrow's before 13:00) are estimated from the same
 time on earlier days. A start waits until the plan has wanted charging for 15 s; a stop the
-charger did not act on is repeated after 45 s. A car that stops at its own charge limit is done:
+charger did not act on is repeated after 45 s. Right after a restart the last battery level is used at once, and until the prices are
+loaded again the charging periods planned before the restart are followed, so a restart at the
+planned start does not lose the charge. A car that stops at its own charge limit is done:
 it is neither started again nor reported as stopped from outside. Settings, the chosen plan, a temporary plan and an
 open phone question all survive a restart. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)

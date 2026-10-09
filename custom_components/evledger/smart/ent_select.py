@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from .entity import EvSmartChargeListenerEntity
 from .plan import DEFAULT_MODES, MODES
@@ -26,6 +27,15 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
             if before in MODES:
                 self.planner.mode_before_now = before
             self.planner.now_seen_connected = bool(last.attributes.get("now_seen_connected"))
+            blocks = []
+            for item in last.attributes.get("planned") or []:
+                try:
+                    start, end = (dt_util.parse_datetime(str(value)) for value in item)
+                except (TypeError, ValueError):
+                    continue
+                if start and end:
+                    blocks.append((start, end))
+            self.planner.restored_blocks = blocks
             warned = last.attributes.get("warned")
             if isinstance(warned, list):
                 self.planner.warned = {str(item) for item in warned}
@@ -45,7 +55,15 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
                 "now_seen_connected": self.planner.now_seen_connected,
                 "last_soc": self.planner.last_soc,
                 "car_limit": self.planner.car_limit(),
-                "warned": sorted(self.planner.warned)}
+                "warned": sorted(self.planner.warned),
+                # The plan's charging periods, followed after a restart until the prices are back.
+                "planned": self._planned()}
+
+    def _planned(self) -> list[list[str]]:
+        planner = self.planner
+        blocks = ([(block.start, block.end) for block in planner.schedule.blocks] if planner.slot_count
+                  else planner.restored_blocks)
+        return [[start.isoformat(), end.isoformat()] for start, end in blocks]
 
     async def async_select_option(self, option: str) -> None:
         self.planner.async_set_mode(option)
