@@ -27,6 +27,7 @@ from .const import (
     CONF_SMART_ENABLED,
     CONF_ZAPTEC_MODE_ENTITY,
 )
+from .plan import parse_price_attributes
 
 # Unique id suffix of the Zaptec integration's "Charger mode" sensor.
 ZAPTEC_MODE_SUFFIX = "_charger_operation_mode"
@@ -73,7 +74,7 @@ def planner_options_from(hass: HomeAssistant, data, smart: dict) -> dict:
     if data.get(CONF_BATTERY_CAPACITY_KWH):
         options[CONF_CAPACITY] = data[CONF_BATTERY_CAPACITY_KWH]
     if not options.get(CONF_PRICE_ENTITIES) and data.get(CONF_SPOT_PRICE_ENTITY):
-        options[CONF_PRICE_ENTITIES] = [data[CONF_SPOT_PRICE_ENTITY]]
+        options[CONF_PRICE_ENTITIES] = price_entities(hass, data[CONF_SPOT_PRICE_ENTITY])
     zaptec_mode = sibling(hass, data.get(CONF_ZAPTEC_POWER_ENTITY), "sensor", suffix=ZAPTEC_MODE_SUFFIX)
     if not options.get(CONF_CHARGER_TYPE):
         options[CONF_CHARGER_TYPE] = CHARGER_ZAPTEC if zaptec_mode else CHARGER_NONE
@@ -84,6 +85,23 @@ def planner_options_from(hass: HomeAssistant, data, smart: dict) -> dict:
         if plug:
             options[CONF_CAR_PLUGGED_ENTITY] = plug
     return options
+
+
+def price_entities(hass: HomeAssistant, spot_price: str) -> list[str]:
+    """The ledger's spot price sensor plus the price lists next to it, e.g. Strømligning's
+    separate "tomorrow" sensor, so the plan sees tomorrow's prices as soon as they are out."""
+    found = [spot_price]
+    registry = er.async_get(hass)
+    entry = registry.async_get(spot_price)
+    if entry is None or entry.device_id is None:
+        return found
+    for other in er.async_entries_for_device(registry, entry.device_id):
+        if other.entity_id == spot_price or other.domain not in ("sensor", "binary_sensor") or other.disabled_by:
+            continue
+        state = hass.states.get(other.entity_id)
+        if state and parse_price_attributes(dict(state.attributes)):
+            found.append(other.entity_id)
+    return found
 
 
 def ledger_vehicle(entry: ConfigEntry) -> vehicles.Vehicle | None:
