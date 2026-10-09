@@ -71,8 +71,12 @@
   },
   "entity": {
     "sensor": {
-      "trips": { "name": "Trips" },
-      "charges": { "name": "Charges" },
+      "trips": {
+        "name": "Trips"
+      },
+      "charges": {
+        "name": "Charges"
+      },
       "charging_status": {
         "name": "Charging status",
         "state": {
@@ -81,14 +85,33 @@
           "public": "Charging (public)"
         }
       },
-      "cost_per_km": { "name": "Cost per km" },
-      "pending_review": { "name": "Charges needing price" },
-      "efficiency": { "name": "Efficiency vs. rated" },
-      "monthly_performance": { "name": "Monthly performance" },
-      "total_cost": { "name": "Total charging cost" },
-      "total_distance": { "name": "Total distance" },
-      "last_trip": { "name": "Last trip" },
-      "last_charge": { "name": "Last charge" }
+      "cost_per_km": {
+        "name": "Cost per km"
+      },
+      "pending_review": {
+        "name": "Charges needing price"
+      },
+      "efficiency": {
+        "name": "Efficiency vs. rated"
+      },
+      "monthly_performance": {
+        "name": "Monthly performance"
+      },
+      "total_cost": {
+        "name": "Total charging cost"
+      },
+      "total_distance": {
+        "name": "Total distance"
+      },
+      "last_trip": {
+        "name": "Last trip"
+      },
+      "last_charge": {
+        "name": "Last charge"
+      },
+      "battery_efficiency_score": {
+        "name": "Battery efficiency score"
+      }
     }
   }
 }

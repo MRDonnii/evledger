@@ -77,6 +77,45 @@ delete_charge:
       selector:
         text:
 
+update_charge:
+  name: Update public charge
+  description: Update price, energy, location, or note on one public charge session.
+  fields:
+    entry_id:
+      name: Vehicle
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    charge_id:
+      name: Charge ID
+      required: true
+      selector:
+        text:
+    kwh:
+      name: Energy added
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 0.1
+          unit_of_measurement: kWh
+    price:
+      name: Total price
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.01
+    location_name:
+      name: Location
+      selector:
+        text:
+    note:
+      name: Note
+      selector:
+        text:
+
 delete_trip:
   name: Delete trip
   description: >-

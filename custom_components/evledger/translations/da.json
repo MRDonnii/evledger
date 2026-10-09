@@ -71,8 +71,12 @@
   },
   "entity": {
     "sensor": {
-      "trips": { "name": "Ture" },
-      "charges": { "name": "Ladninger" },
+      "trips": {
+        "name": "Ture"
+      },
+      "charges": {
+        "name": "Ladninger"
+      },
       "charging_status": {
         "name": "Ladestatus",
         "state": {
@@ -81,14 +85,33 @@
           "public": "Lader (offentlig)"
         }
       },
-      "cost_per_km": { "name": "Pris pr. km" },
-      "pending_review": { "name": "Ladninger der mangler pris" },
-      "efficiency": { "name": "Effektivitet vs. normeret" },
-      "monthly_performance": { "name": "Månedlig performance" },
-      "total_cost": { "name": "Samlet ladeomkostning" },
-      "total_distance": { "name": "Samlet distance" },
-      "last_trip": { "name": "Seneste tur" },
-      "last_charge": { "name": "Seneste ladning" }
+      "cost_per_km": {
+        "name": "Pris pr. km"
+      },
+      "pending_review": {
+        "name": "Ladninger der mangler pris"
+      },
+      "efficiency": {
+        "name": "Effektivitet vs. normeret"
+      },
+      "monthly_performance": {
+        "name": "Månedlig performance"
+      },
+      "total_cost": {
+        "name": "Samlet ladeomkostning"
+      },
+      "total_distance": {
+        "name": "Samlet distance"
+      },
+      "last_trip": {
+        "name": "Seneste tur"
+      },
+      "last_charge": {
+        "name": "Seneste ladning"
+      },
+      "battery_efficiency_score": {
+        "name": "Batteri-effektivitetsscore"
+      }
     }
   }
 }

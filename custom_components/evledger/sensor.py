@@ -43,6 +43,7 @@ async def async_setup_entry(
     ]
     if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
         entities.append(EvLedgerEfficiencySensor(coordinator, entry))
+        entities.append(EvLedgerBatteryEfficiencyScoreSensor(coordinator, entry))
         entities.append(EvLedgerMonthlyPerformanceSensor(coordinator, entry))
     async_add_entities(entities)
 
@@ -379,6 +380,72 @@ class EvLedgerEfficiencySensor(_EvLedgerBaseSensor):
                 if wh_per_km is not None
                 else None
             )
+        return result
+
+
+class EvLedgerBatteryEfficiencyScoreSensor(EvLedgerEfficiencySensor):
+    """Efficiency score overall and by temperature season.
+
+    A score of 100 means the measured consumption matches the configured
+    rated Wh/km. Higher is more efficient. The seasonal labels intentionally
+    use temperature rather than calendar months so warm winter days and cold
+    summer days are compared fairly.
+    """
+
+    _attr_icon = "mdi:battery-heart-variant"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        _EvLedgerBaseSensor.__init__(
+            self,
+            coordinator,
+            entry,
+            "battery_efficiency_score",
+            "Battery efficiency score",
+        )
+        self._battery_capacity_kwh = entry.data[CONF_BATTERY_CAPACITY_KWH]
+        self._rated_wh_per_km = entry.data[CONF_RATED_WH_PER_KM]
+        self._model_label = entry.data.get(CONF_MODEL_LABEL, "Custom")
+
+    def _score(self, bucket: dict[str, float]) -> float | None:
+        wh_per_km = self._wh_per_km(bucket)
+        if wh_per_km is None or wh_per_km <= 0:
+            return None
+        return round((self._rated_wh_per_km / wh_per_km) * 100, 0)
+
+    @property
+    def native_value(self) -> float | None:
+        buckets = self._buckets()
+        total = {
+            "kwh": sum(bucket["kwh"] for bucket in buckets.values()),
+            "km": sum(bucket["km"] for bucket in buckets.values()),
+            "trips": sum(bucket["trips"] for bucket in buckets.values()),
+        }
+        return self._score(total)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        buckets = self._buckets()
+        result: dict[str, Any] = {
+            "model": self._model_label,
+            "rated_wh_per_km": self._rated_wh_per_km,
+            "battery_capacity_kwh": self._battery_capacity_kwh,
+            "method": "rated_wh_per_km / measured_wh_per_km * 100",
+            "winter_definition": f"below {TEMP_BUCKET_COLD_MAX_C} C",
+            "transition_definition": (
+                f"{TEMP_BUCKET_COLD_MAX_C} to {TEMP_BUCKET_MILD_MAX_C - 0.1} C"
+            ),
+            "summer_definition": f"{TEMP_BUCKET_MILD_MAX_C} C and above",
+        }
+        aliases = {"cold": "winter", "mild": "transition", "warm": "summer"}
+        for bucket_name, season_name in aliases.items():
+            bucket = buckets[bucket_name]
+            result[f"{season_name}_score"] = self._score(bucket)
+            result[f"{season_name}_wh_per_km"] = self._wh_per_km(bucket)
+            result[f"{season_name}_trip_count"] = int(bucket["trips"])
+            result[f"{season_name}_distance_km"] = round(bucket["km"], 1)
         return result
 
 

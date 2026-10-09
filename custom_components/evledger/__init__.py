@@ -26,6 +26,7 @@ from .const import (
     SERVICE_DELETE_CHARGE,
     SERVICE_DELETE_TRIP,
     SERVICE_LOG_PUBLIC_CHARGE,
+    SERVICE_UPDATE_CHARGE,
 )
 from .coordinator import EvLedgerCoordinator
 from .models import ChargeSession
@@ -49,6 +50,17 @@ DELETE_CHARGE_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): cv.string,
         vol.Required(ATTR_CHARGE_ID): cv.string,
+    }
+)
+
+UPDATE_CHARGE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entry_id"): cv.string,
+        vol.Required(ATTR_CHARGE_ID): cv.string,
+        vol.Optional(ATTR_KWH): vol.Coerce(float),
+        vol.Optional(ATTR_PRICE): vol.Coerce(float),
+        vol.Optional(ATTR_LOCATION_NAME): cv.string,
+        vol.Optional(ATTR_NOTE): cv.string,
     }
 )
 
@@ -99,16 +111,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
         if not hass.data.get(DOMAIN):
-            for service in (SERVICE_LOG_PUBLIC_CHARGE, SERVICE_DELETE_CHARGE, SERVICE_DELETE_TRIP):
+            for service in (
+                SERVICE_LOG_PUBLIC_CHARGE,
+                SERVICE_UPDATE_CHARGE,
+                SERVICE_DELETE_CHARGE,
+                SERVICE_DELETE_TRIP,
+            ):
                 if hass.services.has_service(DOMAIN, service):
                     hass.services.async_remove(DOMAIN, service)
     return unloaded
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
-    if hass.services.has_service(DOMAIN, SERVICE_LOG_PUBLIC_CHARGE):
-        return
-
     async def _handle_log_public_charge(call: ServiceCall) -> None:
         entry_id = call.data["entry_id"]
         coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
@@ -162,6 +176,30 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         await coordinator.async_request_refresh()
 
+    async def _handle_update_charge(call: ServiceCall) -> None:
+        entry_id = call.data["entry_id"]
+        coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
+        if coordinator is None:
+            raise ValueError(f"Unknown EV Ledger entry_id: {entry_id}")
+
+        charge = coordinator.store.get_charge(call.data[ATTR_CHARGE_ID])
+        if charge is None:
+            raise ValueError(f"No charge with id {call.data[ATTR_CHARGE_ID]!r}")
+        if charge.location_kind != LOCATION_PUBLIC:
+            raise ValueError("Only public charge sessions can be edited manually")
+
+        if ATTR_KWH in call.data:
+            charge.kwh = call.data[ATTR_KWH]
+        if ATTR_PRICE in call.data:
+            charge.price = call.data[ATTR_PRICE]
+        if ATTR_LOCATION_NAME in call.data:
+            charge.location_name = call.data[ATTR_LOCATION_NAME] or None
+        if ATTR_NOTE in call.data:
+            charge.note = call.data[ATTR_NOTE] or None
+        charge.needs_review = charge.kwh is None or charge.price is None
+        await coordinator.store.async_upsert_charge(charge)
+        await coordinator.async_request_refresh()
+
     async def _handle_delete_trip(call: ServiceCall) -> None:
         entry_id = call.data["entry_id"]
         coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
@@ -174,21 +212,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         await coordinator.async_request_refresh()
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_LOG_PUBLIC_CHARGE,
-        _handle_log_public_charge,
-        schema=LOG_PUBLIC_CHARGE_SCHEMA,
+    services = (
+        (SERVICE_LOG_PUBLIC_CHARGE, _handle_log_public_charge, LOG_PUBLIC_CHARGE_SCHEMA),
+        (SERVICE_UPDATE_CHARGE, _handle_update_charge, UPDATE_CHARGE_SCHEMA),
+        (SERVICE_DELETE_CHARGE, _handle_delete_charge, DELETE_CHARGE_SCHEMA),
+        (SERVICE_DELETE_TRIP, _handle_delete_trip, DELETE_TRIP_SCHEMA),
     )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DELETE_CHARGE,
-        _handle_delete_charge,
-        schema=DELETE_CHARGE_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DELETE_TRIP,
-        _handle_delete_trip,
-        schema=DELETE_TRIP_SCHEMA,
-    )
+    for service, handler, schema in services:
+        if not hass.services.has_service(DOMAIN, service):
+            hass.services.async_register(DOMAIN, service, handler, schema=schema)

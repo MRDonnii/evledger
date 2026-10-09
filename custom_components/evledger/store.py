@@ -64,6 +64,10 @@ class EvLedgerStore:
             return None
         return max(candidates, key=lambda c: c.ended_at or "")
 
+    def get_charge(self, charge_id: str) -> ChargeSession | None:
+        """Return one charge session by its stable id."""
+        return self._charges.get(charge_id)
+
     async def async_upsert_trip(self, trip: Trip) -> None:
         self._trips[trip.id] = trip
         await self._async_save()
