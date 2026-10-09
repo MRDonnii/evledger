@@ -85,6 +85,16 @@ def test_next_deadline_rolls_to_tomorrow():
     assert plan.next_deadline(now, time(21, 0)) == datetime(2026, 9, 26, 21, 0, tzinfo=TZ)
 
 
+def test_next_deadline_weekend_time():
+    friday = datetime(2026, 10, 9, 22, 0, tzinfo=TZ)
+    assert plan.next_deadline(friday, time(7, 0), time(10, 0)) == datetime(2026, 10, 10, 10, 0, tzinfo=TZ)
+    assert plan.next_deadline(friday, time(7, 0)) == datetime(2026, 10, 10, 7, 0, tzinfo=TZ), "no weekend time"
+    saturday_morning = datetime(2026, 10, 10, 8, 0, tzinfo=TZ)
+    assert plan.next_deadline(saturday_morning, time(7, 0), time(10, 0)) == datetime(2026, 10, 10, 10, 0, tzinfo=TZ)
+    sunday_evening = datetime(2026, 10, 11, 22, 0, tzinfo=TZ)
+    assert plan.next_deadline(sunday_evening, time(7, 0), time(10, 0)) == datetime(2026, 10, 12, 7, 0, tzinfo=TZ)
+
+
 def test_matches_reference_template_sensors():
     """Same inputs as the original template sensors: 95 % -> 100 %, 57.5 kWh, 90 %, 11 kW, factor 0.75."""
     tomorrow = [1.973915, 1.929249, 1.864633, 1.818775, 1.773315, 1.746239, 1.805191, 1.7256]

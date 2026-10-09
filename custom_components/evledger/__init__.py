@@ -21,6 +21,7 @@ from .const import (
     CONF_VEHICLE_NAME,
     DEFAULT_CURRENCY,
     DOMAIN,
+    LOCATION_HOME,
     LOCATION_PUBLIC,
     PLATFORMS,
     SMART_PLATFORMS,
@@ -103,7 +104,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.platforms = list(PLATFORMS)
     if smart_enabled(entry):
         options = planner_options(hass, entry)
-        coordinator.smart = ChargePlanner(hass, entry, options=lambda: options, vehicle=lambda: ledger_vehicle(entry))
+        coordinator.smart = ChargePlanner(
+            hass, entry, options=lambda: options, vehicle=lambda: ledger_vehicle(entry),
+            open_charge=lambda: coordinator.store.get_open_charge(LOCATION_HOME) is not None)
         coordinator.platforms += SMART_PLATFORMS
 
     await hass.config_entries.async_forward_entry_setups(entry, coordinator.platforms)

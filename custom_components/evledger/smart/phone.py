@@ -219,6 +219,14 @@ class PhoneNotifier:
         for service in self.recipients():
             await self._call(service, data)
 
+    async def async_send_note(self, kind: str, title: str, text: str) -> None:
+        """A message under its own tag and without buttons: the charge is done, a reminder to plug in, the charger
+        is offline."""
+        data = {"title": f"{self.entry.title}: {title}", "message": text,
+                "data": {**self._tap(), "tag": f"{self.tag}_{kind}"}}
+        for service in self.recipients():
+            await self._call(service, data)
+
     async def async_send_plan(self, planner: ChargePlanner) -> None:
         data = {
             "title": f"{self.entry.title} er sat til opladning",

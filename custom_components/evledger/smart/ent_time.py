@@ -1,4 +1,5 @@
-"""Clock times: ready by, and the start and end of the fixed charging window."""
+"""Clock times: ready by (also at the weekend), the start and end of the fixed charging window, and the evening
+check."""
 
 from __future__ import annotations
 
@@ -9,7 +10,8 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .entity import EvSmartChargeEntity
 
-ICONS = {"ready_by_time": "mdi:clock-check-outline", "fixed_start": "mdi:clock-start", "fixed_end": "mdi:clock-end"}
+ICONS = {"ready_by_time": "mdi:clock-check-outline", "ready_by_weekend": "mdi:calendar-weekend-outline",
+         "fixed_start": "mdi:clock-start", "fixed_end": "mdi:clock-end", "reminder_time": "mdi:bell-ring-outline"}
 
 
 def build(planner) -> list:

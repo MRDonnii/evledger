@@ -54,6 +54,35 @@ ASSUMED_SOC = 20.0
 # The plan must want charging this long before a start is sent (see control.Controller).
 START_DELAY_SECONDS = 15
 
+# Ready by on Saturdays and Sundays, when "another time at the weekend" is on.
+DEFAULT_READY_BY_WEEKEND = "09:00"
+# The evening check: a reminder when the car is home without the cable and its battery is below the level, and
+# a warning when the charger is offline while the car is plugged in.
+DEFAULT_REMINDER_TIME = "21:00"
+DEFAULT_REMINDER_SOC = 50.0
+# The evening check is only made this long after its time (not when Home Assistant starts at night).
+REMINDER_WINDOW_HOURS = 3
+# A charger offline this long while the plan wants to charge is reported at once.
+CHARGER_OFFLINE_ALERT_MINUTES = 10
+# Preconditioning: the car's climate is turned on this long before the ready-by time (or a trip's departure),
+# and turned off again this long after it if the car is still plugged in at home.
+DEFAULT_PRECONDITION_MINUTES = 20.0
+PRECONDITION_OFF_AFTER_MINUTES = 30
+# Trips from a calendar: events in the next hours whose title has the keyword (or, without one, that have a
+# location) become the temporary plan, leaving early enough to arrive at the event's start.
+CONF_TRIP_CALENDAR = "trip_calendar"
+CONF_TRIP_KEYWORD = "trip_calendar_keyword"
+CALENDAR_LOOKAHEAD_HOURS = 36
+CALENDAR_REFRESH_MINUTES = 15
+# Leave this long before the event when the drive time is not known yet, and this much earlier than the drive time.
+CALENDAR_LEAD_MINUTES = 45
+CALENDAR_MARGIN_MINUTES = 10
+# The car's location (from EV Ledger's setup), for the reminder and preconditioning.
+CONF_CAR_TRACKER = "car_tracker"
+# The car's climate entity, when it is not on the battery sensor's device (another car integration sends the
+# commands, e.g. Teslemetry or Tesla Fleet next to Tesla Custom).
+CONF_CAR_CLIMATE = "car_climate_entity"
+
 STATUS_PLAN_ONLY = "plan_only"
 STATUS_MANUAL = "manual"
 STATUS_DISCONNECTED = "disconnected"

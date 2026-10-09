@@ -33,7 +33,7 @@ class TripDestination(EvSmartChargeListenerEntity, TextEntity, RestoreEntity):
                     route = Route(**{field: last.attributes.get(field) for field in ROUTE_FIELDS})
                 except TypeError:
                     route = None
-            self.planner.async_set_trip_destination(last.state, route)
+            self.planner.async_set_trip_destination(last.state, route, manual=False)
 
     @property
     def native_value(self) -> str:

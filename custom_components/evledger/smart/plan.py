@@ -107,12 +107,16 @@ def parse_price_attributes(attributes: dict) -> list[PriceSlot]:
     return sorted(slots.values(), key=lambda slot: slot.start)
 
 
-def next_deadline(now: datetime, ready_by: time) -> datetime:
-    """The next occurrence of the ready-by clock time, in now's time zone."""
-    candidate = datetime.combine(now.date(), ready_by, tzinfo=now.tzinfo)
-    if candidate <= now:
-        candidate = datetime.combine(now.date() + timedelta(days=1), ready_by, tzinfo=now.tzinfo)
-    return candidate
+def next_deadline(now: datetime, ready_by: time, weekend: time | None = None) -> datetime:
+    """The next occurrence of the ready-by clock time, in now's time zone. With a weekend time, Saturdays and
+    Sundays use that one instead (e.g. later than on workdays)."""
+    for days in range(8):
+        day = now.date() + timedelta(days=days)
+        clock = weekend if weekend is not None and day.weekday() >= 5 else ready_by
+        candidate = datetime.combine(day, clock, tzinfo=now.tzinfo)
+        if candidate > now:
+            return candidate
+    raise AssertionError("unreachable: a ready-by time comes within a week")
 
 
 def calculate(data: PlanInput, now: datetime) -> PlanResult:

@@ -9,6 +9,7 @@ from homeassistant.helpers import entity_registry as er
 from ..const import (
     CONF_BATTERY_CAPACITY_KWH,
     CONF_BATTERY_ENTITY,
+    CONF_DEVICE_TRACKER_ENTITY,
     CONF_MODEL_LABEL,
     CONF_RATED_WH_PER_KM,
     CONF_SPOT_PRICE_ENTITY,
@@ -21,6 +22,7 @@ from .const import (
     CHARGER_ZAPTEC,
     CONF_CAPACITY,
     CONF_CAR_PLUGGED_ENTITY,
+    CONF_CAR_TRACKER,
     CONF_CHARGER_TYPE,
     CONF_PRICE_ENTITIES,
     CONF_SMART_CHARGE,
@@ -71,6 +73,8 @@ def planner_options(hass: HomeAssistant, entry: ConfigEntry) -> dict:
 def planner_options_from(hass: HomeAssistant, data, smart: dict) -> dict:
     options = {key: value for key, value in smart.items() if value not in (None, "", [])}
     options[CONF_BATTERY_ENTITY] = data[CONF_BATTERY_ENTITY]
+    if data.get(CONF_DEVICE_TRACKER_ENTITY):
+        options[CONF_CAR_TRACKER] = data[CONF_DEVICE_TRACKER_ENTITY]
     if data.get(CONF_BATTERY_CAPACITY_KWH):
         options[CONF_CAPACITY] = data[CONF_BATTERY_CAPACITY_KWH]
     if not options.get(CONF_PRICE_ENTITIES) and data.get(CONF_SPOT_PRICE_ENTITY):

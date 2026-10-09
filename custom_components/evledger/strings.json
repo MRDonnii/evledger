@@ -80,7 +80,10 @@
           "notify_services": "Phones to confirm the plan on",
           "notify_only_home": "Only phones that are home",
           "notify_url": "Page to open on tap",
-          "notify_icon": "Icon on the messages"
+          "notify_icon": "Icon on the messages",
+          "car_climate_entity": "Car climate (preconditioning)",
+          "trip_calendar": "Trip calendar",
+          "trip_calendar_keyword": "Calendar keyword"
         },
         "data_description": {
           "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
@@ -88,7 +91,10 @@
           "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
           "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone.",
           "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car.",
-          "notify_icon": "Material Design Icon shown with the messages. Empty: mdi:ev-station."
+          "notify_icon": "Material Design Icon shown with the messages. Empty: mdi:ev-station.",
+          "car_climate_entity": "Empty: the car's climate entity on the battery sensor's device. Needs a car integration that can send commands to the car (Tesla Fleet with the virtual key, Teslemetry or Tessie).",
+          "trip_calendar": "Events in the next 36 hours become a temporary plan: the car has enough charge for the trip and leaves home in time for the event's start.",
+          "trip_calendar_keyword": "Only events with this word in the title or description, e.g. 'car'. Empty: every event with an address."
         }
       }
     },
@@ -211,6 +217,12 @@
       },
       "trip_reserve": {
         "name": "Arrival reserve"
+      },
+      "reminder_soc": {
+        "name": "Remind below"
+      },
+      "precondition_minutes": {
+        "name": "Precondition minutes before"
       }
     },
     "time": {
@@ -222,6 +234,12 @@
       },
       "fixed_end": {
         "name": "Fixed charging end"
+      },
+      "ready_by_weekend": {
+        "name": "Ready by at the weekend"
+      },
+      "reminder_time": {
+        "name": "Evening check at"
       }
     },
     "select": {
@@ -269,6 +287,18 @@
       },
       "price_cap_override": {
         "name": "Exceed price cap"
+      },
+      "notify_done": {
+        "name": "Message when charging is done"
+      },
+      "plug_reminder": {
+        "name": "Reminder to plug in"
+      },
+      "weekend_ready_by": {
+        "name": "Another time at the weekend"
+      },
+      "precondition": {
+        "name": "Precondition the car for ready by"
       }
     },
     "button": {

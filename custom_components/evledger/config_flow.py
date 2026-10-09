@@ -48,6 +48,7 @@ from .smart.const import (
     CHARGER_SWITCH as SC_CHARGER_SWITCH,
     CHARGER_TYPES as SC_CHARGER_TYPES,
     CHARGER_ZAPTEC as SC_CHARGER_ZAPTEC,
+    CONF_CAR_CLIMATE as SC_CAR_CLIMATE,
     CONF_CAR_PLUGGED_ENTITY as SC_CAR_PLUGGED_ENTITY,
     CONF_CHARGE_SWITCH as SC_CHARGE_SWITCH,
     CONF_CHARGER_TYPE as SC_CHARGER_TYPE,
@@ -58,6 +59,8 @@ from .smart.const import (
     CONF_PRICE_ENTITIES as SC_PRICE_ENTITIES,
     CONF_SMART_CHARGE,
     CONF_SMART_ENABLED,
+    CONF_TRIP_CALENDAR as SC_TRIP_CALENDAR,
+    CONF_TRIP_KEYWORD as SC_TRIP_KEYWORD,
     CONF_ZAPTEC_MODE_ENTITY as SC_ZAPTEC_MODE_ENTITY,
 )
 from .smart.plan import parse_price_attributes
@@ -518,6 +521,11 @@ def _smart_schema(hass, defaults: dict[str, Any]) -> vol.Schema:
             selector.BooleanSelector(),
         vol.Optional(SC_NOTIFY_URL, description=suggested(SC_NOTIFY_URL)): selector.TextSelector(),
         vol.Optional(SC_NOTIFY_ICON, description=suggested(SC_NOTIFY_ICON)): selector.IconSelector(),
+        vol.Optional(SC_CAR_CLIMATE, description=suggested(SC_CAR_CLIMATE)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="climate")),
+        vol.Optional(SC_TRIP_CALENDAR, description=suggested(SC_TRIP_CALENDAR)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="calendar")),
+        vol.Optional(SC_TRIP_KEYWORD, description=suggested(SC_TRIP_KEYWORD)): selector.TextSelector(),
     })
 
 
