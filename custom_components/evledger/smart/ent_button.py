@@ -9,7 +9,7 @@ from .plan import MODE_SMART
 
 
 def build(planner) -> list:
-    return list([ClearTrip(planner, "trip_clear"), ConfirmPlan(planner, "confirm_plan")])
+    return [ClearTrip(planner, "trip_clear"), ConfirmPlan(planner, "confirm_plan"), SendPlan(planner, "send_plan")]
 
 
 class ClearTrip(EvSmartChargeEntity, ButtonEntity):
@@ -24,3 +24,12 @@ class ConfirmPlan(EvSmartChargeEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         self.planner.async_answer(MODE_SMART)
+
+
+class SendPlan(EvSmartChargeEntity, ButtonEntity):
+    """Send the active plan (times, price, Charge now / Pause) to the chosen phones now."""
+
+    _attr_icon = "mdi:cellphone-arrow-down"
+
+    async def async_press(self) -> None:
+        await self.planner.notify.async_send_info(self.planner)

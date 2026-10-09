@@ -242,3 +242,18 @@ async def test_plan_info_on_phone_with_charge_now(hass: HomeAssistant, request):
     assert state(hass, "select.bil_charge_mode") == "now"
     assert calls["button.press"], "Lad nu from the phone starts the charger"
     assert sent[-1]["message"].startswith("Lad nu: "), "the changed plan is sent again"
+
+
+async def test_send_plan_button(hass: HomeAssistant, request):
+    sent = []
+
+    async def fake_notify(call):
+        sent.append(call.data)
+
+    hass.services.async_register("notify", "mobile_app_a", fake_notify)
+    entry, _ = await setup(hass, request, cheap_now=False)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "smart_charge": {
+        **entry.data["smart_charge"], "notify_services": ["mobile_app_a"]}})
+    await hass.async_block_till_done()
+    await hass.services.async_call("button", "press", {"entity_id": "button.bil_send_plan_to_phone"}, blocking=True)
+    assert sent and sent[0]["message"].startswith("Billigst: ")

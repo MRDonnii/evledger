@@ -260,6 +260,9 @@
       },
       "confirm_plan": {
         "name": "Confirm plan"
+      },
+      "send_plan": {
+        "name": "Send plan to phone"
       }
     },
     "binary_sensor": {
