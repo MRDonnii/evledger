@@ -16,6 +16,10 @@ CONF_NOTIFY_SERVICES = "notify_services"
 CONF_NOTIFY_ONLY_HOME = "notify_only_home"
 # Dashboard path opened when the notification itself is tapped, e.g. /dashboard-ev/car.
 CONF_NOTIFY_URL = "notify_url"
+# Icon on the phone messages (Material Design Icon), and its background colour.
+CONF_NOTIFY_ICON = "notify_icon"
+DEFAULT_NOTIFY_ICON = "mdi:ev-station"
+NOTIFY_COLOR = "#16a34a"
 CONF_VEHICLE_MODEL = "vehicle_model"
 VEHICLE_AUTO = "auto"
 

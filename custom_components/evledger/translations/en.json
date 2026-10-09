@@ -79,14 +79,16 @@
           "car_plugged_entity": "Car plugged-in sensor",
           "notify_services": "Phones to confirm the plan on",
           "notify_only_home": "Only phones that are home",
-          "notify_url": "Page to open on tap"
+          "notify_url": "Page to open on tap",
+          "notify_icon": "Icon on the messages"
         },
         "data_description": {
           "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
           "price_entities": "Empty: the ledger's spot price sensor.",
           "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
           "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone.",
-          "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car."
+          "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car.",
+          "notify_icon": "Material Design Icon shown with the messages. Empty: mdi:ev-station."
         }
       }
     },

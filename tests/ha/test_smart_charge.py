@@ -240,6 +240,7 @@ async def test_plan_info_on_phone_with_charge_now(hass: HomeAssistant, request):
     assert lines[2].startswith("Pris: ") and "(spar " in lines[2]
     assert lines[3].startswith("Energi: ")
     assert sent[0]["data"]["url"] == "/dash/car" and sent[0]["data"]["clickAction"] == "/dash/car"
+    assert sent[0]["data"]["notification_icon"] == "mdi:ev-station"
     actions = {action["title"]: action["action"] for action in sent[0]["data"]["actions"]}
     hass.bus.async_fire("mobile_app_notification_action", {"action": actions["Lad nu"]})
     await hass.async_block_till_done(wait_background_tasks=True)

@@ -12,7 +12,15 @@ from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_NOTIFY_ONLY_HOME, CONF_NOTIFY_SERVICES, CONF_NOTIFY_URL, CONFIRM_TIMEOUT_MINUTES
+from .const import (
+    CONF_NOTIFY_ICON,
+    CONF_NOTIFY_ONLY_HOME,
+    CONF_NOTIFY_SERVICES,
+    CONF_NOTIFY_URL,
+    CONFIRM_TIMEOUT_MINUTES,
+    DEFAULT_NOTIFY_ICON,
+    NOTIFY_COLOR,
+)
 from .plan import MODE_FIXED, MODE_NOW, MODE_OFF, MODE_PRICE_CAP, MODE_SMART
 
 if TYPE_CHECKING:
@@ -114,9 +122,13 @@ class PhoneNotifier:
         return "\n".join(lines)
 
     def _tap(self) -> dict:
-        """Open a dashboard page when the notification itself is tapped (iOS: url, Android: clickAction)."""
+        """Open a dashboard page when the notification itself is tapped (iOS: url, Android: clickAction),
+        and show an EV charging icon instead of the app icon (iOS: rounded avatar, Android: small icon)."""
         url = self.options.get(CONF_NOTIFY_URL)
-        return {"url": url, "clickAction": url} if url else {}
+        data = {"url": url, "clickAction": url} if url else {}
+        data |= {"notification_icon": self.options.get(CONF_NOTIFY_ICON) or DEFAULT_NOTIFY_ICON,
+                 "notification_icon_color": "white", "color": NOTIFY_COLOR}
+        return data
 
     async def async_send_info(self, planner: ChargePlanner) -> None:
         """Tell the phones which plan is active, with times and price; the same tag replaces an older one."""
