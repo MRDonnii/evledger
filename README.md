@@ -256,7 +256,8 @@ Settings → Devices & services → EV Ledger → **Configure** → (first page 
   the charge power sensor) and the car's own plug sensor.
 - **Charger control**: Zaptec, or any switch that starts/stops charging (OCPP, Monta, Easee, …).
 - **Phones to confirm the plan on** and **Only phones that are home** (Companion app).
-- **Car climate (preconditioning)**: empty finds the car's `climate.*` next to its battery sensor;
+- **Car climate (preconditioning)**: empty finds the car's `climate.*` on this car only (its battery sensor's device or
+  a device with the same name in another car integration, preferring Tesla Fleet, Teslemetry or Tessie);
   choose one when another integration sends the commands (see *Controlling the car* below).
 - **Trip calendar** and **Calendar keyword**: events in the next 36 hours become the temporary plan
   (see *Trips from a calendar* below).
@@ -278,7 +279,7 @@ New entities on the car's device:
 | `switch.<car>_message_when_charging_is_done` | When the plan is done (or the cable comes out), one message with the whole charge: kWh, price and price per kWh, the battery before and after, and when it charged – summed over all periods of a split plan, from the ledger's sessions. On by default. |
 | `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. |
 | `switch.<car>_another_time_at_the_weekend`, `time.<car>_ready_by_at_the_weekend` | Another ready-by time on Saturdays and Sundays (09:00 by default), e.g. later than on workdays. |
-| `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | Turns the car's climate on 20 minutes (by default) before the ready-by time or a trip's departure while the car is home; if it is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
+| `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | 20 minutes (by default) before the ready-by time or a trip's departure, while the car is home, the phones are asked **Forvarm / Spring over**; the climate is only turned on after **Forvarm** (no answer, nothing happens). If the car is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
 
 Prices without a published value yet (e.g. tomorrow's before 13:00) are estimated from the same
 time on earlier days. A start waits until the plan has wanted charging for 15 s; a stop the

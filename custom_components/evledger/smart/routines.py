@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -103,8 +104,10 @@ class Routines:
         self.evening_checked: date | None = None
         self._offline_since: datetime | None = None
         self._offline_alerted = False
-        # The ready-by (or departure) time the car's climate was turned on for.
+        # The ready-by (or departure) time the phones were asked to precondition for, and whether they said yes
+        # (then the climate was turned on by us, and is turned off again if nobody left).
         self.precondition_goal: datetime | None = None
+        self.preconditioned = False
         self._climate_id: str | None = None
         self._calendar_checked: datetime | None = None
         self._calendar_busy = False
@@ -209,21 +212,31 @@ class Routines:
     # -- the car's climate before the ready-by time -----------------------------------------------
 
     def climate_entity(self) -> str | None:
-        """The car's climate entity: chosen in the setup, else the one on the battery sensor's device (Tesla Fleet,
-        Teslemetry, Tessie, Tesla Custom)."""
+        """The car's climate entity: chosen in the setup, else one on this car only – the battery sensor's device or a
+        device with the same name in another car integration – preferring one that can send commands to the car
+        (Tesla Fleet, Teslemetry, Tessie) over Tesla Custom."""
         if chosen := self.planner.options.get(CONF_CAR_CLIMATE):
             return chosen
         if self._climate_id is None:
             self._climate_id = ""
             registry = er.async_get(self.hass)
+            devices = dr.async_get(self.hass)
             battery = registry.async_get(self.planner.battery_entity)
-            if battery is not None and battery.device_id is not None:
-                found = [other.entity_id for other in er.async_entries_for_device(registry, battery.device_id)
-                         if other.domain == "climate" and not other.disabled_by]
-                self._climate_id = found[0] if found else ""
+            car = devices.async_get(battery.device_id) if battery is not None and battery.device_id else None
+            if car is not None:
+                name = car.name_by_user or car.name
+                same_car = [device.id for device in devices.devices.values()
+                            if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
+                found = [other for device_id in same_car for other in er.async_entries_for_device(registry, device_id)
+                         if other.domain == "climate" and not other.disabled_by and "overheat" not in other.unique_id]
+                order = ("tesla_fleet", "teslemetry", "tessie")
+                found.sort(key=lambda other: order.index(other.platform) if other.platform in order else len(order))
+                self._climate_id = found[0].entity_id if found else ""
         return self._climate_id or None
 
     def precondition(self, now: datetime) -> None:
+        """Before the ready-by (or departure) time the phones are asked whether to warm the car; the climate is only
+        turned on after an answer (every control of the car is confirmed), never on its own."""
         p = self.planner
         climate = self.climate_entity()
         if climate is None:
@@ -233,16 +246,28 @@ class Routines:
             self.precondition_goal = None
             state = self.hass.states.get(climate)
             # Still plugged in at home: nobody left, so the car does not keep the cabin warm for nothing.
-            if (state is not None and state.state not in (STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN)
+            if (self.preconditioned and state is not None
+                    and state.state not in (STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN)
                     and p.car_plugged() and p.car_home() is not False):
                 self._climate("turn_off", climate)
+            self.preconditioned = False
         target = p.goal_time(now)
         if not p.flags["precondition"] or target is None or self.precondition_goal == target:
             return
         start = target - timedelta(minutes=p.settings["precondition_minutes"])
-        if start <= now < target and p.car_home() is not False:
+        if start <= now < target and p.car_home() is not False and p.notify.targets:
             self.precondition_goal = target
-            self._climate("turn_on", climate)
+            self.preconditioned = False
+            p.entry.async_create_background_task(
+                self.hass, p.notify.async_send_precondition(target), "ev_smart_charge_precondition")
+
+    def answer_precondition(self, yes: bool) -> None:
+        """The phone's answer: warm the car now (only before the time it was asked for)."""
+        goal = self.precondition_goal
+        if not yes or goal is None or dt_util.now() >= goal or (climate := self.climate_entity()) is None:
+            return
+        self.preconditioned = True
+        self._climate("turn_on", climate)
 
     def _climate(self, service: str, entity_id: str) -> None:
         _LOGGER.info("%s: climate.%s on %s", self.planner.entry.title, service, entity_id)

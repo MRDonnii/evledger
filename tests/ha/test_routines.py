@@ -149,41 +149,85 @@ async def test_weekend_ready_by(hass: HomeAssistant, request, freezer):
     assert hass.states.get("sensor.bil_next_charge_start").attributes["deadline"] == planner.deadline
 
 
-async def test_precondition_before_ready_by(hass: HomeAssistant, request, freezer):
-    car = MockConfigEntry(domain="tesla_fleet")
-    car.add_to_hass(hass)
-    device = dr.async_get(hass).async_get_or_create(config_entry_id=car.entry_id, identifiers={("tesla_fleet", "1")})
+async def test_precondition_asks_first_and_only_this_car(hass: HomeAssistant, request, freezer):
+    """The climate is only turned on after "Forvarm" on the phone; the command-capable integration of the same car wins,
+    another car's climate is never used."""
     registry = er.async_get(hass)
-    registry.async_get_or_create("sensor", "tesla_fleet", "vin_battery", device_id=device.id, config_entry=car,
+    devices = dr.async_get(hass)
+    custom = MockConfigEntry(domain="tesla_custom")
+    custom.add_to_hass(hass)
+    car = devices.async_get_or_create(config_entry_id=custom.entry_id, identifiers={("tesla_custom", "vin")},
+                                      name="Bil")
+    registry.async_get_or_create("sensor", "tesla_custom", "vin_battery", device_id=car.id, config_entry=custom,
                                  suggested_object_id="car_battery")
-    registry.async_get_or_create("climate", "tesla_fleet", "vin_climate", device_id=device.id, config_entry=car,
-                                 suggested_object_id="car_climate")
+    registry.async_get_or_create("climate", "tesla_custom", "vin_hvac", device_id=car.id, config_entry=custom,
+                                 suggested_object_id="car_hvac")
+    fleet = MockConfigEntry(domain="tesla_fleet")
+    fleet.add_to_hass(hass)
+    for ident, name, object_id in (("1", "Bil", "car_climate"), ("2", "Brother", "other_climate")):
+        device = devices.async_get_or_create(config_entry_id=fleet.entry_id, identifiers={("tesla_fleet", ident)},
+                                             name=name)
+        registry.async_get_or_create("climate", "tesla_fleet", f"{ident}_climate", device_id=device.id,
+                                     config_entry=fleet, suggested_object_id=object_id)
     hass.states.async_set("climate.car_climate", "off")
     climate: list[str] = []
 
     async def record(call):
-        climate.append(call.service)
+        climate.append(f"{call.service} {call.data['entity_id']}")
         hass.states.async_set("climate.car_climate", "heat_cool" if call.service == "turn_on" else "off")
 
     hass.services.async_register("climate", "turn_on", record)
     hass.services.async_register("climate", "turn_off", record)
+    sent = phones(hass)
     entry, _ = await setup(hass, request, charger_state="connected_finished", cheap_now=False)
-    planner = entry.runtime_data
+    await with_options(hass, entry)
+    planner = hass.data[DOMAIN][entry.entry_id].smart
     assert hass.states.get("sensor.bil_charge_status").attributes["car_climate_entity"] == "climate.car_climate"
     ready = (dt_util.now() + timedelta(minutes=30)).time().replace(second=0)
     await set_time(hass, "time.bil_ready_by", ready)
     await later(hass, freezer, 1)
-    assert not climate, "off by default"
     await switch(hass, "switch.bil_precondition_the_car_for_ready_by")
     await later(hass, freezer, 5)
-    assert not climate, "not yet: 20 minutes before"
+    assert not [m for m in sent if "forvarm" in m.get("title", "")], "not yet: 20 minutes before"
     await later(hass, freezer, 6)
-    assert climate == ["turn_on"]
+    asked = [m for m in sent if "forvarm" in m.get("title", "")]
+    assert len(asked) == 1
+    assert not climate, "nothing without an answer"
+    yes = asked[0]["data"]["actions"][0]["action"]
+    hass.bus.async_fire("mobile_app_notification_action", {"action": yes})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert climate == ["turn_on climate.car_climate"]
     await later(hass, freezer, 5)
-    assert climate == ["turn_on"], "once"
+    assert len([m for m in sent if "forvarm" in m.get("title", "")]) == 1, "asked once"
     await later(hass, freezer, 45)
-    assert climate == ["turn_on", "turn_off"], "still plugged in at home after the ready-by time: off again"
+    assert climate == ["turn_on climate.car_climate", "turn_off climate.car_climate"], "nobody left: off again"
     assert planner.routines.precondition_goal is None
+
+
+async def test_precondition_without_answer_does_nothing(hass: HomeAssistant, request, freezer):
+    fleet = MockConfigEntry(domain="tesla_fleet")
+    fleet.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(config_entry_id=fleet.entry_id, identifiers={("tesla_fleet", "1")})
+    registry = er.async_get(hass)
+    for domain, unique, object_id in (("sensor", "vin_battery", "car_battery"),
+                                      ("climate", "vin_climate", "car_climate")):
+        registry.async_get_or_create(domain, "tesla_fleet", unique, device_id=device.id, config_entry=fleet,
+                                     suggested_object_id=object_id)
+    climate: list[str] = []
+
+    async def record(call):
+        climate.append(call.service)
+
+    hass.services.async_register("climate", "turn_on", record)
+    phones(hass)
+    entry, _ = await setup(hass, request, charger_state="connected_finished", cheap_now=False)
+    await with_options(hass, entry)
+    ready = (dt_util.now() + timedelta(minutes=30)).time().replace(second=0)
+    await set_time(hass, "time.bil_ready_by", ready)
+    await switch(hass, "switch.bil_precondition_the_car_for_ready_by")
+    for _ in range(8):
+        await later(hass, freezer, 10)
+    assert not climate
 
 
 async def test_trip_from_calendar(hass: HomeAssistant, request, freezer, aioclient_mock):

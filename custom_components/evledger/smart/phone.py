@@ -79,6 +79,8 @@ class PhoneNotifier:
                 planner.async_answer(planner.mode)  # the plan that waits for the answer, e.g. the default plan
             elif answer in ("CAP_OK", "CAP_STOP"):
                 planner.async_set_cap_override(answer == "CAP_OK")
+            elif answer in ("PRE_ON", "PRE_SKIP"):
+                planner.routines.answer_precondition(answer == "PRE_ON")
             elif mode := ANSWERS.get(answer):
                 planner.async_answer(mode)
 
@@ -200,6 +202,18 @@ class PhoneNotifier:
             "message": text,
             "data": {**self._tap(), "tag": self.tag,
                      "actions": [{"action": f"{self.prefix}NOW", "title": "Lad nu"}]},
+        }
+        for service in self.recipients():
+            await self._call(service, data)
+
+    async def async_send_precondition(self, goal) -> None:
+        """Ask before the car's climate is turned on: without an answer nothing happens."""
+        data = {
+            "title": f"{self.entry.title}: forvarm bilen?",
+            "message": f"Afgang {self.when(goal)}. Klimaet tændes kun, hvis du trykker Forvarm.",
+            "data": {**self._tap(), "tag": f"{self.tag}_precondition",
+                     "actions": [{"action": f"{self.prefix}PRE_ON", "title": "Forvarm"},
+                                 {"action": f"{self.prefix}PRE_SKIP", "title": "Spring over"}]},
         }
         for service in self.recipients():
             await self._call(service, data)
