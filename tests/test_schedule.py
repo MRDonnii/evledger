@@ -59,11 +59,18 @@ def test_unknown_prices_are_borrowed_from_the_day_before():
     assert result.blocks[0].start.hour == 1  # 01:00 was 0.1 yesterday
 
 
-def test_fixed_window_charges_from_its_start():
+def test_fixed_window_charges_in_its_cheapest_quarters():
     window = plan.fixed_window(NIGHT, time(23, 0), time(5, 0))
     result = schedule(mode="fixed", window=window)
-    assert result.blocks[0].start == datetime(2026, 10, 9, 23, 0, tzinfo=TZ)
-    assert result.blocks[0].end == datetime(2026, 10, 10, 0, 30, tzinfo=TZ)
+    # 6 quarters: the 0.5 hour at 01 and the next two at 0.6, all inside 23-05
+    assert [(b.start, b.end) for b in result.blocks] == [
+        (datetime(2026, 10, 10, 1, 0, tzinfo=TZ), datetime(2026, 10, 10, 2, 30, tzinfo=TZ))]
+
+
+def test_fixed_window_never_charges_outside_it():
+    window = plan.fixed_window(NIGHT, time(22, 0), time(0, 0))  # 22-24: cheap hours lie after it
+    result = schedule(mode="fixed", window=window)
+    assert all(b.start >= window[0] and b.end <= window[1] for b in result.blocks)
 
 
 def test_fixed_window_wraps_and_contains_now():

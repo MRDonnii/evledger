@@ -336,9 +336,17 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         need = wall(data.target_soc)
         take(usable, need, chronological)
     elif data.mode == MODE_FIXED and data.window:
+        # The cheapest quarters inside the window, done by its end (one block unless splitting saves enough).
         begin, finish = data.window
         need = wall(data.target_soc)
-        take([slot for slot in usable if slot.end > begin and slot.start < finish], need, chronological)
+        inside = [slot for slot in usable if slot.end > begin and slot.start < finish]
+        take(inside, need, cheapest)
+        window = _cheapest_window(inside, need, kwh, data.price_factor)
+        if chosen and window and not _contiguous(chosen.values()):
+            split_cost = _allocation_cost(chosen.values(), need, kwh, data.price_factor)
+            if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
+                chosen.clear()
+                chosen.update({slot.start: slot for slot in window})
     elif data.mode == MODE_PRICE_CAP:
         if data.min_soc is not None and data.soc < data.min_soc:
             take(usable, wall(data.min_soc), chronological)
