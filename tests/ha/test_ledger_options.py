@@ -67,3 +67,42 @@ async def test_tomorrow_prices_next_to_the_spot_price_are_used(hass: HomeAssista
     entry, _ = await setup(hass, request)
     assert hass.data[DOMAIN][entry.entry_id].smart.options["price_entities"] == [
         "sensor.price", "binary_sensor.price_tomorrow"]
+
+
+async def test_a_cleared_provider_entity_drops_the_provider(hass: HomeAssistant, request):
+    entry, _ = await setup(hass, request)
+    hass.states.async_set("sensor.monta_last_charge", "completed")
+    hass.config_entries.async_update_entry(entry, data={
+        **entry.data, "monta_last_charge_entity": "sensor.monta_last_charge",
+        "charger_providers": [*entry.data["charger_providers"], "monta"]})
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    # The form sends what is left in the fields: here everything but Monta.
+    keep = {key: entry.data[key] for key in ("battery_entity", "odometer_entity", "device_tracker_entity",
+                                              "charging_binary_entity", "spot_price_entity", "zaptec_power_entity",
+                                              "zaptec_session_energy_entity")}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], keep)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], entry.data["smart_charge"])
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert "monta" not in entry.data["charger_providers"]
+    assert "monta_last_charge_entity" not in entry.data
+    assert entry.data["zaptec_power_entity"] == "sensor.charger_power", "the fields that were kept stay"
+
+
+async def test_monta_can_still_be_chosen(hass: HomeAssistant, request):
+    entry, _ = await setup(hass, request)
+    hass.states.async_set("sensor.monta_last_charge", "completed")
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    fields = {key: entry.data[key] for key in ("battery_entity", "odometer_entity", "device_tracker_entity",
+                                                "charging_binary_entity", "spot_price_entity", "zaptec_power_entity",
+                                                "zaptec_session_energy_entity")}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**fields, "monta_last_charge_entity": "sensor.monta_last_charge"})
+    result = await hass.config_entries.options.async_configure(result["flow_id"], entry.data["smart_charge"])
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert entry.data["charger_providers"] == ["manual", "zaptec", "monta", "spot_price"]
+    assert entry.data["monta_last_charge_entity"] == "sensor.monta_last_charge"

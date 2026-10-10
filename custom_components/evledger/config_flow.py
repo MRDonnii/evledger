@@ -252,7 +252,9 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     No device picker here (the originally picked device isn't persisted,
     only the entities it resolved to) — this edits entities directly.
     Clearing an entity that identifies a provider (Zaptec power/session,
-    Monta last-charge, spot price) drops that provider on save.
+    Monta last-charge, spot price) drops that provider on save. The provider
+    entities are suggested, not defaults: a default would be filled in again
+    when the field is cleared.
     """
     schema_dict: dict[Any, Any] = {}
     schema_dict.update(_vehicle_schema(defaults).schema)
@@ -260,31 +262,31 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
         {
             vol.Optional(
                 CONF_ZAPTEC_POWER_ENTITY,
-                default=defaults.get(CONF_ZAPTEC_POWER_ENTITY, vol.UNDEFINED),
+                description={"suggested_value": defaults.get(CONF_ZAPTEC_POWER_ENTITY)},
             ): _entity_selector("sensor"),
             vol.Optional(
                 CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
-                default=defaults.get(CONF_ZAPTEC_SESSION_ENERGY_ENTITY, vol.UNDEFINED),
+                description={"suggested_value": defaults.get(CONF_ZAPTEC_SESSION_ENERGY_ENTITY)},
             ): _entity_selector("sensor"),
             vol.Optional(
                 CONF_ZAPTEC_CHARGING_ENTITY,
-                default=defaults.get(CONF_ZAPTEC_CHARGING_ENTITY, vol.UNDEFINED),
+                description={"suggested_value": defaults.get(CONF_ZAPTEC_CHARGING_ENTITY)},
             ): _entity_selector(["binary_sensor", "switch"]),
             vol.Optional(
                 CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
-                default=defaults.get(CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY, vol.UNDEFINED),
+                description={"suggested_value": defaults.get(CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY)},
             ): _entity_selector("sensor"),
             vol.Optional(
                 CONF_MONTA_LAST_CHARGE_ENTITY,
-                default=defaults.get(CONF_MONTA_LAST_CHARGE_ENTITY, vol.UNDEFINED),
+                description={"suggested_value": defaults.get(CONF_MONTA_LAST_CHARGE_ENTITY)},
             ): _entity_selector("sensor"),
             vol.Optional(
                 CONF_MONTA_WALLET_ENTITY,
-                default=defaults.get(CONF_MONTA_WALLET_ENTITY, vol.UNDEFINED),
+                description={"suggested_value": defaults.get(CONF_MONTA_WALLET_ENTITY)},
             ): _entity_selector("sensor"),
             vol.Optional(
                 CONF_SPOT_PRICE_ENTITY,
-                default=defaults.get(CONF_SPOT_PRICE_ENTITY, vol.UNDEFINED),
+                description={"suggested_value": defaults.get(CONF_SPOT_PRICE_ENTITY)},
             ): _entity_selector("sensor"),
             vol.Optional(
                 CONF_TESLA_MODEL_KEY,
