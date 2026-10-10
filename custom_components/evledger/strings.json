@@ -230,6 +230,21 @@
       },
       "home_cost_today": {
         "name": "Home charging cost today"
+      },
+      "distance_today": {
+        "name": "Distance today"
+      },
+      "home_charging_power": {
+        "name": "Home charging power"
+      },
+      "home_charging_energy": {
+        "name": "Home charging energy"
+      },
+      "home_charging_energy_today": {
+        "name": "Home charging energy today"
+      },
+      "home_charging_energy_month": {
+        "name": "Home charging energy this month"
       }
     },
     "number": {
@@ -268,6 +283,12 @@
       },
       "low_price": {
         "name": "Cheap power message below"
+      },
+      "public_charge_energy": {
+        "name": "Public charge energy"
+      },
+      "public_charge_price": {
+        "name": "Public charge price"
       }
     },
     "time": {
@@ -325,6 +346,9 @@
     "text": {
       "trip_destination": {
         "name": "Trip destination"
+      },
+      "public_charge_location": {
+        "name": "Public charge location"
       }
     },
     "switch": {
@@ -377,6 +401,9 @@
       },
       "send_monthly_summary": {
         "name": "Send monthly summary"
+      },
+      "log_public_charge": {
+        "name": "Log public charge"
       }
     },
     "binary_sensor": {
@@ -397,6 +424,9 @@
   "exceptions": {
     "departure_out_of_range": {
       "message": "The departure must be in the future and at most 14 days ahead."
+    },
+    "public_charge_no_kwh": {
+      "message": "Enter the public charge's kWh first."
     }
   }
 }

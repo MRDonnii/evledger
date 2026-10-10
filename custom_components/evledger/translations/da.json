@@ -230,6 +230,21 @@
       },
       "home_cost_today": {
         "name": "Hjemmeladning i dag"
+      },
+      "distance_today": {
+        "name": "Kørt i dag"
+      },
+      "home_charging_power": {
+        "name": "Hjemmeladning effekt"
+      },
+      "home_charging_energy": {
+        "name": "Hjemmeladning kWh i alt"
+      },
+      "home_charging_energy_today": {
+        "name": "Hjemmeladning kWh i dag"
+      },
+      "home_charging_energy_month": {
+        "name": "Hjemmeladning kWh denne måned"
       }
     },
     "number": {
@@ -268,6 +283,12 @@
       },
       "low_price": {
         "name": "Besked ved strømpris under"
+      },
+      "public_charge_energy": {
+        "name": "Offentlig ladning kWh"
+      },
+      "public_charge_price": {
+        "name": "Offentlig ladning pris"
       }
     },
     "time": {
@@ -325,6 +346,9 @@
     "text": {
       "trip_destination": {
         "name": "Turens destination"
+      },
+      "public_charge_location": {
+        "name": "Offentlig ladning sted"
       }
     },
     "switch": {
@@ -377,6 +401,9 @@
       },
       "send_monthly_summary": {
         "name": "Send månedsoversigt"
+      },
+      "log_public_charge": {
+        "name": "Gem offentlig ladning"
       }
     },
     "binary_sensor": {
@@ -397,6 +424,9 @@
   "exceptions": {
     "departure_out_of_range": {
       "message": "Afgangen skal ligge ude i fremtiden og højst 14 dage frem."
+    },
+    "public_charge_no_kwh": {
+      "message": "Skriv først kWh for den offentlige ladning."
     }
   }
 }

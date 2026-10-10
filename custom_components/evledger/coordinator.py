@@ -149,6 +149,71 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.store.async_upsert_trip(trip)
         _LOGGER.info("%s: trip ended, %s km", self.vehicle_name, trip.distance_km)
 
+    # ---------------------------------------------------------- public charge
+
+    async def async_log_public_charge(self, kwh: float, price: float, location_name: str | None = None,
+                                      note: str | None = None, started_at: datetime | None = None) -> None:
+        """A public charge with its price: fills in the public session waiting for its price, else a new one."""
+        now = dt_util.utcnow()
+        pending = self.store.get_latest_pending_review_charge()
+        if pending is not None and pending.location_kind == LOCATION_PUBLIC:
+            pending.kwh = kwh
+            pending.price = price
+            pending.location_name = location_name or pending.location_name
+            pending.note = note or pending.note
+            pending.needs_review = False
+            await self.store.async_upsert_charge(pending)
+        else:
+            await self.store.async_upsert_charge(ChargeSession(
+                id=self.store.new_id(), location_kind=LOCATION_PUBLIC, provider="manual",
+                started_at=(started_at or now).isoformat(), ended_at=now.isoformat(), kwh=kwh, price=price,
+                price_currency=self.currency, location_name=location_name, start_battery_pct=None,
+                end_battery_pct=None, needs_review=False, note=note,
+            ))
+        await self.async_request_refresh()
+
+    def home_power_kw(self) -> float | None:
+        """The home charger's power while this car has it (kW): 0 while another car on a shared charger has it."""
+        for provider in self._charger_providers.values():
+            if CAP_LIVE_POWER not in provider.capabilities:
+                continue
+            state = provider.get_live_state(self.hass)
+            if state is None or state.power_w is None:
+                continue
+            smart = getattr(self, "smart", None)
+            if smart is not None and smart.shared and not smart.car_present:
+                return 0.0
+            return round(max(state.power_w, 0.0) / 1000, 3)
+        return None
+
+    def home_energy(self, since: datetime | None = None) -> float:
+        """kWh charged at home: the charges that ended since then (all of them without a time) and the one running."""
+        total = 0.0
+        for charge in self.store.charges:
+            if charge.location_kind != LOCATION_HOME:
+                continue
+            if charge.ended_at:
+                ended = dt_util.parse_datetime(charge.ended_at)
+                if since is None or (ended is not None and ended >= since):
+                    total += charge.kwh or 0.0
+            elif (meter := self.store.meter(charge.id)):
+                total += float(meter.get("priced") or 0.0)
+        return round(total, 2)
+
+    def distance_today(self) -> float:
+        """Kilometres driven today: the trips that ended today and the one under way."""
+        today = dt_util.now().date()
+        total = 0.0
+        for trip in self.store.trips:
+            if trip.ended_at is None:
+                if trip.start_odometer_km is not None and self._last_odometer_km is not None:
+                    total += max(self._last_odometer_km - trip.start_odometer_km, 0.0)
+                continue
+            ended = dt_util.parse_datetime(trip.ended_at)
+            if ended and dt_util.as_local(ended).date() == today:
+                total += trip.distance_km or 0.0
+        return round(total, 1)
+
     # -------------------------------------------------------------- charging
 
     async def _process_charge(self, snapshot: VehicleSnapshot, now: datetime) -> None:

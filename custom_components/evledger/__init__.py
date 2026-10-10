@@ -151,40 +151,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
         if coordinator is None:
             raise ValueError(f"Unknown EV Ledger entry_id: {entry_id}")
 
-        now = dt_util.utcnow()
-        started_at = call.data.get(ATTR_STARTED_AT) or now
-
-        # If there's an open/pending public session waiting for review, fill it in
+        # If there's an open/pending public session waiting for review, it is filled in
         # rather than creating a duplicate — this is the normal case: the car
         # charged away from home, EV Ledger recorded the window but not the
         # price, and the user is now supplying it after the fact.
-        pending = coordinator.store.get_latest_pending_review_charge()
-        if pending is not None and pending.location_kind == LOCATION_PUBLIC:
-            pending.kwh = call.data[ATTR_KWH]
-            pending.price = call.data[ATTR_PRICE]
-            pending.location_name = call.data.get(ATTR_LOCATION_NAME, pending.location_name)
-            pending.note = call.data.get(ATTR_NOTE, pending.note)
-            pending.needs_review = False
-            await coordinator.store.async_upsert_charge(pending)
-        else:
-            session = ChargeSession(
-                id=coordinator.store.new_id(),
-                location_kind=LOCATION_PUBLIC,
-                provider="manual",
-                started_at=started_at.isoformat(),
-                ended_at=now.isoformat(),
-                kwh=call.data[ATTR_KWH],
-                price=call.data[ATTR_PRICE],
-                price_currency=coordinator.currency,
-                location_name=call.data.get(ATTR_LOCATION_NAME),
-                start_battery_pct=None,
-                end_battery_pct=None,
-                needs_review=False,
-                note=call.data.get(ATTR_NOTE),
-            )
-            await coordinator.store.async_upsert_charge(session)
-
-        await coordinator.async_request_refresh()
+        await coordinator.async_log_public_charge(
+            call.data[ATTR_KWH], call.data[ATTR_PRICE], call.data.get(ATTR_LOCATION_NAME),
+            call.data.get(ATTR_NOTE), call.data.get(ATTR_STARTED_AT),
+        )
 
     async def _handle_delete_charge(call: ServiceCall) -> None:
         entry_id = call.data["entry_id"]

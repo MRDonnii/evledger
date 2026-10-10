@@ -5,9 +5,10 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
@@ -15,6 +16,7 @@ from .const import (
     CONF_BATTERY_CAPACITY_KWH,
     CONF_MODEL_LABEL,
     CONF_RATED_WH_PER_KM,
+    CONF_ZAPTEC_POWER_ENTITY,
     DOMAIN,
     LOCATION_HOME,
     TEMP_BUCKET_COLD_MAX_C,
@@ -44,6 +46,11 @@ async def async_setup_entry(
         EvLedgerLastTripSensor(coordinator, entry),
         EvLedgerLastChargeSensor(coordinator, entry),
         EvLedgerHomeCostTodaySensor(coordinator, entry),
+        EvLedgerDistanceTodaySensor(coordinator, entry),
+        EvLedgerHomePowerSensor(coordinator, entry),
+        EvLedgerHomeEnergySensor(coordinator, entry),
+        EvLedgerHomeEnergySensor(coordinator, entry, "today"),
+        EvLedgerHomeEnergySensor(coordinator, entry, "month"),
     ]
     if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
         entities.append(EvLedgerEfficiencySensor(coordinator, entry))
@@ -263,6 +270,88 @@ class EvLedgerHomeCostTodaySensor(_EvLedgerBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {"kwh": self._today()[1]}
+
+
+class EvLedgerDistanceTodaySensor(_EvLedgerBaseSensor):
+    """Kilometres driven today (the trips that ended today and the one under way); 0 again at midnight."""
+
+    _attr_icon = "mdi:road-variant"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "km"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "distance_today", "Distance today")
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.distance_today()
+
+    @property
+    def last_reset(self):
+        return dt_util.start_of_local_day()
+
+
+class EvLedgerHomePowerSensor(_EvLedgerBaseSensor):
+    """The home charger's power while this car charges (kW, whatever unit the charger reports), live with the
+    charger's own sensor; 0 while another car on a shared charger has it."""
+
+    _attr_icon = "mdi:ev-station"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "kW"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "home_charging_power", "Home charging power")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        sources = [self._entry.data.get(CONF_ZAPTEC_POWER_ENTITY)]
+        if sources := [entity_id for entity_id in sources if entity_id]:
+            self.async_on_remove(async_track_state_change_event(self.hass, sources, self._source_changed))
+
+    @callback
+    def _source_changed(self, _event) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.home_power_kw()
+
+
+class EvLedgerHomeEnergySensor(_EvLedgerBaseSensor):
+    """kWh charged at home: all of it, today or this month (the charges that ended in the period and the one
+    running). For the Energy dashboard and energy cards, without utility meters of one's own."""
+
+    _attr_icon = "mdi:home-lightning-bolt"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_suggested_display_precision = 2
+
+    PERIODS = {None: ("home_charging_energy", "Home charging energy"),
+               "today": ("home_charging_energy_today", "Home charging energy today"),
+               "month": ("home_charging_energy_month", "Home charging energy this month")}
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry, period: str | None = None) -> None:
+        super().__init__(coordinator, entry, *self.PERIODS[period])
+        self._period = period
+
+    def _start(self):
+        if self._period is None:
+            return None
+        start = dt_util.start_of_local_day()
+        return start.replace(day=1) if self._period == "month" else start
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.home_energy(self._start())
+
+    @property
+    def last_reset(self):
+        return self._start()
 
 
 class EvLedgerTotalDistanceSensor(_EvLedgerBaseSensor):

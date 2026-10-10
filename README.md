@@ -217,6 +217,11 @@ If EV Ledger already noticed the car charging away from home and is waiting
 for a price, this fills that session in. Otherwise it creates a new one.
 Handy as a script tied to a phone widget/shortcut.
 
+The same from a dashboard, without helpers of your own: type the kWh, the price and the place in
+`number.<vehicle>_public_charge_energy`, `number.<vehicle>_public_charge_price` and
+`text.<vehicle>_public_charge_location`, and press `button.<vehicle>_log_public_charge`. The fields are
+emptied when the charge is saved.
+
 ## Fixing a mistake
 
 Trips and charges can be wrong — a phantom trip from GPS drift, a charge
@@ -254,6 +259,10 @@ Each vehicle gets:
 | `sensor.<vehicle>_total_distance` | running total km driven (`state_class: total_increasing`) | — |
 | `sensor.<vehicle>_last_trip` | most recent trip's distance | full trip record |
 | `sensor.<vehicle>_last_charge` | most recent charge's price | full charge record |
+| `sensor.<vehicle>_distance_today` | km driven today (the trips that ended today and the one under way) | — |
+| `sensor.<vehicle>_home_charging_power` | the home charger's power while this car charges, in kW whatever unit the charger reports (0 while another car on a shared charger has it) | — |
+| `sensor.<vehicle>_home_charging_energy` (+ `_today`, `_this_month`) | kWh charged at home: in total, today and this month (the charges that ended in the period and the one running; `state_class: total`, works in the Energy dashboard) | — |
+| `sensor.<vehicle>_home_charging_cost_today` | what charging at home cost today | `kwh` |
 
 `total_cost` and `total_distance` carry proper `device_class`/`state_class`,
 so Home Assistant's own **Statistics graph** card gives you month-over-month
