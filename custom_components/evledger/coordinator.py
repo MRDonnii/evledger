@@ -14,6 +14,7 @@ from .const import (
     DOMAIN,
     LOCATION_HOME,
     LOCATION_PUBLIC,
+    METER_RESET_KWH,
     TRIP_END_IDLE_MINUTES,
     TRIP_MIN_DISTANCE_KM,
 )
@@ -168,6 +169,13 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         open_home = self.store.get_open_charge(LOCATION_HOME)
         open_public = self.store.get_open_charge(LOCATION_PUBLIC)
+        counter = next((s.session_energy_kwh for s in live_states.values() if s.session_energy_kwh is not None), None)
+
+        if open_home is not None and counter is not None:
+            start = self.store.meter_start(open_home.id)
+            if start is not None and counter < start - METER_RESET_KWH:
+                # The counter was reset (a new plug-in that still showed the last one's total): count from zero.
+                await self.store.async_set_meter_start(open_home.id, 0.0)
 
         if home_charging and open_home is None:
             open_home = ChargeSession(
@@ -186,6 +194,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             self._last_known_session_kwh = None
             await self.store.async_upsert_charge(open_home)
+            await self.store.async_set_meter_start(open_home.id, counter)
             _LOGGER.info("%s: home charging started (%s)", self.vehicle_name, home_provider_id)
 
         elif not home_charging and open_home is not None:
@@ -241,13 +250,19 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         charge.ended_at = now.isoformat()
         charge.end_battery_pct = snapshot.battery_pct
 
-        # A stable post-session reading (if any provider exposes one) beats a
-        # value captured mid-session, which can go stale across a restart.
+        # The counter read while this charge ran belongs to this plug-in for sure. Zaptec's completed-session
+        # reading is only set some minutes after the unplug and shows the previous plug-in until then, so it is
+        # only used when no reading was taken (charging stopped while Home Assistant was restarting).
         completed_kwh = next(
             (s.completed_session_kwh for s in live_states.values() if s.completed_session_kwh),
             None,
         )
-        charge.kwh = completed_kwh or self._last_known_session_kwh
+        total = self._last_known_session_kwh or completed_kwh
+        # Zaptec's counter runs from plug-in to unplug, also through a pause: count only what this charge added.
+        start = self.store.meter_start(charge.id)
+        if total is not None and start is not None and total >= start:
+            total = round(total - start, 3)
+        charge.kwh = total
 
         cost = None
         for provider in self._charger_providers.values():

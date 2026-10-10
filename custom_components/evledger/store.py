@@ -19,20 +19,34 @@ class EvLedgerStore:
         )
         self._trips: dict[str, Trip] = {}
         self._charges: dict[str, ChargeSession] = {}
+        # The charger's session counter when the open home charge began (Zaptec counts from plug-in to unplug,
+        # through pauses), so a charge is not counted again in the next one.
+        self._meter: dict = {}
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
         if data:
             self._trips = {t["id"]: Trip.from_dict(t) for t in data.get("trips", [])}
             self._charges = {c["id"]: ChargeSession.from_dict(c) for c in data.get("charges", [])}
+            self._meter = data.get("meter") or {}
 
     async def _async_save(self) -> None:
         await self._store.async_save(
             {
                 "trips": [t.to_dict() for t in self._trips.values()],
                 "charges": [c.to_dict() for c in self._charges.values()],
+                "meter": self._meter,
             }
         )
+
+    def meter_start(self, charge_id: str) -> float | None:
+        """The charger's session counter when this charge began, if it was read."""
+        value = self._meter.get("kwh") if self._meter.get("charge_id") == charge_id else None
+        return float(value) if isinstance(value, (int, float)) else None
+
+    async def async_set_meter_start(self, charge_id: str, kwh: float | None) -> None:
+        self._meter = {"charge_id": charge_id, "kwh": kwh} if kwh is not None else {}
+        await self._async_save()
 
     @property
     def trips(self) -> list[Trip]:

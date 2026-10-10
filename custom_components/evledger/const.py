@@ -10,6 +10,8 @@ STORAGE_VERSION = 1
 STORAGE_KEY_TEMPLATE = "evledger_{entry_id}"
 
 DEFAULT_POLL_INTERVAL_SECONDS = 30
+# A charger session counter this far below where it stood when a charge began was reset (a new plug-in).
+METER_RESET_KWH = 0.05
 
 # Trip detection thresholds
 TRIP_MIN_DISTANCE_KM = 0.3

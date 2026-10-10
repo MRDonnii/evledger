@@ -177,6 +177,10 @@ first one that answers:
 3. Neither → the session is flagged `needs_review` with `kwh` still recorded
    from Zaptec, same as an unpriced public charge.
 
+Zaptec's session counter runs from plug-in to unplug, also through a pause. A charge that stops and
+starts again while the car stays plugged in (e.g. a smart charging plan in several periods) is
+recorded as one session per period, each with only the energy it added.
+
 ## Logging a public charge
 
 ```yaml
