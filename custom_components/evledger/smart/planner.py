@@ -51,6 +51,7 @@ from .const import (
     DEFAULT_TRIP_RESERVE,
     INPUT_WAIT_SECONDS,
     MIN_USE_HISTORY_DAYS,
+    NOW_DONE_MINUTES,
     START_DELAY_SECONDS,
     STARTUP_GRACE_SECONDS,
     STATUS_AWAITING_CONFIRMATION,
@@ -207,6 +208,10 @@ class ChargePlanner:
         # and manual) is chosen; unplugging after that returns to the default plan. Stored with the
         # select entity, so an unplug while Home Assistant was down is noticed too.
         self.now_seen_connected = False
+        # "Charge now" has charged in this run, and since when it has stood finished at the target: then the default
+        # plan takes over at once, so a small drop of the battery is topped up by it and not right away at any price.
+        self._now_charged = False
+        self._now_done_since: datetime | None = None
         # Confirmation on the phone: on/off, and since when a new plan waits for an answer.
         self.confirm_enabled = False
         self.awaiting_since: datetime | None = None
@@ -850,6 +855,7 @@ class ChargePlanner:
                                   self.default_mode)
                     self.mode = self.default_mode
                     self.now_seen_connected = False
+            self._end_charge_now(now)
             if unplugged:
                 self.awaiting_since = None
                 self._new_plug = False
@@ -1139,6 +1145,27 @@ class ChargePlanner:
             self._alerted.add(self.status)
             self.entry.async_create_background_task(
                 self.hass, self.notify.async_send_alert(text), "ev_smart_charge_notify_alert")
+
+    def _end_charge_now(self, now: datetime) -> None:
+        """Charge now ends when it has charged the car to the target (or the car's own limit): back to the default
+        plan after NOW_DONE_MINUTES standing finished. Not when Charge now is the default plan itself."""
+        if self.mode != MODE_NOW or self.default_mode == MODE_NOW:
+            self._now_charged, self._now_done_since = False, None
+            return
+        if self.charger_state == ChargerState.CHARGING:
+            self._now_charged, self._now_done_since = True, None
+            return
+        soc = self._battery_soc()
+        reached = self.car_full or (soc is not None and soc >= self.target - 0.5)
+        if not (self._now_charged and reached and self.charger_state in CONNECTED):
+            self._now_done_since = None
+            return
+        self._now_done_since = self._now_done_since or now
+        if now - self._now_done_since >= timedelta(minutes=NOW_DONE_MINUTES):
+            _LOGGER.debug("Charge now reached the target, back to the default plan %s", self.default_mode)
+            self.mode = self.default_mode
+            self.now_seen_connected = False
+            self._now_charged, self._now_done_since = False, None
 
     def upcoming_deadlines(self, now: datetime, count: int) -> list[datetime]:
         """The next ready-by times: the learned departures (when that is on and learned), else the set time."""

@@ -19,7 +19,7 @@ from custom_components.evledger.smart.plan import (
 )
 
 from .test_routines import phones, switch, with_options
-from .test_smart_charge import DOMAIN, setup
+from .test_smart_charge import DOMAIN, setup, state
 
 
 def hourly_prices(hass: HomeAssistant, cheap: set[int], days: int = 4, price: float = 3.0,
@@ -255,3 +255,55 @@ async def test_the_passed_ready_by_time_is_noted(hass: HomeAssistant, request, f
     freezer.move_to(deadline + timedelta(minutes=1))
     await later(hass, freezer, 1)
     assert planner.passed_deadline == deadline and planner.passed_target == planner.target
+
+
+# -- Charge now ends at the target ---------------------------------------------------------------
+
+async def test_charge_now_hands_back_to_the_default_plan_when_done(hass: HomeAssistant, request, freezer):
+    from .test_smart_charge import MODE, SWITCH, later
+    entry, calls = await setup(hass, request, charger_state="connected_charging", cheap_now=False, soc="70")
+    planner = entry.runtime_data
+    planner.async_set_setting("target_soc", 80.0)
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.bil_charge_mode", "option": "now"},
+                                   blocking=True)
+    await later(hass, freezer, 1)
+    assert planner.mode == "now"
+    # The car reaches the target and the charger stands finished.
+    hass.states.async_set("sensor.car_battery", "80", {"unit_of_measurement": "%"})
+    hass.states.async_set(MODE, "connected_finished")
+    hass.states.async_set(SWITCH, "off")
+    await later(hass, freezer, 1)
+    assert planner.mode == "now", "not at once (the car may still report)"
+    await later(hass, freezer, 2)
+    assert planner.mode == "smart", "back to the default plan"
+    assert state(hass, "select.bil_charge_mode") == "smart"
+    # A small drop is not charged right away at a dear price.
+    turned_on = len(calls["switch.turn_on"])
+    hass.states.async_set("sensor.car_battery", "78", {"unit_of_measurement": "%"})
+    await later(hass, freezer, 3)
+    assert len(calls["switch.turn_on"]) == turned_on
+
+
+async def test_charge_now_as_the_default_plan_stays(hass: HomeAssistant, request, freezer):
+    from .test_smart_charge import MODE, later
+    entry, _ = await setup(hass, request, charger_state="connected_charging", cheap_now=False, soc="79")
+    planner = entry.runtime_data
+    planner.async_set_setting("target_soc", 80.0)
+    planner.async_set_default_mode("now")
+    planner.async_set_mode("now")
+    await later(hass, freezer, 1)
+    hass.states.async_set("sensor.car_battery", "80", {"unit_of_measurement": "%"})
+    hass.states.async_set(MODE, "connected_finished")
+    await later(hass, freezer, 5)
+    assert planner.mode == "now"
+
+
+async def test_charge_now_chosen_at_the_target_waits_for_a_charge(hass: HomeAssistant, request, freezer):
+    from .test_smart_charge import later
+    entry, _ = await setup(hass, request, charger_state="connected_finished", cheap_now=False, soc="85")
+    planner = entry.runtime_data
+    planner.async_set_setting("target_soc", 80.0)
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.bil_charge_mode", "option": "now"},
+                                   blocking=True)
+    await later(hass, freezer, 5)
+    assert planner.mode == "now", "nothing was charged in this run: stays until the cable comes out"

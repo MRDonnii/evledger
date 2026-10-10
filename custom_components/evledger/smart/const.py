@@ -144,3 +144,5 @@ MIN_USE_HISTORY_DAYS = 7
 # MORNING_SHORT % counts.
 MORNING_CHECK_MINUTES = 30
 MORNING_SHORT = 3.0
+# Charge now returns to the default plan this long after it has charged the car to the target.
+NOW_DONE_MINUTES = 2

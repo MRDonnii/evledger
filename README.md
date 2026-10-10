@@ -314,7 +314,7 @@ New entities on the car's device:
 
 | Entity | What it does |
 |---|---|
-| `select.<car>_charge_mode` | Cheapest before departure, Fixed time, Charge now, Price cap, Pause, Manual. A plugged-in car runs the default plan; any other plan returns to it when the car is unplugged. |
+| `select.<car>_charge_mode` | Cheapest before departure, Fixed time, Charge now, Price cap, Pause, Manual. A plugged-in car runs the default plan; any other plan returns to it when the car is unplugged. **Charge now** returns to it as soon as it has charged the car to the target (two minutes after), so a small drop of the battery afterwards is topped up by the default plan and not right away at any price (unless Charge now is the default plan). |
 | `select.<car>_default_plan` | The default plan: Cheapest before departure (out of the box), Fixed time, Price cap, Charge now or Manual. When it changes, a plan that was running as the old default follows; a temporary plan is kept until it has run. |
 | `number.<car>_target_soc`, `time.<car>_ready_by` | Target and ready-by time for the cheapest plan and the price cap. The target is never higher than the charge limit set in the car (Tesla Custom, Tesla Fleet, Teslemetry, Tessie). |
 | `time.<car>_fixed_charging_start/end` | Fixed time charges in the cheapest quarters inside the window and is done by its end. |
