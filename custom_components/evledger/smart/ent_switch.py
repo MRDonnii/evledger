@@ -24,7 +24,8 @@ def build(planner) -> list:
 
 FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-check",
               "plug_reminder": "mdi:power-plug-outline",
-              "weekend_ready_by": "mdi:calendar-weekend", "precondition": "mdi:car-defrost-front"}
+              "weekend_ready_by": "mdi:calendar-weekend", "precondition": "mdi:car-defrost-front",
+              "learn": "mdi:school-outline", "monthly_summary": "mdi:calendar-month-outline"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -33,7 +34,7 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
     def __init__(self, planner, key: str) -> None:
         super().__init__(planner, key)
         self._attr_icon = FLAG_ICONS[key]
-        if key in ("notify_start", "notify_done", "plug_reminder"):
+        if key in ("notify_start", "notify_done", "plug_reminder", "learn", "monthly_summary"):
             self._attr_entity_category = EntityCategory.CONFIG
 
     async def async_added_to_hass(self) -> None:
@@ -46,8 +47,18 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             checked = dt_util.parse_date(str(last.attributes.get("checked_on") or ""))
             if checked:
                 self.planner.routines.evening_checked = checked
+        routines = self.planner.routines
         if last and self._attr_translation_key == "notify_done":
-            self.planner.routines.restore_run(last.attributes.get("charge_run"))
+            routines.restore_run(last.attributes.get("charge_run"))
+        if last and self._attr_translation_key == "learn" and isinstance(last.attributes.get("learned"), dict):
+            routines.learned = {key: value for key, value in last.attributes["learned"].items()
+                                if isinstance(value, (int, float))}
+            routines.apply_learned()
+        if last and self._attr_translation_key == "monthly_summary":
+            routines.summary_sent = last.attributes.get("sent_for") or None
+            if isinstance(last.attributes.get("saved"), dict):
+                routines.saved = {str(month): float(value) for month, value in last.attributes["saved"].items()
+                                  if isinstance(value, (int, float))}
 
     @property
     def is_on(self) -> bool:
@@ -60,7 +71,12 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             return {"checked_on": routines.evening_checked.isoformat() if routines.evening_checked else None}
         if self._attr_translation_key == "notify_done":
             # The periods of the charge so far, for the done message after a restart.
-            return {"charge_run": routines.run.as_dict() if routines.run.sessions else None}
+            return {"charge_run": routines.run.as_dict() if routines.run.active else None}
+        if self._attr_translation_key == "learn":
+            # What was learned from the ledger's charges, and how many charges it rests on.
+            return {"learned": {key: round(value, 3) for key, value in routines.learned.items()}}
+        if self._attr_translation_key == "monthly_summary":
+            return {"sent_for": routines.summary_sent, "saved": routines.saved}
         if self._attr_translation_key == "precondition":
             # The car's climate entity (needs a car integration that can send commands to the car).
             return {"climate_entity": routines.climate_entity()}

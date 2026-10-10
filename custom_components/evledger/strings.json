@@ -263,6 +263,13 @@
           "now": "Charge now",
           "manual": "Manual (not controlled)"
         }
+      },
+      "price_resolution": {
+        "name": "Price resolution",
+        "state": {
+          "quarter": "Quarter (15 min)",
+          "hour": "Hour"
+        }
       }
     },
     "datetime": {
@@ -302,6 +309,12 @@
       },
       "notify_start": {
         "name": "Message when charging starts"
+      },
+      "learn": {
+        "name": "Learn charging power and efficiency"
+      },
+      "monthly_summary": {
+        "name": "Monthly summary on the phone"
       }
     },
     "button": {
@@ -313,6 +326,9 @@
       },
       "send_plan": {
         "name": "Send plan to phone"
+      },
+      "send_monthly_summary": {
+        "name": "Send monthly summary"
       }
     },
     "binary_sensor": {

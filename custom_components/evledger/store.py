@@ -7,6 +7,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import STORAGE_KEY_TEMPLATE, STORAGE_VERSION
+
+METER_SAVE_DELAY = 30
 from .models import ChargeSession, Trip
 
 
@@ -30,23 +32,35 @@ class EvLedgerStore:
             self._charges = {c["id"]: ChargeSession.from_dict(c) for c in data.get("charges", [])}
             self._meter = data.get("meter") or {}
 
+    def _data(self) -> dict:
+        return {
+            "trips": [t.to_dict() for t in self._trips.values()],
+            "charges": [c.to_dict() for c in self._charges.values()],
+            "meter": self._meter,
+        }
+
     async def _async_save(self) -> None:
-        await self._store.async_save(
-            {
-                "trips": [t.to_dict() for t in self._trips.values()],
-                "charges": [c.to_dict() for c in self._charges.values()],
-                "meter": self._meter,
-            }
-        )
+        await self._store.async_save(self._data())
+
+    def meter(self, charge_id: str) -> dict | None:
+        """For the open charge: the charger's session counter when it began ("kwh"), at the last look ("last"), and
+        the energy priced so far ("priced") with its price ("cost")."""
+        return dict(self._meter) if self._meter.get("charge_id") == charge_id else None
 
     def meter_start(self, charge_id: str) -> float | None:
         """The charger's session counter when this charge began, if it was read."""
-        value = self._meter.get("kwh") if self._meter.get("charge_id") == charge_id else None
+        value = (self.meter(charge_id) or {}).get("kwh")
         return float(value) if isinstance(value, (int, float)) else None
 
     async def async_set_meter_start(self, charge_id: str, kwh: float | None) -> None:
-        self._meter = {"charge_id": charge_id, "kwh": kwh} if kwh is not None else {}
+        self._meter = ({"charge_id": charge_id, "kwh": kwh, "last": kwh, "cost": 0.0, "priced": 0.0}
+                       if kwh is not None else {})
         await self._async_save()
+
+    def update_meter(self, charge_id: str, values: dict) -> None:
+        """Saved a little later, not at every look while charging."""
+        self._meter = {"charge_id": charge_id, **values}
+        self._store.async_delay_save(self._data, METER_SAVE_DELAY)
 
     @property
     def trips(self) -> list[Trip]:

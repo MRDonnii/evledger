@@ -68,12 +68,17 @@ from .control import Event as ChargerEvent
 from .phone import PhoneNotifier
 from .plan import (
     DEFAULT_MODES,
+    HOUR_MINUTES,
     MODE_FIXED,
     MODE_MANUAL,
     MODE_NOW,
     MODE_OFF,
     MODE_PRICE_CAP,
     MODE_SMART,
+    RESOLUTION_HOUR,
+    RESOLUTION_QUARTER,
+    RESOLUTIONS,
+    SLOT_MINUTES,
     Constraint,
     PlanInput,
     PlanResult,
@@ -83,7 +88,7 @@ from .plan import (
     build_timeline,
     calculate,
     fixed_window,
-    floor_quarter,
+    floor_slot,
     next_deadline,
     parse_price_attributes,
 )
@@ -95,6 +100,8 @@ PLUGGED_STATES = (STATE_ON, "true", "plugged", "connected", "plugged_in")
 # The car's own charge limit (a number on the car's device): Tesla Custom "_charge_limit", Tesla Fleet,
 # Teslemetry and Tessie "charge_state_charge_limit_soc".
 CHARGE_LIMIT_SUFFIXES = ("_charge_limit", "charge_limit_soc")
+# The car's own "full at" time: Tesla Custom, and Tesla Fleet / Teslemetry / Tessie.
+CAR_FULL_SUFFIXES = ("_time_charge_complete", "charge_state_minutes_to_full_charge")
 HOLD_MODES = (MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)
 LOOKUP_RETRY = timedelta(minutes=5)
 
@@ -120,7 +127,8 @@ class ChargePlanner:
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry,
                  options: Callable[[], dict] | None = None,
                  vehicle: Callable[[], vehicles.Vehicle | None] | None = None,
-                 open_charge: Callable[[], bool] | None = None) -> None:
+                 open_charge: Callable[[], bool] | None = None,
+                 charges: Callable[[], list] | None = None) -> None:
         self.hass = hass
         self.entry = entry
         # EV Ledger supplies the settings from its own vehicle and charger setup.
@@ -128,6 +136,8 @@ class ChargePlanner:
         self._vehicle = vehicle
         # Whether the ledger has a home charging session open (its kWh and price come when it closes).
         self.open_charge = open_charge or (lambda: False)
+        # The ledger's charges (home and public), for the monthly summary.
+        self.charges = charges or (lambda: [])
         self.settings: dict[str, float] = {
             "target_soc": DEFAULT_TARGET_SOC,
             "charge_power_kw": DEFAULT_POWER_KW,
@@ -152,9 +162,11 @@ class ChargePlanner:
         # weekend and the car's climate before the ready-by time.
         self.flags: dict[str, bool] = {"notify_start": True, "notify_done": True,
                                        "plug_reminder": True, "weekend_ready_by": False,
-                                       "precondition": False}
+                                       "precondition": False, "learn": True, "monthly_summary": True}
         # The default plan runs when a car is plugged in; any other plan returns to it once it has run.
         self.default_mode = MODE_SMART
+        # Plan in quarters or in whole hours (the mean price of the hour).
+        self.resolution = RESOLUTION_QUARTER
         self.mode = MODE_SMART
         self.mode_before_now = MODE_SMART
         # Set once the charger has been connected while a temporary plan (anything but the default plan
@@ -171,6 +183,7 @@ class ChargePlanner:
         # Warnings already sent for this plug-in and these settings (target out of reach, price cap).
         self.warned: set[str] = set()
         self._limit_id: str | None = None
+        self._full_ids: list[str] | None = None
         self.trip = TripState()
         self.result = PlanResult(None, None, None, None, None, None)
         self.schedule = Schedule()
@@ -331,6 +344,7 @@ class ChargePlanner:
         self.async_recalculate()
         self.routines.evening(now)
         self.routines.precondition(now)
+        self.routines.monthly(now)
 
     # -- setters used by the entities ----------------------------------------------------------
 
@@ -380,6 +394,21 @@ class ChargePlanner:
         else:
             self.async_recalculate()
 
+    @property
+    def slot_minutes(self) -> int:
+        return HOUR_MINUTES if self.resolution == RESOLUTION_HOUR else SLOT_MINUTES
+
+    @callback
+    def async_set_resolution(self, value: str, restore: bool = False) -> None:
+        """Quarters or whole hours: the plan (and the price cards that follow it) change at once."""
+        if value not in RESOLUTIONS:
+            return
+        if value != self.resolution and not restore:
+            self._rewarn()
+            self._hold_until = None
+        self.resolution = value
+        self.async_recalculate()
+
     def _rewarn(self) -> None:
         """New settings: warn again if they cannot be met either (not while restoring after a restart)."""
         if self._started_at is not None:
@@ -397,6 +426,8 @@ class ChargePlanner:
         if self.flags.get(key) != value and key == "weekend_ready_by":
             self._rewarn()
         self.flags[key] = value
+        if key == "learn" and value:
+            self.routines.apply_learned()
         self.async_recalculate()
 
     @callback
@@ -605,6 +636,48 @@ class ChargePlanner:
             return None
         return value if 50 <= value <= 100 else None
 
+    def _full_entities(self) -> list[str]:
+        """The car's own "full at" time sensors on this car only (the battery sensor's device or a device with the
+        same name): Tesla Custom, Tesla Fleet, Teslemetry, Tessie."""
+        if self._full_ids is None:
+            registry = er.async_get(self.hass)
+            devices = dr.async_get(self.hass)
+            battery = registry.async_get(self.battery_entity)
+            car = devices.async_get(battery.device_id) if battery is not None and battery.device_id else None
+            found: list[str] = []
+            if car is not None:
+                name = car.name_by_user or car.name
+                same_car = [device.id for device in devices.devices.values()
+                            if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
+                found = [other.entity_id for device_id in same_car
+                         for other in er.async_entries_for_device(registry, device_id)
+                         if other.domain == "sensor" and not other.disabled_by
+                         and other.unique_id.endswith(CAR_FULL_SUFFIXES)]
+            self._full_ids = found
+        return self._full_ids
+
+    def car_full_at(self, now: datetime) -> datetime | None:
+        """When the car says it will be full, while it charges up to its own charge limit. The car knows that it
+        charges slower near the top, so the plan's last period then ends when the car says."""
+        limit = self.car_limit()
+        if self.charger_state != ChargerState.CHARGING or limit is None or self.target < limit - 0.5:
+            return None
+        for entity_id in self._full_entities():
+            state = self.hass.states.get(entity_id)
+            value = dt_util.parse_datetime(state.state) if state else None
+            if value is not None and now < value < now + timedelta(hours=24):
+                return value
+        return None
+
+    def block_end(self, block, now: datetime) -> datetime | None:
+        """When a charging period ends: the plan's, or the car's own time for the last period while it charges."""
+        if block is None:
+            return None
+        blocks = self.schedule.blocks
+        if blocks and block == blocks[-1] and block.start <= now and (full := self.car_full_at(now)) is not None:
+            return full
+        return block.end
+
     @property
     def target(self) -> float:
         """The daily target, no higher than the car's own charge limit."""
@@ -705,7 +778,7 @@ class ChargePlanner:
         window = fixed_window(now, self.times["fixed_start"], self.times["fixed_end"])
         constraints = self.constraints(now)
         horizon = max([self.deadline, window[1], *(c.deadline for c in constraints)])
-        timeline = build_timeline(now, ordered, horizon)
+        timeline = build_timeline(now, ordered, horizon, self.slot_minutes)
 
         # The charge running now, or the start already announced, stays while it is still among the cheapest.
         keep: datetime | None = None
@@ -737,6 +810,7 @@ class ChargePlanner:
         self.alternatives = {mode: self.schedule if mode == self.mode else plan_for(mode)
                              for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)}
 
+        self.routines.note_plan(now)
         self._control(now)
         self._warn(now)
         self.routines.check_offline(now)
@@ -773,6 +847,7 @@ class ChargePlanner:
             self.warned.clear()
             self.cap_override = True
             self._limit_id = None
+            self._full_ids = None
             self._new_plug = True
             self.routines.new_plug()
             self._refresh_car()
@@ -838,7 +913,7 @@ class ChargePlanner:
         if self.schedule.charge_now:
             if self.charger_state == ChargerState.CHARGING and self.mode in HOLD_MODES:
                 # Keep going to the end of the quarter, so small plan changes do not toggle the charger.
-                self._hold_until = floor_quarter(now) + timedelta(minutes=15)
+                self._hold_until = floor_slot(now, self.slot_minutes) + timedelta(minutes=self.slot_minutes)
             return True
         if (self._hold_until and now < self._hold_until and self.mode in HOLD_MODES
                 and self.schedule.energy_kwh > 0 and self.charger_state == ChargerState.CHARGING):

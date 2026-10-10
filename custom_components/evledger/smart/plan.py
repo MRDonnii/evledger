@@ -8,6 +8,8 @@ from datetime import UTC, datetime, time, timedelta
 from itertools import groupby
 
 SLOT = timedelta(minutes=15)
+SLOT_MINUTES = 15
+HOUR_MINUTES = 60
 # Windows whose total price differs by less than this are treated as equal; the later one wins,
 # so the car is charged as close to the deadline as the price allows.
 TIE_EPSILON = 0.08
@@ -173,6 +175,10 @@ MODE_MANUAL = "manual"
 MODES = (MODE_SMART, MODE_FIXED, MODE_NOW, MODE_PRICE_CAP, MODE_OFF, MODE_MANUAL)
 # Plans that can be the default: used when a car is plugged in and returned to after another plan has run.
 DEFAULT_MODES = (MODE_SMART, MODE_FIXED, MODE_PRICE_CAP, MODE_NOW, MODE_MANUAL)
+# The price slots the plans are made of: quarters, or whole hours with the mean price of their quarters.
+RESOLUTION_QUARTER = "quarter"
+RESOLUTION_HOUR = "hour"
+RESOLUTIONS = (RESOLUTION_QUARTER, RESOLUTION_HOUR)
 
 # How many days back an unknown price may be borrowed from (same clock time).
 ESTIMATE_DAYS_BACK = 7
@@ -266,25 +272,55 @@ def floor_quarter(value: datetime) -> datetime:
     return utc.replace(minute=utc.minute - utc.minute % 15, second=0, microsecond=0)
 
 
-def build_timeline(now: datetime, known: list[PriceSlot], horizon: datetime) -> list[TimelineSlot]:
-    """Quarter-hour slots from the current quarter until horizon. A slot without a published price
-    borrows the price at the same clock time on an earlier day, or the mean of the known prices."""
+def floor_slot(value: datetime, minutes: int = SLOT_MINUTES) -> datetime:
+    """The start of the price slot that holds value: the quarter, or the whole hour on the local clock."""
+    if minutes < 60:
+        return floor_quarter(value)
+    return value.replace(minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
+def build_timeline(now: datetime, known: list[PriceSlot], horizon: datetime,
+                   minutes: int = SLOT_MINUTES) -> list[TimelineSlot]:
+    """Slots of a quarter (or a whole hour, with the mean of its quarters) from the current one until horizon.
+    A quarter without a published price borrows the price at the same clock time on an earlier day, or the
+    mean of the known prices."""
     by_start = {slot.start: slot.price for slot in known}
     mean = sum(by_start.values()) / len(by_start) if by_start else 0.0
     end = max(horizon, max((slot.end for slot in known), default=horizon))
+    step = timedelta(minutes=minutes)
     timeline: list[TimelineSlot] = []
-    cursor = floor_quarter(now)
+    cursor = floor_slot(now, minutes)
     zone = now.tzinfo
     while cursor < end:
-        start, finish = cursor.astimezone(zone), (cursor + SLOT).astimezone(zone)
-        if cursor in by_start:
-            timeline.append(TimelineSlot(start, finish, by_start[cursor], False))
-        else:
-            price = next((by_start[earlier] for days in range(1, ESTIMATE_DAYS_BACK + 1)
-                          if (earlier := cursor - timedelta(days=days)) in by_start), mean)
-            timeline.append(TimelineSlot(start, finish, price, True))
-        cursor += SLOT
+        prices: list[float] = []
+        estimated = False
+        quarter = cursor
+        while quarter < cursor + step:
+            if quarter in by_start:
+                prices.append(by_start[quarter])
+            else:
+                prices.append(next((by_start[earlier] for days in range(1, ESTIMATE_DAYS_BACK + 1)
+                                    if (earlier := quarter - timedelta(days=days)) in by_start), mean))
+                estimated = True
+            quarter += SLOT
+        timeline.append(TimelineSlot(cursor.astimezone(zone), (cursor + step).astimezone(zone),
+                                     sum(prices) / len(prices), estimated))
+        cursor += step
     return timeline
+
+
+def _split(timeline: list[TimelineSlot], cuts) -> list[TimelineSlot]:
+    """Hour slots split where a fixed window starts or ends or a deadline falls, so the part inside can be used."""
+    points = sorted({cut for cut in cuts if cut is not None})
+    result: list[TimelineSlot] = []
+    for slot in timeline:
+        start = slot.start
+        for cut in points:
+            if start < cut < slot.end:
+                result.append(TimelineSlot(start, cut, slot.price, slot.estimated))
+                start = cut
+        result.append(slot if start == slot.start else TimelineSlot(start, slot.end, slot.price, slot.estimated))
+    return result
 
 
 def fixed_window(now: datetime, start: time, end: time) -> tuple[datetime, datetime]:
@@ -318,7 +354,8 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             return 0.0
         return max(target - data.soc, 0.0) * data.capacity_kwh / 100 / data.efficiency
 
-    usable = [slot for slot in data.timeline if slot.end > now]
+    cuts = [*(data.window or ()), *(constraint.deadline for constraint in data.constraints)]
+    usable = [slot for slot in _split(data.timeline, cuts) if slot.end > now]
     kwh = {slot.start: _slot_kwh(slot, now, data.power_kw) for slot in usable}
     chosen: dict[datetime, TimelineSlot] = {}
 

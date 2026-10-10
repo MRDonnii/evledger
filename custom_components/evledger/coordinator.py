@@ -20,6 +20,7 @@ from .const import (
 )
 from .models import ChargeSession, LiveChargeState, Trip, VehicleSnapshot
 from .providers.charger.base import CAP_COST_LOOKUP, CAP_LIVE_POWER, ChargerProvider
+from .smart.plan import SLOT_MINUTES
 from .providers.vehicle.base import VehicleProvider
 from .store import EvLedgerStore
 
@@ -172,10 +173,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         counter = next((s.session_energy_kwh for s in live_states.values() if s.session_energy_kwh is not None), None)
 
         if open_home is not None and counter is not None:
-            start = self.store.meter_start(open_home.id)
-            if start is not None and counter < start - METER_RESET_KWH:
-                # The counter was reset (a new plug-in that still showed the last one's total): count from zero.
-                await self.store.async_set_meter_start(open_home.id, 0.0)
+            self._meter_tick(open_home, counter, now)
 
         if home_charging and open_home is None:
             open_home = ChargeSession(
@@ -240,6 +238,53 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.vehicle_name,
             )
 
+    def _billed_cost(self, now: datetime, kwh: float | None, spot: bool):
+        for provider in self._charger_providers.values():
+            if CAP_COST_LOOKUP in provider.capabilities and (provider.provider_id == "spot_price") == spot:
+                cost = provider.get_recent_session_cost(self.hass, now, known_kwh=kwh)
+                if cost is not None:
+                    return cost
+        return None
+
+    def _metered_cost(self, meter: dict, kwh: float | None, now: datetime) -> float | None:
+        """The price of the energy as it was counted; the last bit after the last look at the price now."""
+        priced, cost = float(meter.get("priced") or 0.0), float(meter.get("cost") or 0.0)
+        if not kwh or priced <= 0:
+            return None
+        if priced >= kwh:
+            return round(cost * kwh / priced, 2)
+        price = self._price_now(now)
+        if price is None:
+            return None
+        return round(cost + (kwh - priced) * price, 2)
+
+    def _price_now(self, now: datetime) -> float | None:
+        """The spot price now: the quarter, or the mean of the hour when smart charging plans in hours."""
+        provider = next((p for p in self._charger_providers.values() if p.provider_id == "spot_price"), None)
+        if provider is None:
+            return None
+        smart = getattr(self, "smart", None)
+        return provider.price_at(self.hass, now, smart.slot_minutes if smart is not None else SLOT_MINUTES)
+
+    def _meter_tick(self, charge: ChargeSession, counter: float, now: datetime) -> None:
+        """Price what the charger counted since the last look at the price of this moment."""
+        meter = self.store.meter(charge.id)
+        if meter is None:
+            return
+        start = meter.get("kwh")
+        last = meter.get("last", start)
+        if last is not None and counter < last - METER_RESET_KWH:
+            # The counter was reset (a new plug-in that still showed the last one's total): count from zero.
+            start, last = 0.0, 0.0
+        cost, priced = float(meter.get("cost") or 0.0), float(meter.get("priced") or 0.0)
+        added = counter - last if last is not None and counter > last else 0.0
+        if added > 0 and (price := self._price_now(now)) is not None:
+            cost += added * price
+            priced += added
+        values = {"kwh": start, "last": counter, "cost": round(cost, 5), "priced": round(priced, 5)}
+        if any(meter.get(key) != value for key, value in values.items()):
+            self.store.update_meter(charge.id, values)
+
     async def _end_home_charge(
         self,
         charge: ChargeSession,
@@ -257,23 +302,27 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             (s.completed_session_kwh for s in live_states.values() if s.completed_session_kwh),
             None,
         )
-        total = self._last_known_session_kwh or completed_kwh
+        meter = self.store.meter(charge.id) or {}
+        readings = [value for value in (self._last_known_session_kwh, meter.get("last")) if value]
+        total = max(readings) if readings else completed_kwh
         # Zaptec's counter runs from plug-in to unplug, also through a pause: count only what this charge added.
-        start = self.store.meter_start(charge.id)
+        start = meter.get("kwh")
         if total is not None and start is not None and total >= start:
             total = round(total - start, 3)
         charge.kwh = total
 
-        cost = None
-        for provider in self._charger_providers.values():
-            if CAP_COST_LOOKUP in provider.capabilities:
-                cost = provider.get_recent_session_cost(self.hass, now, known_kwh=charge.kwh)
-                if cost is not None:
-                    break
+        # A billed cost (Monta) first, then the energy priced while it was counted, then the price at the end.
+        cost = self._billed_cost(now, charge.kwh, spot=False)
+        metered = None if cost is not None else self._metered_cost(meter, charge.kwh, now)
+        if cost is None and metered is None:
+            cost = self._billed_cost(now, charge.kwh, spot=True)
 
         if cost is not None:
             charge.kwh = cost.kwh
             charge.price = cost.price
+            charge.needs_review = False
+        elif metered is not None:
+            charge.price = metered
             charge.needs_review = False
         else:
             charge.needs_review = True

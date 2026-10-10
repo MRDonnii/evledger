@@ -1,5 +1,7 @@
 """Constants for smart charging (formerly the EV Smart Charge integration)."""
 
+from datetime import time
+
 DOMAIN = "evledger"
 CONF_SMART_CHARGE = "smart_charge"
 CONF_SMART_ENABLED = "enabled"
@@ -106,3 +108,19 @@ STATUSES = [STATUS_PLAN_ONLY, STATUS_MANUAL, STATUS_DISCONNECTED, STATUS_OTHER_C
 
 # A second "charging started" message only after this long (the car pausing or a charger reboot is no new start).
 STARTED_NOTE_QUIET_MINUTES = 30
+# The saving against "Charge now" is shown from this amount (also when the plan cost more).
+SAVING_SHOWN = 0.5
+SAVED_MONTHS_KEPT = 3
+# Learning the charging power and efficiency from the ledger's charges.
+LEARN_MIN_HOURS = 0.5
+LEARN_TOP_SOC = 90.0  # above this cars charge slower: those charges do not count for the power
+LEARN_MIN_SOC_GAIN = 10.0
+LEARN_MIN_SAMPLES = 2
+LEARN_WEIGHT = 0.3
+LEARN_POWER_RANGE = (1.0, 50.0)
+LEARN_EFFICIENCY_RANGE = (0.7, 1.0)
+# The monthly summary: on the first days of the month from this time (once).
+MONTHLY_AT = time(9, 0)
+MONTHLY_DAYS = 3
+MONTH_NAMES = ("januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober",
+               "november", "december")

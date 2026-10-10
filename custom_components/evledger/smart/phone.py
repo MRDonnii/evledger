@@ -115,7 +115,7 @@ class PhoneNotifier:
         if not schedule.blocks:
             lines.append("Batteriet er allerede ladet til målet.")
             return "\n".join(lines)
-        first, last = schedule.blocks[0].start, schedule.blocks[-1].end
+        first, last = schedule.blocks[0].start, planner.block_end(schedule.blocks[-1], dt_util.now())
         start = "nu" if first <= dt_util.now() else when(first)
         same_day = dt_util.as_local(first).date() == dt_util.as_local(last).date()
         end = dt_util.as_local(last).strftime("%H:%M") if same_day else when(last)
@@ -154,9 +154,9 @@ class PhoneNotifier:
         lines = [f"Plan: {NAMES.get(planner.mode, planner.mode)}"]
         block = schedule.next_block(now)
         if block is not None:
-            end = f"Slut ca. {self.when(block.end)}"
+            end = f"Slut ca. {self.when(planner.block_end(block, now))}"
             if len(schedule.blocks) > 1:
-                end += f" (periode 1 af {len(schedule.blocks)})"
+                end += f" (periode {schedule.blocks.index(block) + 1} af {len(schedule.blocks)})"
             lines.append(end)
         if schedule.cost is not None and schedule.energy_kwh > 0:
             energy = f"{schedule.energy_kwh:.1f}".replace(".", ",")

@@ -228,3 +228,43 @@ def test_a_running_charge_is_not_stopped_when_the_cheap_hours_lie_together():
     kept = plan_at(now)
     assert kept.charge_now, "a running charge goes on"
     assert kept.blocks[0].start == now
+
+
+def quarterly(start: datetime, prices: list[float]) -> list:
+    raw = [{"start": (start + timedelta(minutes=15 * q)).isoformat(),
+            "end": (start + timedelta(minutes=15 * (q + 1))).isoformat(), "price": p} for q, p in enumerate(prices)]
+    return plan.parse_price_attributes({"prices": raw})
+
+
+def schedule_in(minutes: int, known, need_hours: float, constraints, now=NIGHT):
+    data = plan.ScheduleInput(
+        mode="smart", soc=50.0, target_soc=50.0 + need_hours * 12 / 60 * 100, capacity_kwh=60, efficiency=1.0,
+        power_kw=12, price_factor=1.0, timeline=plan.build_timeline(now, known, now + timedelta(hours=10), minutes),
+        constraints=tuple(constraints))
+    return plan.build_schedule(data, now)
+
+
+def test_an_hour_slot_has_the_mean_price_of_its_quarters():
+    known = quarterly(NIGHT, [0.2, 0.2, 2.0, 2.0, 0.9, 0.9, 0.9, 0.9])
+    hours = plan.build_timeline(NIGHT, known, NIGHT + timedelta(hours=2), 60)
+    assert [(slot.start, slot.end - slot.start, round(slot.price, 3)) for slot in hours[:2]] == [
+        (NIGHT, timedelta(hours=1), 1.1), (NIGHT + timedelta(hours=1), timedelta(hours=1), 0.9)]
+    assert not hours[0].estimated
+
+
+def test_quarters_or_whole_hours():
+    # Half an hour of charging: the two cheap quarters at 22:00, or the cheapest whole hour (23:00, mean 0.9 < 1.1).
+    known = quarterly(NIGHT, [0.2, 0.2, 2.0, 2.0, 0.9, 0.9, 0.9, 0.9] + [3.0] * 32)
+    by_quarter = schedule_in(15, known, 0.5, [deadline(8, 60.0)])
+    by_hour = schedule_in(60, known, 0.5, [deadline(8, 60.0)])
+    assert [(b.start, b.end) for b in by_quarter.blocks] == [(NIGHT, NIGHT + timedelta(minutes=30))]
+    assert [(b.start, b.end) for b in by_hour.blocks] == [
+        (NIGHT + timedelta(hours=1), NIGHT + timedelta(hours=1, minutes=30))]
+
+
+def test_an_hour_slot_is_cut_at_the_ready_by_time():
+    # Cheapest at 06:00-07:00, ready by 06:45: the hour plan still uses 06:00-06:45.
+    known = hourly(NIGHT, [3, 3, 3, 3, 3, 3, 3, 3, 0.1, 3])
+    result = schedule_in(60, known, 0.5, [plan.Constraint(NIGHT + timedelta(hours=8, minutes=45), 60.0)])
+    assert [(b.start, b.end) for b in result.blocks] == [
+        (NIGHT + timedelta(hours=8), NIGHT + timedelta(hours=8, minutes=30))]

@@ -24,13 +24,25 @@ from .const import (
     CONF_CAR_CLIMATE,
     CONF_TRIP_CALENDAR,
     CONF_TRIP_KEYWORD,
+    LEARN_EFFICIENCY_RANGE,
+    LEARN_MIN_HOURS,
+    LEARN_MIN_SAMPLES,
+    LEARN_MIN_SOC_GAIN,
+    LEARN_POWER_RANGE,
+    LEARN_TOP_SOC,
+    LEARN_WEIGHT,
+    MONTH_NAMES,
+    MONTHLY_AT,
+    MONTHLY_DAYS,
     PRECONDITION_OFF_AFTER_MINUTES,
     REMINDER_WINDOW_HOURS,
+    SAVED_MONTHS_KEPT,
+    SAVING_SHOWN,
     STARTED_NOTE_QUIET_MINUTES,
     STATUS_DONE,
 )
-from .control import ChargerState
-from .plan import MODE_MANUAL, MODE_OFF
+from .control import CONNECTED, ChargerState
+from .plan import MODE_MANUAL, MODE_NOW, MODE_OFF
 
 if TYPE_CHECKING:
     from .planner import ChargePlanner
@@ -51,13 +63,28 @@ class ChargeRun:
     end_soc: float | None = None
     started: datetime | None = None
     ended: datetime | None = None
+    # What a kWh would have cost charging right away when the car was plugged in ("Charge now"), for the saving.
+    now_price: float | None = None
+    noted: datetime | None = None
+
+    @property
+    def active(self) -> bool:
+        return bool(self.sessions) or self.now_price is not None
 
     def as_dict(self) -> dict[str, Any]:
         """Kept on the done message switch, so periods that ended before a restart still count."""
         return {"kwh": round(self.kwh, 3), "price": round(self.price, 4), "price_known": self.price_known,
                 "sessions": self.sessions, "start_soc": self.start_soc, "end_soc": self.end_soc,
                 "started": self.started.isoformat() if self.started else None,
-                "ended": self.ended.isoformat() if self.ended else None}
+                "ended": self.ended.isoformat() if self.ended else None,
+                "now_price": round(self.now_price, 4) if self.now_price is not None else None,
+                "noted": self.noted.isoformat() if self.noted else None}
+
+    def saving(self) -> float | None:
+        """What the plan saved against charging right away at plug-in (negative: it cost more)."""
+        if self.now_price is None or not self.price_known or self.kwh <= 0:
+            return None
+        return self.kwh * self.now_price - self.price
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChargeRun:
@@ -70,7 +97,8 @@ class ChargeRun:
 
         return cls(kwh=float(data.get("kwh") or 0.0), price=float(data.get("price") or 0.0),
                    price_known=bool(data.get("price_known", True)), sessions=int(data.get("sessions") or 0),
-                   start_soc=soc("start_soc"), end_soc=soc("end_soc"), started=when("started"), ended=when("ended"))
+                   start_soc=soc("start_soc"), end_soc=soc("end_soc"), started=when("started"), ended=when("ended"),
+                   now_price=soc("now_price"), noted=when("noted"))
 
     def add(self, charge: Any) -> None:
         self.sessions += 1
@@ -114,7 +142,17 @@ def done_text(run: ChargeRun, unit: str, soc: float | None) -> str:
         if run.sessions > 1:
             period += f" ({run.sessions} perioder)"
         lines.append(period)
+    saving = run.saving()
+    if saving is not None and saving >= SAVING_SHOWN:
+        lines.append(f"Sparet {number(saving, 2)} {unit} i forhold til Lad nu ved tilslutning")
+    elif saving is not None and saving <= -SAVING_SHOWN:
+        lines.append(f"{number(-saving, 2)} {unit} dyrere end Lad nu ved tilslutning")
     return "\n".join(lines)
+
+
+def _average(old: float | None, sample: float) -> float:
+    """A running average that follows new charges without jumping on one odd one."""
+    return sample if old is None else old * (1 - LEARN_WEIGHT) + sample * LEARN_WEIGHT
 
 
 class Routines:
@@ -139,23 +177,151 @@ class Routines:
         self._calendar_busy = False
         # Calendar events whose trip was cleared by hand: not added again.
         self.dismissed: set[str] = set()
+        # Learned from the ledger's charges: charging power and efficiency with how many charges they rest on.
+        self.learned: dict[str, float] = {}
+        # The month the last monthly summary was for, and what the plans saved per month.
+        self.summary_sent: str | None = None
+        self.saved: dict[str, float] = {}
 
     # -- the charge is done ---------------------------------------------------------------------
 
     def charge_finished(self, charge: Any) -> None:
         """A home charging session ended in the ledger (with its kWh and price)."""
         self.run.add(charge)
+        self.learn(charge)
         self.planner.async_recalculate()
+
+    def note_plan(self, now: datetime) -> None:
+        """At the first plan after a plug-in: what a kWh costs charging right away, for the saving in the done
+        message."""
+        p = self.planner
+        if self.run.now_price is not None or p.charger_state not in CONNECTED or not p.car_present:
+            return
+        plan = p.alternatives.get(MODE_NOW)
+        energy = sum(slot.kwh for slot in plan.slots) if plan is not None else 0.0
+        if energy > 0:
+            factor = p.settings["price_factor"]
+            self.run.now_price = sum(slot.kwh * slot.price * factor for slot in plan.slots) / energy
+            self.run.noted = now
+
+    # -- learning the charging power and efficiency ---------------------------------------------
+
+    def learn(self, charge: Any) -> None:
+        """Learn the charging power and the efficiency (energy into the battery per kWh from the charger) from the
+        ledger's home charges, and plan with them once a couple of charges agree."""
+        p = self.planner
+        started = dt_util.parse_datetime(charge.started_at or "")
+        ended = dt_util.parse_datetime(charge.ended_at or "")
+        if not (started and ended and charge.kwh and charge.kwh > 0):
+            return
+        hours = (ended - started).total_seconds() / 3600
+        begin, end = charge.start_battery_pct, charge.end_battery_pct
+        learned = self.learned
+        # The power from charges of half an hour or more below the top, where cars charge slower.
+        if hours >= LEARN_MIN_HOURS and (end is None or end <= LEARN_TOP_SOC):
+            power = charge.kwh / hours
+            if LEARN_POWER_RANGE[0] <= power <= LEARN_POWER_RANGE[1]:
+                learned["power_kw"] = _average(learned.get("power_kw"), power)
+                learned["power_samples"] = int(learned.get("power_samples") or 0) + 1
+        # The efficiency from charges that raised the battery level by enough to measure it.
+        if begin is not None and end is not None and end - begin >= LEARN_MIN_SOC_GAIN and p.capacity > 0:
+            efficiency = (end - begin) / 100 * p.capacity / charge.kwh
+            if LEARN_EFFICIENCY_RANGE[0] <= efficiency <= LEARN_EFFICIENCY_RANGE[1]:
+                learned["efficiency"] = _average(learned.get("efficiency"), efficiency)
+                learned["efficiency_samples"] = int(learned.get("efficiency_samples") or 0) + 1
+        self.apply_learned()
+
+    def apply_learned(self) -> None:
+        """Plan with the learned power and efficiency (when learning is on and enough charges agree)."""
+        p = self.planner
+        if not p.flags["learn"]:
+            return
+        learned = self.learned
+        if int(learned.get("power_samples") or 0) >= LEARN_MIN_SAMPLES and learned.get("power_kw"):
+            p.settings["charge_power_kw"] = round(float(learned["power_kw"]), 1)
+        if int(learned.get("efficiency_samples") or 0) >= LEARN_MIN_SAMPLES and learned.get("efficiency"):
+            p.settings["efficiency"] = round(float(learned["efficiency"]), 2)
+
+    # -- the monthly summary --------------------------------------------------------------------
+
+    def add_saving(self, run: ChargeRun) -> None:
+        saving = run.saving()
+        if saving is None or run.ended is None:
+            return
+        month = dt_util.as_local(run.ended).strftime("%Y-%m")
+        self.saved[month] = round(self.saved.get(month, 0.0) + saving, 2)
+        for old in sorted(self.saved)[:-SAVED_MONTHS_KEPT]:
+            del self.saved[old]
+
+    def monthly(self, now: datetime) -> None:
+        """On the first of the month (from 09:00): last month's home charging on the phones, once."""
+        p = self.planner
+        if not (p.flags["monthly_summary"] and p.notify.targets) or now.day > MONTHLY_DAYS or now.time() < MONTHLY_AT:
+            return
+        previous = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        if self.summary_sent == previous:
+            return
+        self.summary_sent = previous
+        p.entry.async_create_background_task(
+            self.hass, self.async_send_month(previous), "ev_smart_charge_notify_month")
+
+    def month_text(self, month: str) -> str | None:
+        """Home charges (kWh, price, price per kWh), the saving from the plans and the public charges of a month."""
+        p = self.planner
+        unit = p.price_unit or "kr"
+
+        def number(value: float, digits: int) -> str:
+            return f"{value:.{digits}f}".replace(".", ",")
+
+        def in_month(charge) -> bool:
+            when = dt_util.parse_datetime(charge.ended_at or charge.started_at or "")
+            return when is not None and dt_util.as_local(when).strftime("%Y-%m") == month
+
+        charges = [charge for charge in p.charges() if in_month(charge) and charge.ended_at]
+        home = [charge for charge in charges if charge.location_kind == "home"]
+        public = [charge for charge in charges if charge.location_kind != "home"]
+        if not charges:
+            return None
+        lines = []
+        if home:
+            kwh = sum(charge.kwh or 0 for charge in home)
+            priced = [charge for charge in home if charge.price is not None]
+            price = sum(charge.price for charge in priced)
+            line = f"Hjemme: {len(home)} ladninger · {number(kwh, 1)} kWh · {number(price, 2)} {unit}"
+            priced_kwh = sum(charge.kwh or 0 for charge in priced)
+            if priced_kwh > 0:
+                line += f" ({number(price / priced_kwh, 2)} {unit}/kWh)"
+            lines.append(line)
+            if len(priced) < len(home):
+                lines.append(f"Uden pris: {len(home) - len(priced)}")
+        if (saved := self.saved.get(month)) is not None and abs(saved) >= SAVING_SHOWN:
+            lines.append(f"Sparet med ladeplanerne: {number(saved, 2)} {unit}" if saved > 0
+                         else f"Ladeplanerne kostede {number(-saved, 2)} {unit} mere end Lad nu")
+        if public:
+            kwh = sum(charge.kwh or 0 for charge in public)
+            price = sum(charge.price or 0 for charge in public)
+            lines.append(f"Ude: {len(public)} ladninger · {number(kwh, 1)} kWh · {number(price, 2)} {unit}")
+        return "\n".join(lines)
+
+    async def async_send_month(self, month: str, so_far: bool = False) -> None:
+        p = self.planner
+        text = self.month_text(month)
+        if text is None:
+            text = "Ingen ladninger."
+        year, number = (int(part) for part in month.split("-"))
+        name = f"{MONTH_NAMES[number - 1]} {year}" + (" indtil nu" if so_far else "")
+        await p.notify.async_send_note("month", f"månedsoversigt {name}", text)
 
     def new_plug(self) -> None:
         self.run = ChargeRun()
 
     def restore_run(self, data: Any) -> None:
         """The charge saved before a restart (or a reload of the settings); a run that ended long ago is dropped."""
-        if self.run.sessions or not isinstance(data, dict):
+        if self.run.active or not isinstance(data, dict):
             return
         run = ChargeRun.from_dict(data)
-        if run.sessions and run.ended and dt_util.utcnow() - run.ended < timedelta(hours=CHARGE_RUN_KEEP_HOURS):
+        last = run.ended or run.noted
+        if run.active and last and dt_util.utcnow() - last < timedelta(hours=CHARGE_RUN_KEEP_HOURS):
             self.run = run
 
     def check_done(self, now: datetime) -> None:
@@ -169,6 +335,7 @@ class Routines:
         if p.status != STATUS_DONE and not unplugged:
             return
         self.run = ChargeRun()
+        self.add_saving(run)
         if not (p.flags["notify_done"] and p.notify.targets):
             return
         title = "opladning færdig" if p.status == STATUS_DONE else "opladning slut"

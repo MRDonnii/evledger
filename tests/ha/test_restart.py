@@ -242,3 +242,17 @@ async def test_an_old_saved_charge_is_not_counted(hass: HomeAssistant, request, 
     planner.routines.charge_finished(session(4.0, 1.5, dt_util.now() - timedelta(hours=1), 45, (70, 80)))
     await later(hass, freezer, 1)
     assert hass.states.get("switch.bil_message_when_charging_is_done").attributes["charge_run"]["sessions"] == 1
+
+
+async def test_learned_values_and_the_monthly_summary_survive(hass: HomeAssistant, request):
+    restore(hass, [
+        State("switch.bil_learn_charging_power_and_efficiency", "on",
+              {"learned": {"power_kw": 10.4, "power_samples": 3, "efficiency": 0.87, "efficiency_samples": 2}}),
+        State("switch.bil_monthly_summary_on_the_phone", "on", {"sent_for": "2026-09", "saved": {"2026-09": 20.5}}),
+        State("select.bil_price_resolution", "hour"),
+    ])
+    entry, _ = await setup(hass, request)
+    planner = entry.runtime_data
+    assert planner.settings["charge_power_kw"] == 10.4 and planner.settings["efficiency"] == 0.87
+    assert planner.routines.summary_sent == "2026-09" and planner.routines.saved == {"2026-09": 20.5}
+    assert planner.resolution == "hour"

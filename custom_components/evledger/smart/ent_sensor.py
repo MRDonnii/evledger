@@ -46,7 +46,7 @@ SENSORS: tuple[PlanSensorDescription, ...] = (
                           value=lambda p: (block := _next_block(p)) and block.start),
     PlanSensorDescription(key="next_charge_end", device_class=SensorDeviceClass.TIMESTAMP,
                           icon="mdi:clock-end",
-                          value=lambda p: (block := _next_block(p)) and block.end),
+                          value=lambda p: p.block_end(_next_block(p), dt_util.now())),
     PlanSensorDescription(key="planned_cost", device_class=SensorDeviceClass.MONETARY,
                           icon="mdi:cash-clock", suggested_display_precision=2,
                           value=lambda p: p.schedule.cost),

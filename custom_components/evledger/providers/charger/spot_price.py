@@ -7,8 +7,11 @@ electricity-price sensor reports *right now*. Works the same way regardless
 of which price integration you use — Nordpool, Energi Data Service,
 Strømligning, or anything else that exposes a plain "current price" sensor.
 
-This is an estimate, not a bill: it uses one price point (at session end)
-rather than a time-weighted average across the whole session, and it assumes
+This is an estimate, not a bill. While a charge runs, the ledger prices
+every bit of energy the charger counts at the price of that moment (the
+quarter, or the mean of the hour with smart charging set to hours, from the
+sensor's price list, else its state); a single price at the session end is
+only the fallback. It assumes
 your price sensor's unit is already your configured currency per kWh (if
 yours reports in øre or cents, its state needs converting — e.g. with a
 template sensor — before pointing EV Ledger at it). When both Monta and spot
@@ -16,12 +19,13 @@ price are configured, Monta's actual billed cost is always preferred.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from ...models import SessionCost
+from ...smart.plan import SLOT_MINUTES, floor_slot, parse_price_attributes
 from .base import CAP_COST_LOOKUP, ChargerProvider
 
 
@@ -58,3 +62,21 @@ class SpotPriceChargerProvider(ChargerProvider):
             price=round(known_kwh * price_per_kwh, 2),
             ended_at=dt_util.as_utc(session_end).isoformat(),
         )
+
+    def price_at(self, hass: HomeAssistant, when: datetime, minutes: int = SLOT_MINUTES) -> float | None:
+        """The price at a moment: the quarter (or the mean of the hour) from the sensor's price list, else its
+        state."""
+        if not self._price_entity:
+            return None
+        state = hass.states.get(self._price_entity)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return None
+        start = floor_slot(when, minutes)
+        inside = [slot.price for slot in parse_price_attributes(dict(state.attributes))
+                  if start <= slot.start < start + timedelta(minutes=minutes)]
+        if inside:
+            return sum(inside) / len(inside)
+        try:
+            return float(state.state)
+        except ValueError:
+            return None

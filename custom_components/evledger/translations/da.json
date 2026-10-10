@@ -263,6 +263,13 @@
           "now": "Lad nu",
           "manual": "Manuel (styres ikke)"
         }
+      },
+      "price_resolution": {
+        "name": "Prisopløsning",
+        "state": {
+          "quarter": "Kvarter (15 min)",
+          "hour": "Time"
+        }
       }
     },
     "datetime": {
@@ -302,6 +309,12 @@
       },
       "notify_start": {
         "name": "Besked når opladningen starter"
+      },
+      "learn": {
+        "name": "Lær ladeeffekt og virkningsgrad"
+      },
+      "monthly_summary": {
+        "name": "Månedsoversigt på mobilen"
       }
     },
     "button": {
@@ -313,6 +326,9 @@
       },
       "send_plan": {
         "name": "Send ladeplan til mobil"
+      },
+      "send_monthly_summary": {
+        "name": "Send månedsoversigt"
       }
     },
     "binary_sensor": {

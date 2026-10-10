@@ -8,11 +8,12 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
 from .entity import EvSmartChargeListenerEntity
-from .plan import DEFAULT_MODES, MODES
+from .plan import DEFAULT_MODES, MODES, RESOLUTIONS
 
 
 def build(planner) -> list:
-    return [ChargeModeSelect(planner, "charge_mode"), DefaultModeSelect(planner, "default_charge_mode")]
+    return [ChargeModeSelect(planner, "charge_mode"), DefaultModeSelect(planner, "default_charge_mode"),
+            PriceResolutionSelect(planner, "price_resolution")]
 
 
 class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity):
@@ -55,6 +56,8 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
                 "now_seen_connected": self.planner.now_seen_connected,
                 "last_soc": self.planner.last_soc,
                 "car_limit": self.planner.car_limit(),
+                # Quarters or whole hours: price cards can show the prices the same way.
+                "price_resolution": self.planner.resolution,
                 "warned": sorted(self.planner.warned),
                 # The plan's charging periods, followed after a restart until the prices are back.
                 "planned": self._planned()}
@@ -88,3 +91,24 @@ class DefaultModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity
 
     async def async_select_option(self, option: str) -> None:
         self.planner.async_set_default_mode(option)
+
+
+class PriceResolutionSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity):
+    """Plan in quarters or in whole hours (with the mean price of the hour). Price cards can follow it too."""
+
+    _attr_icon = "mdi:timer-cog-outline"
+    _attr_options = list(RESOLUTIONS)
+    _attr_entity_category = EntityCategory.CONFIG
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in RESOLUTIONS:
+            self.planner.async_set_resolution(last.state, restore=True)
+
+    @property
+    def current_option(self) -> str:
+        return self.planner.resolution
+
+    async def async_select_option(self, option: str) -> None:
+        self.planner.async_set_resolution(option)

@@ -168,12 +168,13 @@ Home charge sessions try each configured cost source in order and use the
 first one that answers:
 
 1. **Monta** — the actual billed cost of the session, matched by timestamp.
-2. **Spot price** — kWh (from Zaptec) × your price sensor's current state, as
-   an estimate. One price point at session end, not a time-weighted average
-   across the session — good enough for most sessions, less so for very long
-   ones spanning a price change. Assumes your sensor's state is already in
-   your configured currency per kWh (convert first with a template sensor if
-   yours reports in øre/cents).
+2. **Spot price** — while the charge runs, every bit of energy Zaptec counts is
+   priced at the price of that moment: the quarter from your price sensor's
+   price list (or the mean of the hour when smart charging plans in whole
+   hours), else the sensor's state. Only when that is not possible, the kWh
+   × the price at the end. Assumes your sensor's state is already in your
+   configured currency per kWh (convert first with a template sensor if yours
+   reports in øre/cents).
 3. Neither → the session is flagged `needs_review` with `kwh` still recorded
    from Zaptec, same as an unpriced public charge.
 
@@ -279,9 +280,12 @@ New entities on the car's device:
 | `switch.<car>_confirm_plan_on_phone`, `button.<car>_confirm_plan` | When on, a plugged-in car waits for an answer on the phones (Confirm / Charge now / Pause); without an answer the plan runs after 60 minutes. Confirm keeps the plan that waits (e.g. the default plan). |
 | `switch.<car>_message_when_charging_starts` | When charging starts: the plan, when the charging period ends, the expected price and energy, the target and the battery now, with **Pause**. Not again for a short stop within 30 minutes. |
 | `switch.<car>_notify_plan_on_phone`, `button.<car>_send_plan_to_phone` | Phone messages: the active plan with time, price and Charge now / Pause when the car is plugged in or the plan changes; a warning once when the target cannot be reached in time (plugged in late, fixed window too short, a trip above the car's charge limit). |
-| `sensor.<car>_charge_status`, `..._next_charge_start/end`, `..._planned_charge_cost/energy` | The plan. `planned_charge_cost` has an `alternatives` attribute with the price of every plan. |
+| `sensor.<car>_charge_status`, `..._next_charge_start/end`, `..._planned_charge_cost/energy` | The plan. `planned_charge_cost` has an `alternatives` attribute with the price of every plan. While the car charges up to its own charge limit in the plan's last period, the end is the car's own "full at" time (Tesla Custom, Tesla Fleet, Teslemetry, Tessie): the car knows that it charges slower near 100 %. |
+| `select.<car>_price_resolution` | **Quarter** (15 min) or **Hour**: the plans use quarters, or whole hours with the mean price of the hour (a fixed window or a ready-by time inside an hour still counts). The ledger prices its charges the same way. The charge mode select has a `price_resolution` attribute, so price cards can show the prices the same way. |
+| `switch.<car>_learn_charging_power_and_efficiency` | Learns the charging power (charges of 30 minutes or more that end below 90 %) and the efficiency (charges that raise the battery level by 10 % or more) from the ledger's home charges, and plans with them once two charges agree; the numbers for power and efficiency then show the learned values. The attribute `learned` has the values and how many charges they rest on. On by default. |
+| `switch.<car>_monthly_summary_on_the_phone`, `button.<car>_send_monthly_summary` | On the 1st of the month from 09:00: last month's home charges (count, kWh, price, price per kWh), what the plans saved and the public charges, once. The button sends this month so far. |
 | `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
-| `switch.<car>_message_when_charging_is_done` | When the plan is done (or the cable comes out), one message with the whole charge: kWh, price and price per kWh, the battery before and after, and when it charged – summed over all periods of a split plan, from the ledger's sessions. On by default. |
+| `switch.<car>_message_when_charging_is_done` | When the plan is done (or the cable comes out), one message with the whole charge: kWh, price and price per kWh, the battery before and after, when it charged – summed over all periods of a split plan, from the ledger's sessions – and what the plan saved against charging right away when the car was plugged in ("Charge now"). On by default. |
 | `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. |
 | `switch.<car>_another_time_at_the_weekend`, `time.<car>_ready_by_at_the_weekend` | Another ready-by time on Saturdays and Sundays (09:00 by default), e.g. later than on workdays. |
 | `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | 20 minutes (by default) before the ready-by time or a trip's departure, while the car is home, the phones are asked **Forvarm / Spring over**; the climate is only turned on after **Forvarm** (no answer, nothing happens). If the car is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
