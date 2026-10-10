@@ -75,3 +75,16 @@ async def test_the_other_car_shows_no_power(hass: HomeAssistant, request, freeze
     await hass.async_block_till_done()
     assert float(state(hass, "sensor.kia_home_charging_power")) == pytest.approx(7.4)
     assert float(state(hass, "sensor.bil_home_charging_power")) == 0
+
+
+async def test_power_while_the_chargers_switch_is_unavailable(hass: HomeAssistant, request):
+    # Zaptec's charging switch is unavailable while no car is connected; its power sensor still says 0 W.
+    entry, _ = await setup(hass, request, charger_state="disconnected")
+    hass.config_entries.async_update_entry(entry, data={**entry.data,
+                                                        "zaptec_charging_entity": "switch.charger_charging"})
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    hass.states.async_set("switch.charger_charging", "unavailable")
+    hass.states.async_set("sensor.charger_power", "0.0", {"unit_of_measurement": "W"})
+    await hass.async_block_till_done()
+    assert float(state(hass, "sensor.bil_home_charging_power")) == 0

@@ -59,6 +59,10 @@ class ZaptecChargerProvider(ChargerProvider):
         self._charging_entity = charging_entity
         self._completed_energy_entity = completed_energy_entity
 
+    def live_power_w(self, hass: HomeAssistant) -> float | None:
+        """The charger's power on its own, also while its charging switch is unavailable (no car connected)."""
+        return _numeric_state_in_watts(hass, self._power_entity)
+
     def get_live_state(self, hass: HomeAssistant) -> LiveChargeState | None:
         power_w = _numeric_state_in_watts(hass, self._power_entity)
         session_energy_kwh = _numeric_state(hass, self._session_energy_entity)

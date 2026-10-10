@@ -177,13 +177,18 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for provider in self._charger_providers.values():
             if CAP_LIVE_POWER not in provider.capabilities:
                 continue
-            state = provider.get_live_state(self.hass)
-            if state is None or state.power_w is None:
+            reader = getattr(provider, "live_power_w", None)
+            if reader is not None:
+                power_w = reader(self.hass)
+            else:
+                state = provider.get_live_state(self.hass)
+                power_w = state.power_w if state is not None else None
+            if power_w is None:
                 continue
             smart = getattr(self, "smart", None)
             if smart is not None and smart.shared and not smart.car_present:
                 return 0.0
-            return round(max(state.power_w, 0.0) / 1000, 3)
+            return round(max(power_w, 0.0) / 1000, 3)
         return None
 
     def home_energy(self, since: datetime | None = None) -> float:
