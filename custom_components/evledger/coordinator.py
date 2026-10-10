@@ -160,6 +160,9 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     live_states[provider_id] = state
 
         home_charging = any(state.is_charging for state in live_states.values())
+        smart = getattr(self, "smart", None)
+        if home_charging and smart is not None and smart.shared and not smart.car_present:
+            home_charging = False  # another of the cars on the shared charger is the one charging
         home_provider_id = next(
             (pid for pid, state in live_states.items() if state.is_charging), None
         )

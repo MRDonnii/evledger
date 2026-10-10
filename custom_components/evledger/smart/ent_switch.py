@@ -25,7 +25,8 @@ def build(planner) -> list:
 FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-check",
               "plug_reminder": "mdi:power-plug-outline",
               "weekend_ready_by": "mdi:calendar-weekend", "precondition": "mdi:car-defrost-front",
-              "learn": "mdi:school-outline", "monthly_summary": "mdi:calendar-month-outline"}
+              "learn": "mdi:school-outline", "monthly_summary": "mdi:calendar-month-outline",
+              "low_price_alert": "mdi:cash-check"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -34,7 +35,7 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
     def __init__(self, planner, key: str) -> None:
         super().__init__(planner, key)
         self._attr_icon = FLAG_ICONS[key]
-        if key in ("notify_start", "notify_done", "plug_reminder", "learn", "monthly_summary"):
+        if key in ("notify_start", "notify_done", "plug_reminder", "learn", "monthly_summary", "low_price_alert"):
             self._attr_entity_category = EntityCategory.CONFIG
 
     async def async_added_to_hass(self) -> None:

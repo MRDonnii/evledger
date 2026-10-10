@@ -223,6 +223,9 @@
       },
       "precondition_minutes": {
         "name": "Forvarm minutter før"
+      },
+      "low_price": {
+        "name": "Besked ved strømpris under"
       }
     },
     "time": {
@@ -315,6 +318,9 @@
       },
       "monthly_summary": {
         "name": "Månedsoversigt på mobilen"
+      },
+      "low_price_alert": {
+        "name": "Besked når strømmen er billig"
       }
     },
     "button": {

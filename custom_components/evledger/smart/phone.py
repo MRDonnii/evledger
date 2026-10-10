@@ -34,7 +34,7 @@ ACTION_EVENT = "mobile_app_notification_action"
 # questions and warnings keep their sound.
 QUIET_FROM = time(22, 0)
 QUIET_UNTIL = time(7, 0)
-QUIET_KINDS = ("start", "done")
+QUIET_KINDS = ("start", "done", "plug_soon")
 ANSWERS = {"NOW": MODE_NOW, "OFF": MODE_OFF}
 NAMES = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft",
          MODE_MANUAL: "Manuel"}

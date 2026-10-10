@@ -286,7 +286,8 @@ New entities on the car's device:
 | `switch.<car>_monthly_summary_on_the_phone`, `button.<car>_send_monthly_summary` | On the 1st of the month from 09:00: last month's home charges (count, kWh, price, price per kWh), what the plans saved and the public charges, once. The button sends this month so far. |
 | `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
 | `switch.<car>_message_when_charging_is_done` | When the plan is done (or the cable comes out), one message with the whole charge: kWh, price and price per kWh, the battery before and after, when it charged – summed over all periods of a split plan, from the ledger's sessions – and what the plan saved against charging right away when the car was plugged in ("Charge now"). On by default. |
-| `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. |
+| `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. Also half an hour before the plan's cheapest start, under the same conditions: "Billigste ladning starter kl. …" (once per start, quiet at night). |
+| `switch.<car>_message_when_power_is_cheap`, `number.<car>_cheap_power_message_below` | When the price drops below the level (1.00 by default) between 08:00 and 21:00 and the car is home without the cable and not near its target: a message with **Charge now** (at most every 3 hours). Off by default. |
 | `switch.<car>_another_time_at_the_weekend`, `time.<car>_ready_by_at_the_weekend` | Another ready-by time on Saturdays and Sundays (09:00 by default), e.g. later than on workdays. |
 | `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | 20 minutes (by default) before the ready-by time or a trip's departure, while the car is home, the phones are asked **Forvarm / Spring over**; the climate is only turned on after **Forvarm** (no answer, nothing happens). If the car is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
 
@@ -302,6 +303,17 @@ charging started, charge done) arrive without sound between 22:00 and 07:00 (iOS
 and warnings keep their sound. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)
 shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
+
+### Several cars on one charger
+
+Each car has its own EV Ledger entry (its own model, battery, target, plans and ledger) and smart charging on the
+same charger. The car that says it is plugged in (its own plug sensor: Tesla Fleet, Teslemetry or Tessie "charge
+cable", Tesla Custom "charger", or the one chosen in the setup) and is at home takes the charger with its own plan;
+right after plugging in, before the car has reported, the only car at home is taken. The other cars show "another
+car" and never send the charger a command, also not in Charge now, and only the car on the charger records the charge
+in its ledger. When no car can be told (several at home, none reporting yet – or a guest car), nothing starts until
+**Charge now** is pressed on the car that is plugged in (also from the phone message); that choice holds until the
+cable comes out. With one car on the charger nothing changes.
 
 ### Trips from a calendar
 

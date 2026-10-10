@@ -339,3 +339,36 @@ async def test_charging_started_is_quiet_at_night(hass: HomeAssistant, request, 
     await hass.async_block_till_done(wait_background_tasks=True)
     started = [m for m in sent if "ladning startet" in m.get("title", "")]
     assert started and started[0]["data"]["push"] == {"interruption-level": "passive"}
+
+
+async def test_plug_in_before_the_cheapest_start(hass: HomeAssistant, request, freezer):
+    from .test_new_features import quarter_prices
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, charger_state="disconnected", soc="30", cheap_now=False)
+    hour = quarter_prices(hass, {q: 0.2 for q in range(8, 16)})  # cheap from two hours on
+    planner = await with_options(hass, entry)
+    planner.async_set_ready_by((hour + timedelta(hours=10)).time())
+    await later(hass, freezer, 60)
+    assert not [m for m in sent if "sæt bilen til" in m["title"]], "not yet"
+    await later(hass, freezer, 35)
+    soon = [m for m in sent if m["title"] == "Bil: sæt bilen til"]
+    assert len(soon) == 1 and "Billigste ladning starter" in soon[0]["message"], sent
+    await later(hass, freezer, 5)
+    assert len([m for m in sent if m["title"] == "Bil: sæt bilen til"]) == 1, "once"
+
+
+async def test_message_when_power_is_cheap(hass: HomeAssistant, request, freezer):
+    from .test_new_features import quarter_prices
+    freezer.move_to(dt_util.now().replace(hour=11, minute=0, second=5))
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, charger_state="disconnected", soc="40", cheap_now=False)
+    quarter_prices(hass, {}, default=2.0)
+    await with_options(hass, entry)
+    await switch(hass, "switch.bil_message_when_power_is_cheap")
+    await later(hass, freezer, 1)
+    assert not [m for m in sent if "billig" in m["title"]]
+    quarter_prices(hass, {}, default=0.6)
+    await later(hass, freezer, 1)
+    cheap = [m for m in sent if m["title"] == "Bil: strømmen er billig"]
+    assert len(cheap) == 1 and "0,60 kr/kWh (under 1,00)." in cheap[0]["message"], cheap
+    assert cheap[0]["data"]["actions"][0]["title"] == "Lad nu"

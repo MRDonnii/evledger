@@ -31,9 +31,13 @@ from .const import (
     LEARN_POWER_RANGE,
     LEARN_TOP_SOC,
     LEARN_WEIGHT,
+    LOW_PRICE_EVERY_HOURS,
+    LOW_PRICE_FROM,
+    LOW_PRICE_UNTIL,
     MONTH_NAMES,
     MONTHLY_AT,
     MONTHLY_DAYS,
+    PLUG_SOON_MINUTES,
     PRECONDITION_OFF_AFTER_MINUTES,
     REMINDER_WINDOW_HOURS,
     SAVED_MONTHS_KEPT,
@@ -179,6 +183,10 @@ class Routines:
         self.dismissed: set[str] = set()
         # Learned from the ledger's charges: charging power and efficiency with how many charges they rest on.
         self.learned: dict[str, float] = {}
+        # The plan start a "plug in soon" reminder was sent for; the low price message: below now, and when sent.
+        self.soon_sent: datetime | None = None
+        self._was_below = False
+        self.low_sent: datetime | None = None
         # The month the last monthly summary was for, and what the plans saved per month.
         self.summary_sent: str | None = None
         self.saved: dict[str, float] = {}
@@ -403,6 +411,60 @@ class Routines:
                 p.entry.async_create_background_task(
                     self.hass, p.notify.async_send_note(key, title, text), f"ev_smart_charge_notify_{key}")
         p.notify_listeners()
+
+    def plug_soon(self, now: datetime) -> None:
+        """Half an hour before the plan's cheapest start, while the car is home without the cable and low: a reminder
+        to plug in (once per start)."""
+        p = self.planner
+        block = p.schedule.next_block(now)
+        if (block is None or block.start <= now or block.start - now > timedelta(minutes=PLUG_SOON_MINUTES)
+                or self.soon_sent == block.start or not (p.flags["plug_reminder"] and p.notify.targets)):
+            return
+        if p.car_home() is False or p.car_plugged() is not False:
+            return
+        soc = p._battery_soc()
+        soc = soc if soc is not None else p.last_soc
+        trip_need = p.trip_target_soc if p.trip_active else None
+        if soc is None or (soc >= p.settings["reminder_soc"] and (trip_need is None or soc >= trip_need)):
+            return
+        self.soon_sent = block.start
+        cost = p.schedule.cost
+        price = f" ({p.notify.money(p, cost)} for {p.schedule.energy_kwh:.1f} kWh)".replace(".", ",") if cost else ""
+        text = (f"Billigste ladning starter {p.notify.when(block.start)}{price}. Batteriet er på {soc:.0f} %; "
+                "sæt kablet i, så lader den efter planen.")
+        p.entry.async_create_background_task(
+            self.hass, p.notify.async_send_note("plug_soon", "sæt bilen til", text), "ev_smart_charge_notify_plug_soon")
+
+    def low_price(self, now: datetime) -> None:
+        """When the price drops below the chosen level in the daytime and the car is home without the cable and not
+        full: a message with Charge now (at most every few hours)."""
+        p = self.planner
+        slot = next((item for item in p.timeline if item.start <= now < item.end and not item.estimated), None)
+        price = slot.price * p.settings["price_factor"] if slot else None
+        below = price is not None and price < p.settings["low_price"]
+        was_below, self._was_below = self._was_below, below
+        if not below or was_below or not (p.flags["low_price_alert"] and p.notify.targets):
+            return
+        if not LOW_PRICE_FROM <= now.time() < LOW_PRICE_UNTIL:
+            return
+        if self.low_sent and now - self.low_sent < timedelta(hours=LOW_PRICE_EVERY_HOURS):
+            return
+        if p.car_home() is False or p.car_plugged() is True or p.car_full:
+            return
+        soc = p._battery_soc()
+        if soc is not None and soc >= p.target - 5:
+            return
+        self.low_sent = now
+        unit = p.price_unit or "kr"
+        def kr(value: float) -> str:
+            return f"{value:.2f}".replace(".", ",")
+
+        text = (f"Strømmen er billig nu: {kr(price)} {unit}/kWh (under {kr(p.settings['low_price'])})."
+                + (f" Batteriet er på {soc:.0f} %." if soc is not None else "") + " Sæt bilen til og tryk Lad nu.")
+        actions = [{"action": f"{p.notify.prefix}NOW", "title": "Lad nu"}]
+        p.entry.async_create_background_task(
+            self.hass, p.notify.async_send_note("low_price", "strømmen er billig", text, actions),
+            "ev_smart_charge_notify_low_price")
 
     def reminder_text(self, now: datetime) -> str | None:
         p = self.planner

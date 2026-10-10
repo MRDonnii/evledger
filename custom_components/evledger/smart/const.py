@@ -124,3 +124,9 @@ MONTHLY_AT = time(9, 0)
 MONTHLY_DAYS = 3
 MONTH_NAMES = ("januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober",
                "november", "december")
+# "Plug in": this long before the plan's cheapest start. "Power is cheap": in the daytime, at most this often.
+PLUG_SOON_MINUTES = 30
+LOW_PRICE_FROM = time(8, 0)
+LOW_PRICE_UNTIL = time(21, 0)
+LOW_PRICE_EVERY_HOURS = 3
+DEFAULT_LOW_PRICE = 1.0

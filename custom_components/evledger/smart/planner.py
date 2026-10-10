@@ -16,6 +16,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from . import share as charger_share
 from . import trip, vehicles
 from .charger import ChargerBackend, create_backend
 from .const import (
@@ -32,6 +33,7 @@ from .const import (
     DEFAULT_EFFICIENCY,
     DEFAULT_FIXED_END,
     DEFAULT_FIXED_START,
+    DEFAULT_LOW_PRICE,
     DEFAULT_MIN_SOC,
     DEFAULT_POWER_KW,
     DEFAULT_PRECONDITION_MINUTES,
@@ -100,6 +102,8 @@ PLUGGED_STATES = (STATE_ON, "true", "plugged", "connected", "plugged_in")
 # The car's own charge limit (a number on the car's device): Tesla Custom "_charge_limit", Tesla Fleet,
 # Teslemetry and Tessie "charge_state_charge_limit_soc".
 CHARGE_LIMIT_SUFFIXES = ("_charge_limit", "charge_limit_soc")
+# The car's own plug sensor: Tesla Fleet / Teslemetry / Tessie "charge cable", Tesla Custom "charger".
+CAR_PLUG_SUFFIXES = ("charge_state_conn_charge_cable", "_charger")
 # The car's own "full at" time: Tesla Custom, and Tesla Fleet / Teslemetry / Tessie.
 CAR_FULL_SUFFIXES = ("_time_charge_complete", "charge_state_minutes_to_full_charge")
 HOLD_MODES = (MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)
@@ -150,6 +154,7 @@ class ChargePlanner:
             "trip_reserve": DEFAULT_TRIP_RESERVE,
             "reminder_soc": DEFAULT_REMINDER_SOC,
             "precondition_minutes": DEFAULT_PRECONDITION_MINUTES,
+            "low_price": DEFAULT_LOW_PRICE,
         }
         self.times: dict[str, time] = {
             "ready_by_time": time.fromisoformat(DEFAULT_READY_BY),
@@ -162,7 +167,8 @@ class ChargePlanner:
         # weekend and the car's climate before the ready-by time.
         self.flags: dict[str, bool] = {"notify_start": True, "notify_done": True,
                                        "plug_reminder": True, "weekend_ready_by": False,
-                                       "precondition": False, "learn": True, "monthly_summary": True}
+                                       "precondition": False, "learn": True, "monthly_summary": True,
+                                       "low_price_alert": False}
         # The default plan runs when a car is plugged in; any other plan returns to it once it has run.
         self.default_mode = MODE_SMART
         # Plan in quarters or in whole hours (the mean price of the hour).
@@ -184,6 +190,9 @@ class ChargePlanner:
         self.warned: set[str] = set()
         self._limit_id: str | None = None
         self._full_ids: list[str] | None = None
+        self._plug_ids: list[str] | None = None
+        # Several cars on one charger: the share decides which of them is on it.
+        self.share: charger_share.ChargerShare | None = None
         self.trip = TripState()
         self.result = PlanResult(None, None, None, None, None, None)
         self.schedule = Schedule()
@@ -307,6 +316,10 @@ class ChargePlanner:
         watched = [self.battery_entity, *self.price_entities]
         if self.plugged_entity:
             watched.append(self.plugged_entity)
+        # The car's own plug sensors and location tell which car is on a shared charger.
+        watched.extend(self._plug_entities())
+        if tracker := self.options.get(CONF_CAR_TRACKER):
+            watched.append(tracker)
         if self.backend:
             watched.extend(self.backend.entities)
         self._unsubs.append(async_track_state_change_event(self.hass, list(dict.fromkeys(watched)), self._on_state))
@@ -314,10 +327,13 @@ class ChargePlanner:
         self._unsubs.append(self.notify.async_listen(self))
         # Act as soon as the first minute after a start is over, not at the next minute tick.
         self._unsubs.append(async_call_later(self.hass, STARTUP_GRACE_SECONDS + 1, self._on_recheck))
+        self.share = charger_share.join(self.hass, self)
         self.async_recalculate()
 
     @callback
     def async_stop(self) -> None:
+        charger_share.leave(self.hass, self, self.share)
+        self.share = None
         while self._unsubs:
             self._unsubs.pop()()
         if self._recheck:
@@ -371,6 +387,13 @@ class ChargePlanner:
 
     @callback
     def async_set_mode(self, mode: str, restore: bool = False) -> None:
+        if (mode == MODE_NOW and not restore and self.shared and self.charger_state in CONNECTED
+                and self.share.owner() is not self):
+            # "Charge now" on a car that is not told to be on the shared charger: it is this one.
+            self.share.forced = self
+            self.car_present = True
+            self._took_charger()
+            self.share.check()
         if mode != self.mode and not restore:
             if mode == MODE_NOW:
                 self.mode_before_now = self.mode
@@ -607,8 +630,51 @@ class ChargePlanner:
         except (TypeError, ValueError):
             return None
 
+    @property
+    def shared(self) -> bool:
+        """Other EV Ledger cars use the same charger."""
+        return bool(self.share and self.share.shared)
+
+    def _plug_entities(self) -> list[str]:
+        """The car's own plug sensors on this car only (the battery sensor's device or a device with the same name)."""
+        if self._plug_ids is None:
+            registry = er.async_get(self.hass)
+            devices = dr.async_get(self.hass)
+            battery = registry.async_get(self.battery_entity)
+            car = devices.async_get(battery.device_id) if battery is not None and battery.device_id else None
+            found: list[str] = []
+            if car is not None:
+                name = car.name_by_user or car.name
+                same_car = [device.id for device in devices.devices.values()
+                            if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
+                found = [other.entity_id for device_id in same_car
+                         for other in er.async_entries_for_device(registry, device_id)
+                         if other.domain == "binary_sensor" and not other.disabled_by
+                         and other.unique_id.endswith(CAR_PLUG_SUFFIXES)]
+            self._plug_ids = found
+        return self._plug_ids
+
+    def car_plug_state(self) -> tuple[bool | None, datetime | None]:
+        """Whether the car itself says it is plugged in (the chosen plug sensor, else its own ones), and since when."""
+        ids = list(dict.fromkeys([*([self.plugged_entity] if self.plugged_entity else []), *self._plug_entities()]))
+        known: list[tuple[bool, datetime]] = []
+        for entity_id in ids:
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state in ("unknown", "unavailable", ""):
+                continue
+            known.append((state.state.lower() in PLUGGED_STATES, state.last_changed))
+        if not known:
+            return None, None
+        plugged = [changed for value, changed in known if value]
+        if plugged:
+            return True, max(plugged)
+        return False, max(changed for _, changed in known)
+
     def _car_present(self) -> bool:
-        """False only when the car's own plug sensor says it is not plugged in (another car is)."""
+        """False only when the car's own plug sensor says it is not plugged in (another car is). With several cars
+        on the charger: only the car that is on it."""
+        if self.shared:
+            return self.share.owner() is self
         if not self.plugged_entity or (state := self.hass.states.get(self.plugged_entity)) is None:
             return True
         if state.state == STATE_OFF or state.state in ("false", "unplugged", "disconnected"):
@@ -721,9 +787,16 @@ class ChargePlanner:
 
         if self.backend:
             self.charger_state = self.backend.state()
-            self.car_present = self._car_present()
+            was_present, self.car_present = self.car_present, self._car_present()
             event = self.controller.observe(self.charger_state, now)
             self._handle_event(event, now)
+            if self.shared:
+                if self.charger_state == ChargerState.DISCONNECTED:
+                    self.share.unplugged()
+                elif self.car_present and not was_present and self.charger_state in CONNECTED and event is None:
+                    # Told which car is on the charger after it was plugged in: this one, with its own plan.
+                    self._took_charger()
+                self.share.check()
             if self.charger_state == ChargerState.DISCONNECTED:
                 self._disconnected_since = self._disconnected_since or now
             elif self.charger_state in CONNECTED:
@@ -815,6 +888,8 @@ class ChargePlanner:
                              for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)}
 
         self.routines.note_plan(now)
+        self.routines.plug_soon(now)
+        self.routines.low_price(now)
         self._control(now)
         self._warn(now)
         self.routines.check_offline(now)
@@ -870,6 +945,18 @@ class ChargePlanner:
             self.mode_before_now, self.mode = self.mode, MODE_NOW
             self.now_seen_connected = True
             self.controller.last_desired = True
+
+    def _took_charger(self) -> None:
+        _LOGGER.debug("%s is the car on the shared charger", self.entry.title)
+        self._alerted.clear()
+        self.warned.clear()
+        self.cap_override = True
+        self._limit_id = None
+        self._new_plug = True
+        self.controller.reset()
+        self.routines.new_plug()
+        if self.mode != MODE_MANUAL and self.info_enabled and self.notify.targets:
+            self._info_pending = True
 
     def unplugged(self, now: datetime) -> bool:
         """The charger has been disconnected longer than a reboot or a lost connection takes."""
@@ -935,7 +1022,7 @@ class ChargePlanner:
         self.status = self._status(state, desired)
         self._alert(now)
         # "Charge now" charges whichever car is plugged in; the plans only the car they belong to.
-        if self.mode == MODE_MANUAL or (not self.car_present and self.mode != MODE_NOW):
+        if self.mode == MODE_MANUAL or (not self.car_present and (self.mode != MODE_NOW or self.shared)):
             return
         missing = ((self._battery_soc() is None and self.last_soc is None)
                    or (not self.slot_count and not self._restored_ahead(now)))
@@ -984,6 +1071,11 @@ class ChargePlanner:
         if self.status == STATUS_STOPPED_EXTERNALLY and self.controller.respects_stop:
             alerts[STATUS_STOPPED_EXTERNALLY] = ("Opladningen blev stoppet af bilen eller appen og startes ikke igen "
                                                  "af sig selv. Tryk Lad nu for at fortsætte.")
+        if self.shared and self.status == STATUS_OTHER_CAR:
+            if self.share.owner() is not None:
+                return  # another of the cars is on the charger: nothing to tell
+            alerts[STATUS_OTHER_CAR] = ("Laderen er tilsluttet, men ingen af bilerne melder sig endnu. "
+                                        f"Er det {self.entry.title}, så tryk Lad nu.")
         if (text := alerts.get(self.status)) and self.status not in self._alerted:
             if self.status == STATUS_OTHER_CAR and not self._new_plug:
                 return  # only when a car is plugged in, not at every restart while it stands there
@@ -1042,7 +1134,7 @@ class ChargePlanner:
             return STATUS_DISCONNECTED
         if state == ChargerState.UNKNOWN:
             return STATUS_UNKNOWN
-        if not self.car_present and self.mode != MODE_NOW:
+        if not self.car_present and (self.mode != MODE_NOW or self.shared):
             return STATUS_OTHER_CAR
         if state == ChargerState.CHARGING:
             return STATUS_CHARGING

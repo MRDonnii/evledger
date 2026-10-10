@@ -223,6 +223,9 @@
       },
       "precondition_minutes": {
         "name": "Precondition minutes before"
+      },
+      "low_price": {
+        "name": "Cheap power message below"
       }
     },
     "time": {
@@ -315,6 +318,9 @@
       },
       "monthly_summary": {
         "name": "Monthly summary on the phone"
+      },
+      "low_price_alert": {
+        "name": "Message when power is cheap"
       }
     },
     "button": {

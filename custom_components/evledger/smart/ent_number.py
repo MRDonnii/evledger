@@ -49,6 +49,9 @@ NUMBERS: tuple[NumberEntityDescription, ...] = (
                             native_min_value=0, native_max_value=100, native_step=5,
                             native_unit_of_measurement=PERCENTAGE,
                             mode=NumberMode.SLIDER, entity_category=EntityCategory.CONFIG),
+    NumberEntityDescription(key="low_price", icon="mdi:cash-check",
+                            native_min_value=-5, native_max_value=20, native_step=0.05,
+                            mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG),
     NumberEntityDescription(key="precondition_minutes", icon="mdi:timer-cog-outline",
                             native_min_value=5, native_max_value=60, native_step=5,
                             native_unit_of_measurement=UnitOfTime.MINUTES,
@@ -79,7 +82,7 @@ class PlanNumber(EvSmartChargeEntity, RestoreNumber):
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        if self.entity_description.key == "price_cap":
+        if self.entity_description.key in ("price_cap", "low_price"):
             return f"{self.planner.price_unit or 'kr'}/kWh"
         return self.entity_description.native_unit_of_measurement
 
