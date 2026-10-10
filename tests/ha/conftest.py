@@ -15,5 +15,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 @pytest.fixture(autouse=True)
 def clock_at_start_of_hour(freezer):
     """The tests make the current hour the cheap one; start at its beginning so that it lasts the whole
-    test, whatever the time of day the tests run at (CI failed in the last minutes of an hour)."""
-    freezer.move_to(dt_util.now().replace(minute=0, second=5, microsecond=0))
+    test (CI failed in the last minutes of an hour), and at noon, so that the hours the tests make cheap lie
+    before the default ready-by time (06:45) the next morning whatever the time of day the tests run at (CI
+    failed at night, when 06:45 cut the cheap hour)."""
+    freezer.move_to(dt_util.now().replace(hour=12, minute=0, second=5, microsecond=0))
