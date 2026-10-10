@@ -187,6 +187,9 @@ class ChargePlanner:
         self.trip = TripState()
         self.result = PlanResult(None, None, None, None, None, None)
         self.schedule = Schedule()
+        # The price slots the plan was made from (quarters or hours, from the current slot to the plan's horizon).
+        self.timeline: list = []
+        self.horizon: datetime | None = None
         self.alternatives: dict[str, Schedule] = {}
         self.deadline: datetime | None = None
         self.price_unit: str | None = None
@@ -779,6 +782,7 @@ class ChargePlanner:
         constraints = self.constraints(now)
         horizon = max([self.deadline, window[1], *(c.deadline for c in constraints)])
         timeline = build_timeline(now, ordered, horizon, self.slot_minutes)
+        self.timeline, self.horizon = timeline, horizon
 
         # The charge running now, or the start already announced, stays while it is still among the cheapest.
         keep: datetime | None = None

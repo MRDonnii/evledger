@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -27,6 +28,15 @@ def _clock(value) -> str:
 
 def _next_block(planner: ChargePlanner):
     return planner.schedule.next_block(dt_util.now())
+
+
+def _prices(planner: ChargePlanner) -> list[dict]:
+    now = dt_util.now()
+    last = max([planner.horizon or now, *(block.end for block in planner.schedule.blocks)])
+    until = min(last, now + timedelta(hours=48))
+    factor = planner.settings["price_factor"]
+    return [{"t": slot.start.isoformat(), "p": round(slot.price * factor, 4), **({"e": True} if slot.estimated else {})}
+            for slot in planner.timeline if slot.end > now and slot.start < until]
 
 
 def _route(planner: ChargePlanner, field: str):
@@ -77,6 +87,8 @@ def build(planner) -> list:
 
 class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
     entity_description: PlanSensorDescription
+    # The price list for cards changes every slot; it is not kept in the recorder.
+    _unrecorded_attributes = frozenset({"prices"})
 
     def __init__(self, planner: ChargePlanner, description: PlanSensorDescription) -> None:
         super().__init__(planner, description.key)
@@ -130,6 +142,10 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "trip_departure": planner.trip.departure,
                 "estimated_prices": schedule.estimated,
                 "shortfall_kwh": schedule.shortfall_kwh,
+                # The prices the plan chose from, for a chart of when the car would charge (also before it is
+                # plugged in): start, price (with the price factor) and whether it is estimated.
+                "slot_minutes": planner.slot_minutes,
+                "prices": _prices(planner),
             }
         if key == "planned_cost":
             return {"alternatives": {

@@ -139,3 +139,12 @@ async def test_the_monthly_summary_on_the_first(hass: HomeAssistant, request, fr
     assert month[0]["message"].startswith("Hjemme: 2 ladninger · 15,0 kWh · 5,00 kr (0,33 kr/kWh)")
     assert "Sparet med ladeplanerne: 12,50 kr" in month[0]["message"]
     assert hass.states.get("switch.bil_monthly_summary_on_the_phone").attributes["sent_for"] == "2026-10"
+
+
+async def test_the_plan_has_its_prices_for_a_chart(hass: HomeAssistant, request):
+    entry, _ = await setup(hass, request, charger=False, cheap_now=False)
+    attributes = hass.states.get("sensor.bil_next_charge_start").attributes
+    prices = attributes["prices"]
+    assert attributes["slot_minutes"] == 15 and len(prices) > 4
+    assert dt_util.parse_datetime(prices[0]["t"]) <= dt_util.now() < dt_util.parse_datetime(prices[1]["t"])
+    assert {"t", "p"} <= set(prices[0])
