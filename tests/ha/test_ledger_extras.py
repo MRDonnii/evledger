@@ -88,3 +88,23 @@ async def test_power_while_the_chargers_switch_is_unavailable(hass: HomeAssistan
     hass.states.async_set("sensor.charger_power", "0.0", {"unit_of_measurement": "W"})
     await hass.async_block_till_done()
     assert float(state(hass, "sensor.bil_home_charging_power")) == 0
+
+
+async def test_a_home_charge_can_be_corrected(hass: HomeAssistant, request):
+    from homeassistant.exceptions import ServiceValidationError
+
+    from .test_ledger_sessions import home_charges, step
+    entry, _ = await setup(hass, request)
+    await step(hass, entry, 0, 0.0)
+    await step(hass, entry, 11000, 0.0)
+    await step(hass, entry, 11000, 6.0)
+    await step(hass, entry, 0, 6.0)
+    charge = home_charges(hass, entry)[-1]
+    await hass.services.async_call(DOMAIN, "update_charge", {"entry_id": entry.entry_id, "charge_id": charge.id,
+                                                             "kwh": 5.0, "price": 2.5, "note": "counted twice"},
+                                   blocking=True)
+    charge = home_charges(hass, entry)[-1]
+    assert (charge.kwh, charge.price, charge.note) == (5.0, 2.5, "counted twice")
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(DOMAIN, "update_charge", {"entry_id": entry.entry_id, "charge_id": "nope",
+                                                                 "kwh": 1.0}, blocking=True)

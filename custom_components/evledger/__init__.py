@@ -6,8 +6,8 @@ import logging
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_CHARGE_ID,
@@ -22,7 +22,6 @@ from .const import (
     DEFAULT_CURRENCY,
     DOMAIN,
     LOCATION_HOME,
-    LOCATION_PUBLIC,
     PLATFORMS,
     SMART_PLATFORMS,
     SERVICE_DELETE_CHARGE,
@@ -31,7 +30,6 @@ from .const import (
     SERVICE_UPDATE_CHARGE,
 )
 from .coordinator import EvLedgerCoordinator
-from .models import ChargeSession
 from .providers.registry import build_charger_providers, build_vehicle_provider
 from .smart.planner import ChargePlanner
 from .smart.setup import ledger_vehicle, planner_options, smart_enabled
@@ -149,7 +147,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         entry_id = call.data["entry_id"]
         coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
         if coordinator is None:
-            raise ValueError(f"Unknown EV Ledger entry_id: {entry_id}")
+            raise ServiceValidationError(f"Unknown EV Ledger entry_id: {entry_id}")
 
         # If there's an open/pending public session waiting for review, it is filled in
         # rather than creating a duplicate — this is the normal case: the car
@@ -164,11 +162,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
         entry_id = call.data["entry_id"]
         coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
         if coordinator is None:
-            raise ValueError(f"Unknown EV Ledger entry_id: {entry_id}")
+            raise ServiceValidationError(f"Unknown EV Ledger entry_id: {entry_id}")
 
         deleted = await coordinator.store.async_delete_charge(call.data[ATTR_CHARGE_ID])
         if not deleted:
-            raise ValueError(f"No charge with id {call.data[ATTR_CHARGE_ID]!r}")
+            raise ServiceValidationError(f"No charge with id {call.data[ATTR_CHARGE_ID]!r}")
 
         await coordinator.async_request_refresh()
 
@@ -176,13 +174,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
         entry_id = call.data["entry_id"]
         coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
         if coordinator is None:
-            raise ValueError(f"Unknown EV Ledger entry_id: {entry_id}")
+            raise ServiceValidationError(f"Unknown EV Ledger entry_id: {entry_id}")
 
         charge = coordinator.store.get_charge(call.data[ATTR_CHARGE_ID])
         if charge is None:
-            raise ValueError(f"No charge with id {call.data[ATTR_CHARGE_ID]!r}")
-        if charge.location_kind != LOCATION_PUBLIC:
-            raise ValueError("Only public charge sessions can be edited manually")
+            raise ServiceValidationError(f"No charge with id {call.data[ATTR_CHARGE_ID]!r}")
+        # Home charges too: a measured charge can be wrong (e.g. a charger counter that ran on through pauses).
 
         if ATTR_KWH in call.data:
             charge.kwh = call.data[ATTR_KWH]
@@ -200,11 +197,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
         entry_id = call.data["entry_id"]
         coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
         if coordinator is None:
-            raise ValueError(f"Unknown EV Ledger entry_id: {entry_id}")
+            raise ServiceValidationError(f"Unknown EV Ledger entry_id: {entry_id}")
 
         deleted = await coordinator.store.async_delete_trip(call.data[ATTR_TRIP_ID])
         if not deleted:
-            raise ValueError(f"No trip with id {call.data[ATTR_TRIP_ID]!r}")
+            raise ServiceValidationError(f"No trip with id {call.data[ATTR_TRIP_ID]!r}")
 
         await coordinator.async_request_refresh()
 

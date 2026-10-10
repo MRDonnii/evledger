@@ -225,8 +225,20 @@ emptied when the charge is saved.
 ## Fixing a mistake
 
 Trips and charges can be wrong — a phantom trip from GPS drift, a charge
-logged with a typo'd price. Two services remove a record permanently
-(there's no undo):
+logged with a typo'd price, a home charge counted twice by a charger counter.
+A charge (home or public) can be corrected:
+
+```yaml
+service: evledger.update_charge
+data:
+  entry_id: <your vehicle's config entry id>
+  charge_id: <the charge's id, from sensor.<vehicle>_charges' `charges` list>
+  kwh: 7.03
+  price: 2.77
+  note: "Counted twice by the charger"
+```
+
+Two services remove a record permanently (there's no undo):
 
 ```yaml
 service: evledger.delete_charge
