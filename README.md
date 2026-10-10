@@ -39,7 +39,7 @@ their raw entity states into a proper **trip and charging ledger**:
 - **Efficiency vs. rated consumption** — real-world Wh/km, bucketed by outside
   temperature (cold/mild/warm) at trip time, compared against your vehicle's
   official WLTP-rated consumption. See "Efficiency comparison" below.
-- **Smart charging (optional, off by default)** — charge plans (cheapest before
+- **Smart charging (optional, part of the setup)** — charge plans (cheapest before
   departure, fixed time, price cap, charge now, pause, manual) with a default
   plan, a temporary trip with an address, start/stop of the charger (Zaptec or
   any switch), plan messages and questions on your phones, and a plan that keeps
@@ -57,7 +57,8 @@ or logged out anywhere.
 
 | Role | Provider | What it gives EV Ledger |
 |---|---|---|
-| Vehicle | [Tesla Custom Integration](https://github.com/alandtse/tesla) | battery %, odometer, location, charging state, lock state |
+| Vehicle | [Tesla Custom Integration](https://github.com/alandtse/tesla), [Tesla Fleet](https://www.home-assistant.io/integrations/tesla_fleet/), [Teslemetry](https://www.home-assistant.io/integrations/teslemetry/) or [Tessie](https://www.home-assistant.io/integrations/tessie/) — picked as a device | battery %, odometer, location, charging state, lock state |
+| Vehicle (any other car) | Its sensors, picked by hand | battery %, odometer, location and a charging sensor (on/off, or a state that says `charging`) |
 | Charger (live power) | [Zaptec](https://www.home-assistant.io/integrations/zaptec/) | live power, session energy |
 | Charger (actual cost) | [Monta](https://github.com/erlendsellie/monta_ha) | actual cost of the last completed session |
 | Charger (estimated cost) | Any electricity-price sensor (Nordpool, Energi Data Service, Strømligning, ...) | kWh × current price — used when Monta isn't configured or isn't fresh enough |
@@ -87,13 +88,28 @@ folder and restart.
 
 ## Setting it up
 
-Pick a device for each role — that's it:
+Everything is set up in one flow: the ledger, the charger, the power price and smart charging.
+What you need in Home Assistant first:
+
+- **The car**: Tesla Custom, Tesla Fleet, Teslemetry or Tessie (or any car integration with a battery,
+  odometer, location and charging sensor). To let EV Ledger warm the car before departure, the car
+  integration must be able to send commands (Tesla Fleet with the virtual key, Teslemetry or Tessie).
+- **The charger**: Zaptec (found automatically), or any charger with a switch that starts and stops
+  charging. For Zaptec, turn on **Authorization required** in the Zaptec portal, so the car does not start
+  by itself when it is plugged in and the plan decides. If the charger runs through Monta or another OCPP
+  backend, that backend controls it: switch the charger back to Zaptec's own control first.
+- **The power price** with a price list in its attributes: Strømligning, Energi Data Service or Nord Pool.
+- **The Home Assistant app** on the phones that should get the messages.
+
+Then Settings → Devices & services → **Add Integration** → **EV Ledger**, and pick a device for each role:
 
 1. **Vehicle name** and **currency** (e.g. DKK, EUR, USD).
-2. **Vehicle** — a device picker scoped to the Tesla Custom Integration. If
+2. **Vehicle** — your car from Tesla Custom, Tesla Fleet, Teslemetry or Tessie. If
    you have more than one car, this is how EV Ledger knows which one this
    entry is for. Its entities (battery, odometer, location, charging state,
-   lock, outside temperature) are resolved automatically.
+   lock, outside temperature) are resolved automatically; Tesla Fleet's odometer, which
+   is off by default, is turned on. Leave it empty for another car and pick its sensors
+   on the next page.
 3. **Charger** (Zaptec) — pick your charger device, or leave it empty if you
    don't have one. Its power/energy entities are resolved automatically.
 4. **Charging control** (Monta) — same idea; leave it empty to skip Monta
@@ -106,10 +122,14 @@ Pick a device for each role — that's it:
    battery capacity + rated consumption right there on the same page.
 
 Leaving a device picker empty simply leaves that role out of the setup —
-there's no separate "which providers do you want" step. Submit, and you're
-done, unless something couldn't be auto-detected from a device you picked,
-in which case a second, much shorter page asks only for the specific
-sensor that's missing.
+there's no separate "which providers do you want" step. If something couldn't be
+auto-detected from a device you picked, a second, much shorter page asks only for the
+specific sensor that's missing. The last page is **Smart charging** (see below): it is
+ticked when you picked a power price, and the phones for the messages are chosen there.
+Submit, and you're done.
+
+**A second car** is a second EV Ledger entry. Cars on the same charger share it: the one
+that is plugged in gets it (see *Several cars on one charger*).
 
 **Want to set every sensor yourself instead?** Tick **Advanced setup** on
 the first page. It skips nothing — every sensor field for every role you
@@ -252,9 +272,11 @@ graphs, and Jinja-templated recent-trips/recent-charges tables. See
 
 EV Ledger can also plan the charging by electricity price and start/stop the charger itself
 (formerly the separate [EV Smart Charge](https://github.com/MRDonnii/ha-ev-smart-charge)
-integration). It is **off by default**; nothing changes for existing setups until it is switched on.
+integration). It is the last page of the setup (suggested when a power price was picked) and can be
+changed or switched off later; nothing changes for existing setups until it is switched on.
 
-Settings → Devices & services → EV Ledger → **Configure** → (first page unchanged) → **Smart charging**:
+The setup's last page, or later Settings → Devices & services → EV Ledger → **Configure** → (first page
+unchanged) → **Smart charging**:
 
 - **Smart charging** on. Everything else is optional and filled in from the ledger: the car's
   battery, the spot price sensor, the Zaptec charger (its "Charger mode" sensor is found next to
@@ -288,7 +310,7 @@ New entities on the car's device:
 | `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
 | `switch.<car>_message_when_charging_is_done` | When the plan is done (or the cable comes out), one message with the whole charge: kWh, price and price per kWh, the battery before and after, when it charged – summed over all periods of a split plan, from the ledger's sessions – and what the plan saved against charging right away when the car was plugged in ("Charge now"). On by default. |
 | `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. Also half an hour before the plan's cheapest start, under the same conditions: "Billigste ladning starter kl. …" (once per start, quiet at night). |
-| `switch.<car>_message_when_power_is_cheap`, `number.<car>_cheap_power_message_below` | When the price drops below the level (1.00 by default) between 08:00 and 21:00 and the car is home without the cable and not near its target: a message with **Charge now** (at most every 3 hours). Off by default. |
+| `switch.<car>_message_when_power_is_cheap`, `number.<car>_cheap_power_message_below` | When the price drops below the level (0.50 by default) between 08:00 and 21:00 and the car is home without the cable and not near its target: a message with **Charge now** (at most every 3 hours). Off by default. |
 | `switch.<car>_another_time_at_the_weekend`, `time.<car>_ready_by_at_the_weekend` | Another ready-by time on Saturdays and Sundays (09:00 by default), e.g. later than on workdays. |
 | `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | 20 minutes (by default) before the ready-by time or a trip's departure, while the car is home, the phones are asked **Forvarm / Spring over**; the climate is only turned on after **Forvarm** (no answer, nothing happens). If the car is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
 

@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Tilføj en bil",
-        "description": "Fire enheds-vælgere herunder, i denne rækkefølge: (1) Bil, (2) Lader, (3) Ladestyring, (4) Strømpris. EV Ledger finder selv alle de sensorer den skal bruge fra den enhed du vælger. Lad en vælger stå tom for at udelade den rolle helt. Slå 'Avanceret opsætning' til nederst hvis du hellere selv vil se og rette alle sensorer manuelt.",
+        "description": "Vælg enhederne herunder, så finder EV Ledger selv alle de sensorer, den skal bruge: (1) din bil (Tesla Custom, Tesla Fleet, Teslemetry eller Tessie; lad den stå tom for en anden bil og vælg dens sensorer på næste side), (2) din hjemmelader, (3) en lade-app/konto som Monta, (4) din elpris. Lad en vælger stå tom for at udelade den rolle. Næste side sætter smart opladning op. Slå 'Avanceret opsætning' til nederst, hvis du selv vil gennemgå alle sensorer.",
         "data": {
           "vehicle_name": "Bilnavn",
           "currency": "Valuta",
@@ -17,7 +17,7 @@
           "advanced_setup": "Avanceret opsætning — vis alle sensorfelter så jeg selv kan gennemgå eller rette dem"
         },
         "data_description": {
-          "vehicle_device_id": "Din bil, fx en Tesla",
+          "vehicle_device_id": "Din bil fra Tesla Custom, Tesla Fleet, Teslemetry eller Tessie. Tom: vælg bilens sensorer selv på næste side (alle bilmærker).",
           "zaptec_device_id": "Din hjemmelader, fx Zaptec — lad stå tom hvis du ikke har en",
           "monta_device_id": "Din ladestyrings-app/konto, fx Monta — lad stå tom hvis du ikke har en",
           "spot_price_device_id": "Din elpris-integration, fx Nordpool eller Strømligning — lad stå tom hvis du ikke har en"
@@ -30,7 +30,7 @@
           "battery_entity": "Batteriniveau-sensor",
           "odometer_entity": "Kilometertæller-sensor",
           "device_tracker_entity": "Lokation (device tracker)",
-          "charging_binary_entity": "Lader (binary sensor)",
+          "charging_binary_entity": "Lader (binær sensor eller en ladetilstands-sensor)",
           "locked_entity": "Låst (valgfri)",
           "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)",
           "zaptec_power_entity": "Ladeeffekt-sensor",
@@ -38,9 +38,48 @@
           "zaptec_charging_entity": "Lader (binary sensor eller switch, valgfri)",
           "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)",
           "monta_last_charge_entity": "Seneste ladning-sensor",
-          "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)"
+          "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)",
+          "spot_price_entity": "Elpris-sensor"
+        }
+      },
+      "smart_charge": {
+        "title": "Smart opladning",
+        "description": "Lad når strømmen er billigst, og lad EV Ledger starte og stoppe laderen. Bil, batteri og elpris kommer fra ledger-opsætningen; tomme felter findes automatisk (Zaptec-laderens tilstandssensor, bilens stik-sensor).",
+        "data": {
+          "enabled": "Smart opladning",
+          "price_entities": "Elpris-sensorer (i dag og i morgen)",
+          "charger_type": "Styring af laderen",
+          "zaptec_mode_entity": "Zaptec-laderens tilstandssensor",
+          "charge_switch": "Ladekontakt",
+          "car_plugged_entity": "Bilens tilslutnings-sensor",
+          "notify_services": "Mobiler der skal bekræfte planen",
+          "notify_only_home": "Kun mobiler der er hjemme",
+          "notify_url": "Side der åbnes ved tryk",
+          "notify_icon": "Ikon på beskederne",
+          "car_climate_entity": "Bilens klima (forvarmning)",
+          "trip_calendar": "Kalender med ture",
+          "trip_calendar_keyword": "Kodeord i kalenderen"
+        },
+        "data_description": {
+          "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
+          "price_entities": "Tom: ledgerens spotpris-sensor.",
+          "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
+          "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke.",
+          "notify_url": "Dashboard-sti der åbnes, når man trykker på beskeden, fx /teknik-overblik/tesla.",
+          "notify_icon": "Material Design-ikon, der vises ved beskederne. Tom: mdi:ev-station.",
+          "car_climate_entity": "Tom: bilens klima-entity findes på samme enhed som batteri-sensoren. Kræver en bil-integration, der kan sende kommandoer til bilen (Tesla Fleet med virtuel nøgle, Teslemetry eller Tessie).",
+          "trip_calendar": "Begivenheder de næste 36 timer bliver til en midlertidig plan: bilen er ladet nok til turen og kører hjemmefra i tide til begivenhedens start.",
+          "trip_calendar_keyword": "Kun begivenheder med ordet i titlen eller beskrivelsen, fx 'bil'. Tom: alle begivenheder med en adresse."
         }
       }
+    },
+    "error": {
+      "no_prices": "Ingen af sensorerne har en prisliste i attributterne.",
+      "required_for_zaptec": "Vælg Zaptec-laderens tilstandssensor.",
+      "required_for_switch": "Vælg ladekontakten."
+    },
+    "abort": {
+      "already_configured": "Denne bil er allerede sat op."
     }
   },
   "options": {
@@ -52,7 +91,7 @@
           "battery_entity": "Batteriniveau-sensor",
           "odometer_entity": "Kilometertæller-sensor",
           "device_tracker_entity": "Lokation (device tracker)",
-          "charging_binary_entity": "Lader (binary sensor)",
+          "charging_binary_entity": "Lader (binær sensor eller en ladetilstands-sensor)",
           "locked_entity": "Låst (valgfri)",
           "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)",
           "zaptec_power_entity": "Zaptec ladeeffekt-sensor (valgfri — lad stå tom for at fjerne Zaptec)",

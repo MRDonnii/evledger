@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Add a vehicle",
-        "description": "Four device pickers below, in this order: (1) Vehicle, (2) Charger, (3) Charging control, (4) Power price. EV Ledger finds every sensor it needs from whichever device you pick. Leave a picker empty to leave that role out entirely. Turn on 'Advanced setup' at the bottom to review or override every sensor by hand instead.",
+        "description": "Pick the devices below and EV Ledger finds every sensor it needs: (1) your car (Tesla Custom, Tesla Fleet, Teslemetry or Tessie; leave empty for another car and pick its sensors on the next page), (2) your home charger, (3) a charging app/account such as Monta, (4) your power price. Leave a picker empty to leave that role out. The next page sets up smart charging. Turn on 'Advanced setup' at the bottom to review every sensor by hand.",
         "data": {
           "vehicle_name": "Vehicle name",
           "currency": "Currency",
@@ -17,7 +17,7 @@
           "advanced_setup": "Advanced setup — show every sensor field so I can review or override them"
         },
         "data_description": {
-          "vehicle_device_id": "Your car, e.g. a Tesla",
+          "vehicle_device_id": "Your car from Tesla Custom, Tesla Fleet, Teslemetry or Tessie. Empty: pick the car's sensors by hand on the next page (any car).",
           "zaptec_device_id": "Your home charger, e.g. Zaptec — leave empty if you don't have one",
           "monta_device_id": "Your charging-control app/account, e.g. Monta — leave empty if you don't have one",
           "spot_price_device_id": "Your electricity-price integration, e.g. Nordpool or Strømligning — leave empty if you don't have one"
@@ -30,7 +30,7 @@
           "battery_entity": "Battery level sensor",
           "odometer_entity": "Odometer sensor",
           "device_tracker_entity": "Location (device tracker)",
-          "charging_binary_entity": "Is charging (binary sensor)",
+          "charging_binary_entity": "Is charging (binary sensor, or a charging state sensor)",
           "locked_entity": "Is locked (optional)",
           "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)",
           "zaptec_power_entity": "Charge power sensor",
@@ -38,9 +38,48 @@
           "zaptec_charging_entity": "Charging (binary sensor or switch, optional)",
           "zaptec_completed_energy_entity": "Completed session energy sensor (optional, recommended)",
           "monta_last_charge_entity": "Last charge sensor",
-          "monta_wallet_entity": "Wallet balance sensor (optional)"
+          "monta_wallet_entity": "Wallet balance sensor (optional)",
+          "spot_price_entity": "Power price sensor"
+        }
+      },
+      "smart_charge": {
+        "title": "Smart charging",
+        "description": "Charge when power is cheapest and let EV Ledger start and stop the charger. The car, the battery and the price sensor come from the ledger setup; fields left empty are found automatically (the Zaptec charger's mode sensor, the car's plug sensor).",
+        "data": {
+          "enabled": "Smart charging",
+          "price_entities": "Price sensors (today and tomorrow)",
+          "charger_type": "Charger control",
+          "zaptec_mode_entity": "Zaptec charger mode sensor",
+          "charge_switch": "Charging switch",
+          "car_plugged_entity": "Car plugged-in sensor",
+          "notify_services": "Phones to confirm the plan on",
+          "notify_only_home": "Only phones that are home",
+          "notify_url": "Page to open on tap",
+          "notify_icon": "Icon on the messages",
+          "car_climate_entity": "Car climate (preconditioning)",
+          "trip_calendar": "Trip calendar",
+          "trip_calendar_keyword": "Calendar keyword"
+        },
+        "data_description": {
+          "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
+          "price_entities": "Empty: the ledger's spot price sensor.",
+          "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
+          "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone.",
+          "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car.",
+          "notify_icon": "Material Design Icon shown with the messages. Empty: mdi:ev-station.",
+          "car_climate_entity": "Empty: the car's climate entity on the battery sensor's device. Needs a car integration that can send commands to the car (Tesla Fleet with the virtual key, Teslemetry or Tessie).",
+          "trip_calendar": "Events in the next 36 hours become a temporary plan: the car has enough charge for the trip and leaves home in time for the event's start.",
+          "trip_calendar_keyword": "Only events with this word in the title or description, e.g. 'car'. Empty: every event with an address."
         }
       }
+    },
+    "error": {
+      "no_prices": "None of the sensors has a price list in its attributes.",
+      "required_for_zaptec": "Pick the Zaptec charger mode sensor.",
+      "required_for_switch": "Pick the charging switch."
+    },
+    "abort": {
+      "already_configured": "This car is already set up."
     }
   },
   "options": {
@@ -52,7 +91,7 @@
           "battery_entity": "Battery level sensor",
           "odometer_entity": "Odometer sensor",
           "device_tracker_entity": "Location (device tracker)",
-          "charging_binary_entity": "Is charging (binary sensor)",
+          "charging_binary_entity": "Is charging (binary sensor, or a charging state sensor)",
           "locked_entity": "Is locked (optional)",
           "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)",
           "zaptec_power_entity": "Zaptec charge power sensor (optional — leave empty to drop Zaptec)",

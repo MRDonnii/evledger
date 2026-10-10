@@ -367,8 +367,8 @@ async def test_message_when_power_is_cheap(hass: HomeAssistant, request, freezer
     await switch(hass, "switch.bil_message_when_power_is_cheap")
     await later(hass, freezer, 1)
     assert not [m for m in sent if "billig" in m["title"]]
-    quarter_prices(hass, {}, default=0.6)
+    quarter_prices(hass, {}, default=0.4)
     await later(hass, freezer, 1)
     cheap = [m for m in sent if m["title"] == "Bil: strømmen er billig"]
-    assert len(cheap) == 1 and "0,60 kr/kWh (under 1,00)." in cheap[0]["message"], cheap
+    assert len(cheap) == 1 and "0,40 kr/kWh (under 0,50)." in cheap[0]["message"], cheap
     assert cheap[0]["data"]["actions"][0]["title"] == "Lad nu"

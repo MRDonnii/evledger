@@ -60,10 +60,33 @@ def _first_matching(
     return None
 
 
+# The official Tesla integrations (Tesla Fleet, Teslemetry, Tessie) name their entities by the car's name and
+# translated labels, but their unique ids end in the Tesla API's field names: "<vin>-charge_state_battery_level".
+TESLA_INTEGRATIONS = ("tesla_custom", "tesla_fleet", "teslemetry", "tessie")
+TESLA_API_FIELDS = {
+    CONF_BATTERY_ENTITY: (("sensor",), "charge_state_battery_level"),
+    CONF_ODOMETER_ENTITY: (("sensor",), "vehicle_state_odometer"),
+    CONF_DEVICE_TRACKER_ENTITY: (("device_tracker",), "location"),
+    CONF_CHARGING_BINARY_ENTITY: (("binary_sensor", "sensor"), "charge_state_charging_state"),
+    CONF_LOCKED_ENTITY: (("lock",), "vehicle_state_locked"),
+    CONF_OUTSIDE_TEMP_ENTITY: (("sensor",), "climate_state_outside_temp"),
+}
+
+
+def _by_api_field(entries: list[er.RegistryEntry], domains: tuple[str, ...], field: str) -> str | None:
+    """The entity for a Tesla API field; an enabled one before one that is disabled by default."""
+    found = [entry for entry in entries
+             if entry.domain in domains and (entry.unique_id.endswith(f"-{field}") or entry.unique_id == field)
+             and entry.disabled_by in (None, er.RegistryEntryDisabler.INTEGRATION)]
+    found.sort(key=lambda entry: entry.disabled_by is not None)
+    return found[0].entity_id if found else None
+
+
 def resolve_tesla_vehicle_entities(hass: HomeAssistant, device_id: str) -> dict[str, str | None]:
-    """Guess battery/odometer/tracker/charging/lock/temperature entities for a Tesla device."""
+    """Guess battery/odometer/tracker/charging/lock/temperature entities for a Tesla device: Tesla Custom's entity
+    names, else the official integrations' API fields (Tesla Fleet, Teslemetry, Tessie)."""
     entries = _entities_for_device(hass, device_id)
-    return {
+    custom = {
         CONF_BATTERY_ENTITY: _first_matching(entries, "sensor", "_battery"),
         CONF_ODOMETER_ENTITY: _first_matching(entries, "sensor", "_odometer"),
         CONF_DEVICE_TRACKER_ENTITY: _first_matching(
@@ -73,6 +96,21 @@ def resolve_tesla_vehicle_entities(hass: HomeAssistant, device_id: str) -> dict[
         CONF_LOCKED_ENTITY: _first_matching(entries, "lock", "_doors"),
         CONF_OUTSIDE_TEMP_ENTITY: _first_matching(entries, "sensor", "_temperature_outside"),
     }
+    every = er.async_entries_for_device(er.async_get(hass), device_id, include_disabled_entities=True)
+    return {key: value or _by_api_field(every, *TESLA_API_FIELDS[key]) for key, value in custom.items()}
+
+
+def enable_default_disabled(hass: HomeAssistant, entity_ids) -> list[str]:
+    """Turn on the chosen entities that their integration disables by default (Tesla Fleet's odometer). Home
+    Assistant reloads that integration by itself shortly after, and the entity gets a state."""
+    registry = er.async_get(hass)
+    enabled = []
+    for entity_id in entity_ids:
+        entry = registry.async_get(entity_id) if entity_id else None
+        if entry is not None and entry.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
+            registry.async_update_entity(entity_id, disabled_by=None)
+            enabled.append(entity_id)
+    return enabled
 
 
 def resolve_zaptec_charger_entities(hass: HomeAssistant, device_id: str) -> dict[str, str | None]:

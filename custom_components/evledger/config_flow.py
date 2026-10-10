@@ -39,6 +39,8 @@ from .const import (
     VEHICLE_PROVIDER_TESLA_CUSTOM,
 )
 from .device_resolve import (
+    TESLA_INTEGRATIONS,
+    enable_default_disabled,
     resolve_monta_charger_entities,
     resolve_spot_price_entities,
     resolve_tesla_vehicle_entities,
@@ -89,7 +91,11 @@ def _entity_selector(domain: str | list[str]) -> selector.EntitySelector:
     return selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
 
 
-def _device_selector(integration: str | None = None) -> selector.DeviceSelector:
+def _device_selector(integration: str | tuple[str, ...] | None = None) -> selector.DeviceSelector:
+    if isinstance(integration, tuple):
+        return selector.DeviceSelector(
+            selector.DeviceSelectorConfig(filter=[{"integration": name} for name in integration])
+        )
     config: dict[str, str] = {}
     if integration:
         config["integration"] = integration
@@ -126,9 +132,10 @@ def _main_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_CURRENCY, default=defaults.get(CONF_CURRENCY, DEFAULT_CURRENCY)
             ): str,
-            vol.Required(
+            # Any Tesla integration; empty for another car, whose sensors are then picked by hand.
+            vol.Optional(
                 FIELD_VEHICLE_DEVICE, default=defaults.get(FIELD_VEHICLE_DEVICE, vol.UNDEFINED)
-            ): _device_selector("tesla_custom"),
+            ): _device_selector(TESLA_INTEGRATIONS),
             vol.Optional(
                 FIELD_ZAPTEC_DEVICE, default=defaults.get(FIELD_ZAPTEC_DEVICE, vol.UNDEFINED)
             ): _device_selector("zaptec"),
@@ -185,7 +192,7 @@ def _vehicle_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_CHARGING_BINARY_ENTITY,
                 default=defaults.get(CONF_CHARGING_BINARY_ENTITY, vol.UNDEFINED),
-            ): _entity_selector("binary_sensor"),
+            ): _entity_selector(["binary_sensor", "sensor"]),
             vol.Optional(
                 CONF_LOCKED_ENTITY, default=defaults.get(CONF_LOCKED_ENTITY, vol.UNDEFINED)
             ): _entity_selector("lock"),
@@ -374,8 +381,9 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
             self._data[CONF_VEHICLE_NAME] = user_input[CONF_VEHICLE_NAME]
             self._data[CONF_CURRENCY] = user_input[CONF_CURRENCY]
 
-            resolved = resolve_tesla_vehicle_entities(self.hass, user_input[FIELD_VEHICLE_DEVICE])
-            self._data.update({k: v for k, v in resolved.items() if v is not None})
+            if user_input.get(FIELD_VEHICLE_DEVICE):
+                resolved = resolve_tesla_vehicle_entities(self.hass, user_input[FIELD_VEHICLE_DEVICE])
+                self._data.update({k: v for k, v in resolved.items() if v is not None})
 
             providers = [CHARGER_PROVIDER_MANUAL]
 
@@ -406,7 +414,7 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
 
             if self._advanced or self._missing_required():
                 return await self.async_step_fill_missing()
-            return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
+            return await self.async_step_smart_charge()
 
         return self.async_show_form(
             step_id="user", data_schema=_main_schema(self._data), errors=errors
@@ -415,7 +423,7 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_fill_missing(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
             self._data.update(user_input)
-            return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
+            return await self.async_step_smart_charge()
 
         schema_dict: dict[Any, Any] = {}
         if self._advanced or not all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
@@ -431,6 +439,24 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._need_spot_price and (self._advanced or not self._data.get(CONF_SPOT_PRICE_ENTITY)):
             schema_dict.update(_spot_price_schema(self._data).schema)
         return self.async_show_form(step_id="fill_missing", data_schema=vol.Schema(schema_dict))
+
+    async def async_step_smart_charge(self, user_input: dict[str, Any] | None = None):
+        """Smart charging in the same setup: plans by price, control of the charger and the phones. Suggested
+        when the ledger has a power price; it can be changed later under Configure."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            settings = {key: value for key, value in user_input.items() if value not in (None, "", [])}
+            if settings.get(CONF_SMART_ENABLED):
+                errors = _validate_smart(self.hass, self._data, settings)
+            if not errors:
+                self._data[CONF_SMART_CHARGE] = settings
+                enable_default_disabled(self.hass, [self._data.get(key) for key in REQUIRED_VEHICLE_FIELDS])
+                return self.async_create_entry(title=self._data[CONF_VEHICLE_NAME], data=self._data)
+            current = settings
+        else:
+            current = {CONF_SMART_ENABLED: bool(self._data.get(CONF_SPOT_PRICE_ENTITY))}
+        return self.async_show_form(step_id="smart_charge", data_schema=_smart_schema(self.hass, current),
+                                    errors=errors)
 
     @staticmethod
     @callback

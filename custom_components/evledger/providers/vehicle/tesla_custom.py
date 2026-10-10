@@ -1,4 +1,5 @@
-"""Vehicle provider backed by the tesla_custom (or official Tesla) integration's entities."""
+"""Vehicle provider backed by the car integration's entities (Tesla Custom, Tesla Fleet, Teslemetry, Tessie or any
+car with a battery, odometer, location and charging sensor)."""
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
@@ -64,7 +65,8 @@ class TeslaCustomVehicleProvider(VehicleProvider):
                 latitude = tracker_state.attributes.get("latitude")
                 longitude = tracker_state.attributes.get("longitude")
 
-        is_charging = _bool_state(hass, self._charging_binary_entity, ("on",))
+        # A binary sensor (Tesla Custom) or a charging-state sensor (Tesla Fleet, Teslemetry: "charging").
+        is_charging = _bool_state(hass, self._charging_binary_entity, ("on", "charging"))
         is_locked = _bool_state(hass, self._locked_entity, ("locked", "on"))
 
         if battery_pct is None and odometer_km is None and latitude is None:
