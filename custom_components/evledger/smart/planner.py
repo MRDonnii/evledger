@@ -16,6 +16,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from ..device_resolve import all_devices
 from . import share as charger_share
 from . import trip, vehicles
 from .charger import ChargerBackend, create_backend
@@ -645,7 +646,7 @@ class ChargePlanner:
             found: list[str] = []
             if car is not None:
                 name = car.name_by_user or car.name
-                same_car = [device.id for device in devices.devices.values()
+                same_car = [device.id for device in all_devices(devices)
                             if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
                 found = [other.entity_id for device_id in same_car
                          for other in er.async_entries_for_device(registry, device_id)
@@ -716,7 +717,7 @@ class ChargePlanner:
             found: list[str] = []
             if car is not None:
                 name = car.name_by_user or car.name
-                same_car = [device.id for device in devices.devices.values()
+                same_car = [device.id for device in all_devices(devices)
                             if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
                 found = [other.entity_id for device_id in same_car
                          for other in er.async_entries_for_device(registry, device_id)

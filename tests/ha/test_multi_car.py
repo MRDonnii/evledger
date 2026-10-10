@@ -101,3 +101,17 @@ async def test_only_the_car_on_the_charger_records_the_charge(hass: HomeAssistan
 async def test_one_car_works_as_before(hass: HomeAssistant, request):
     entry, _ = await setup(hass, request)
     assert not planner(hass, entry).shared and planner(hass, entry).car_present
+
+
+def test_all_devices_with_old_and_new_registries():
+    """Home Assistant 2026.10 iterates the registry's devices as entries; before, as device ids."""
+    from types import SimpleNamespace
+
+    from custom_components.evledger.device_resolve import all_devices
+
+    car, charger = SimpleNamespace(id="car"), SimpleNamespace(id="charger")
+    by_id = {"car": car, "charger": charger}
+    old = SimpleNamespace(devices=by_id, async_get=by_id.get)
+    new = SimpleNamespace(devices=[car, charger], async_get=by_id.get)
+    assert all_devices(old) == [car, charger]
+    assert all_devices(new) == [car, charger]

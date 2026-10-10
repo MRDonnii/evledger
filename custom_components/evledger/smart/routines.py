@@ -14,6 +14,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from ..device_resolve import all_devices
 from .const import (
     CALENDAR_LEAD_MINUTES,
     CALENDAR_LOOKAHEAD_HOURS,
@@ -509,7 +510,7 @@ class Routines:
             car = devices.async_get(battery.device_id) if battery is not None and battery.device_id else None
             if car is not None:
                 name = car.name_by_user or car.name
-                same_car = [device.id for device in devices.devices.values()
+                same_car = [device.id for device in all_devices(devices)
                             if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
                 found = [other for device_id in same_car for other in er.async_entries_for_device(registry, device_id)
                          if other.domain == "climate" and not other.disabled_by and "overheat" not in other.unique_id]

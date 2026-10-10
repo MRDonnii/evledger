@@ -30,6 +30,17 @@ from .const import (
 )
 
 
+def all_devices(device_registry: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
+    """Every device in the registry. Iterating the registry's devices gives the entries since Home Assistant 2026.10
+    (where using it as a mapping is deprecated) and the device ids before."""
+    devices = []
+    for item in device_registry.devices:
+        device = device_registry.async_get(item) if isinstance(item, str) else item
+        if device is not None:
+            devices.append(device)
+    return devices
+
+
 def _entities_for_device(hass: HomeAssistant, device_id: str) -> list[er.RegistryEntry]:
     registry = er.async_get(hass)
     return er.async_entries_for_device(registry, device_id, include_disabled_entities=False)
@@ -98,7 +109,7 @@ def resolve_monta_charger_entities(hass: HomeAssistant, device_id: str) -> dict[
     # The wallet balance lives on a separate sibling "Monta account" device
     # under the same config entry, not on the charger device itself.
     entity_registry = er.async_get(hass)
-    for sibling in device_registry.devices.values():
+    for sibling in all_devices(device_registry):
         if sibling.id == device_id:
             continue
         if not (set(sibling.config_entries) & set(charger_device.config_entries)):

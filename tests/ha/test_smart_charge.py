@@ -113,7 +113,9 @@ async def test_authorizes_waiting_charger(hass: HomeAssistant, request):
     assert not calls["switch.turn_on"]
 
 
-async def test_waits_when_expensive_and_stops_running_charge(hass: HomeAssistant, request):
+async def test_waits_when_expensive_and_stops_running_charge(hass: HomeAssistant, request, freezer):
+    # At noon, so the cheap hour (5 hours on) lies before the default ready-by time (06:45) and is not cut by it.
+    freezer.move_to(dt_util.now().replace(hour=12, minute=10, second=0, microsecond=0))
     _, calls = await setup(hass, request, charger_state="connected_charging", cheap_now=False)
     assert calls["switch.turn_off"] == [SWITCH]
     hass.states.async_set(MODE, "connected_finished")
