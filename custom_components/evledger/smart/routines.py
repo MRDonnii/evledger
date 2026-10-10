@@ -4,6 +4,7 @@ charger offline), the car's climate before the ready-by time, and trips from a c
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -38,6 +39,8 @@ from .const import (
     MONTH_NAMES,
     MONTHLY_AT,
     MONTHLY_DAYS,
+    MORNING_CHECK_MINUTES,
+    MORNING_SHORT,
     PLUG_SOON_MINUTES,
     PRECONDITION_OFF_AFTER_MINUTES,
     REMINDER_WINDOW_HOURS,
@@ -191,6 +194,87 @@ class Routines:
         # The month the last monthly summary was for, and what the plans saved per month.
         self.summary_sent: str | None = None
         self.saved: dict[str, float] = {}
+        # The ready-by time the morning check was made for; the public charges asked about (id: estimated kWh).
+        self.morning_for: datetime | None = None
+        self.public_asked: dict[str, float | None] = {}
+
+    # -- the target was not reached --------------------------------------------------------------
+
+    def morning_check(self, now: datetime) -> None:
+        """Shortly after the ready-by time: a message when the car is home on the charger below the level the plan
+        aimed for (e.g. Home Assistant or the charger was down in the night)."""
+        p = self.planner
+        passed, target = p.passed_deadline, p.passed_target
+        if not (p.flags["morning_check"] and p.notify.targets) or passed is None or target is None:
+            return
+        if self.morning_for == passed or not passed <= now < passed + timedelta(minutes=MORNING_CHECK_MINUTES):
+            return
+        self.morning_for = passed
+        soc = p._battery_soc()
+        if soc is None or soc >= target - MORNING_SHORT or p.car_home() is False or p.car_plugged() is False:
+            return
+        text = (f"Bilen nåede ikke målet: {soc:.0f} % af {target:.0f} % kl. {dt_util.as_local(passed):%H:%M}. "
+                "Tjek laderen, eller tryk Lad nu.")
+        p.entry.async_create_background_task(
+            self.hass, p.notify.async_send_note("morning", "målet blev ikke nået", text,
+                                                [{"action": f"{p.notify.prefix}NOW", "title": "Lad nu"}]),
+            "ev_smart_charge_notify_morning")
+
+    # -- the price of a public charge ------------------------------------------------------------
+
+    @staticmethod
+    def _kr(value: float, digits: int = 2) -> str:
+        return f"{value:.{digits}f}".replace(".", ",")
+
+    def public_kwh(self, charge: Any) -> float | None:
+        """About what a public charge put in: the battery's gain (fast chargers lose a few %)."""
+        start, end = charge.start_battery_pct, charge.end_battery_pct
+        if start is None or end is None or end <= start or self.planner.capacity <= 0:
+            return None
+        return round((end - start) / 100 * self.planner.capacity / 0.95, 1)
+
+    def ask_public_price(self, charge: Any) -> None:
+        """A public charge ended without a price: ask the phones, who answer in the message (kWh and price)."""
+        p = self.planner
+        if not (p.flags["ask_public_price"] and p.notify.targets) or charge.id in self.public_asked:
+            return
+        kwh = self.public_kwh(charge)
+        self.public_asked[charge.id] = kwh
+        started = dt_util.parse_datetime(charge.started_at or "")
+        ended = dt_util.parse_datetime(charge.ended_at or "")
+        when = (f"{dt_util.as_local(started):%H:%M}–{dt_util.as_local(ended):%H:%M}" if started and ended else "")
+        battery = (f", {charge.start_battery_pct:.0f} → {charge.end_battery_pct:.0f} %"
+                   if charge.start_battery_pct is not None and charge.end_battery_pct is not None else "")
+        estimate = f", ca. {self._kr(kwh, 1)} kWh" if kwh else ""
+        text = (f"Bilen har ladet ude {when}{battery}{estimate}. Skriv prisen i kr, eller kWh og pris "
+                "(fx 23,4 82,50).")
+        actions = [{"action": f"{p.notify.prefix}PUBLIC_{charge.id}", "title": "Skriv pris",
+                    "behavior": "textInput", "textInputButtonTitle": "Gem", "textInputPlaceholder": "82,50"}]
+        p.entry.async_create_background_task(
+            self.hass, p.notify.async_send_note("public_price", "offentlig ladning", text, actions),
+            "ev_smart_charge_notify_public")
+
+    def answer_public(self, charge_id: str, reply: str) -> None:
+        """The phone's answer: a price, or kWh and price."""
+        p = self.planner
+        numbers = [float(value.replace(",", ".")) for value in re.findall(r"\d+(?:[.,]\d+)?", reply or "")]
+        kwh = numbers[0] if len(numbers) >= 2 else self.public_asked.get(charge_id)
+        price = numbers[1] if len(numbers) >= 2 else (numbers[0] if numbers else None)
+        if price is None or kwh is None or p.ledger is None:
+            text = "Prisen kunne ikke læses. Skriv kWh og pris, fx 23,4 82,50."
+            p.entry.async_create_background_task(
+                self.hass, p.notify.async_send_note("public_price", "offentlig ladning", text),
+                "ev_smart_charge_notify_public")
+            return
+
+        async def save() -> None:
+            await p.ledger.async_log_public_charge(kwh, price)
+            per = f" ({self._kr(price / kwh)} kr/kWh)" if kwh else ""
+            await p.notify.async_send_note("public_price", "offentlig ladning gemt",
+                                           f"Gemt: {self._kr(kwh, 1)} kWh for {self._kr(price)} kr{per}.")
+
+        self.public_asked.pop(charge_id, None)
+        p.entry.async_create_background_task(self.hass, save(), "ev_smart_charge_public_saved")
 
     # -- the charge is done ---------------------------------------------------------------------
 

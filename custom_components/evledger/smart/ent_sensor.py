@@ -146,6 +146,10 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 # plugged in): start, price (with the price factor) and whether it is estimated.
                 "slot_minutes": planner.slot_minutes,
                 "prices": _prices(planner),
+                # Waiting for a cheaper day (that day's departure, prices and saving), and the plan's CO2 per kWh.
+                "waiting_for": ({**planner.waiting, "deadline": planner.waiting["deadline"].isoformat()}
+                                if planner.waiting else None),
+                "co2": planner.schedule.co2,
             }
         if key == "planned_cost":
             return {"alternatives": {

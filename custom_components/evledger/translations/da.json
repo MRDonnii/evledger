@@ -387,6 +387,21 @@
       },
       "low_price_alert": {
         "name": "Besked når strømmen er billig"
+      },
+      "wait_cheaper_day": {
+        "name": "Vent på billigere dag"
+      },
+      "learn_departure": {
+        "name": "Lær køretider"
+      },
+      "prefer_green": {
+        "name": "Foretræk grøn strøm"
+      },
+      "ask_public_price": {
+        "name": "Spørg om pris efter offentlig ladning"
+      },
+      "morning_check": {
+        "name": "Besked hvis målet ikke nås"
       }
     },
     "button": {

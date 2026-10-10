@@ -189,6 +189,10 @@ SPLIT_MIN_SAVING = 0.05
 # money) are equally cheap: prices a fraction of a cent apart must not move or stop a planned charge.
 WINDOW_TIE = 0.005
 WINDOW_TIE_MIN = 0.02
+# "Prefer green power": windows that cost at most this much more (share, or money) count as equally cheap, and the one
+# with the least CO2 per kWh wins.
+GREEN_TIE = 0.03
+GREEN_TIE_MIN = 0.10
 
 
 @dataclass(frozen=True)
@@ -197,6 +201,8 @@ class TimelineSlot:
     end: datetime
     price: float
     estimated: bool
+    # The grid's CO2 per kWh in the slot (g/kWh), when known ("prefer green power").
+    co2: float | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +232,8 @@ class ScheduleInput:
     # The start of the plan already running or announced: kept while it is still among the cheapest windows, so a
     # charge is neither stopped nor moved for a difference of a fraction of a cent.
     keep_start: datetime | None = None
+    # Among (nearly) equally cheap windows, take the one with the least CO2 per kWh.
+    green: bool = False
 
 
 @dataclass(frozen=True)
@@ -262,6 +270,8 @@ class Schedule:
     over_cap_max_price: float | None = None
     over_cap_extra: float = 0.0
     cap_soc: float | None = None
+    # The grid's CO2 per kWh for the planned energy (g/kWh), when known.
+    co2: float | None = None
 
     def next_block(self, now: datetime) -> ChargeBlock | None:
         return next((block for block in self.blocks if block.end > now), None)
@@ -317,9 +327,10 @@ def _split(timeline: list[TimelineSlot], cuts) -> list[TimelineSlot]:
         start = slot.start
         for cut in points:
             if start < cut < slot.end:
-                result.append(TimelineSlot(start, cut, slot.price, slot.estimated))
+                result.append(TimelineSlot(start, cut, slot.price, slot.estimated, slot.co2))
                 start = cut
-        result.append(slot if start == slot.start else TimelineSlot(start, slot.end, slot.price, slot.estimated))
+        result.append(slot if start == slot.start else TimelineSlot(start, slot.end, slot.price, slot.estimated,
+                                                                     slot.co2))
     return result
 
 
@@ -405,7 +416,10 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         need = wall(data.target_soc)
         inside = [slot for slot in usable if slot.end > begin and slot.start < finish]
         take(inside, need, cheapest)
-        window = _cheapest_window(inside, need, kwh, data.price_factor, data.keep_start)
+        window = _cheapest_window(inside, need, kwh, data.price_factor, data.keep_start, data.green)
+        if chosen and window and data.green and _greener(window, list(chosen.values()), need, kwh, data.price_factor):
+            chosen.clear()
+            chosen.update({slot.start: slot for slot in window})
         if chosen and window and not _contiguous(chosen.values()):
             split_cost = _allocation_cost(chosen.values(), need, kwh, data.price_factor)
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
@@ -448,7 +462,9 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
     if data.mode in (MODE_SMART, MODE_MANUAL) and len(constraints) == 1 and chosen:
         deadline = constraints[0].deadline
         window = _cheapest_window([slot for slot in usable if slot.end <= deadline], need, kwh,
-                                  data.price_factor, data.keep_start)
+                                  data.price_factor, data.keep_start, data.green)
+        if window and data.green and _greener(window, list(chosen.values()), need, kwh, data.price_factor):
+            chosen = {slot.start: slot for slot in window}
         if window and not _contiguous(chosen.values()):
             split_cost = _allocation_cost(chosen.values(), need, kwh, data.price_factor)
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
@@ -463,11 +479,15 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
     planned: list[PlannedSlot] = []
     over_kwh = over_extra = 0.0
     over_max: float | None = None
+    co2_grams = co2_kwh = 0.0
     for slot in sorted(chosen.values(), key=lambda item: item.start):
         if remaining <= 1e-9:
             break
         amount = min(kwh[slot.start], remaining)
         remaining -= amount
+        if slot.co2 is not None:
+            co2_grams += amount * slot.co2
+            co2_kwh += amount
         if capped and slot.start not in for_minimum and not under_cap(slot):
             price = slot.price * data.price_factor
             over_kwh += amount
@@ -504,6 +524,7 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         over_cap_extra=round(over_extra, 2),
         cap_soc=(min(data.soc + (total - over_kwh) * data.efficiency / data.capacity_kwh * 100, 100.0)
                  if capped else None),
+        co2=round(co2_grams / co2_kwh) if co2_kwh > 1e-9 and co2_kwh >= total * 0.5 else None,
     )
 
 
@@ -551,8 +572,34 @@ def _keep_running(chosen: list[TimelineSlot], slots: list[TimelineSlot], need: f
     return None
 
 
+def _co2(slots, need: float, kwh: dict) -> float | None:
+    """CO2 per kWh of charging need kWh in these slots in time order; None unless every slot used has it."""
+    remaining, grams, energy = need, 0.0, 0.0
+    for slot in sorted(slots, key=lambda item: item.start):
+        if remaining <= 1e-9:
+            break
+        if slot.co2 is None:
+            return None
+        amount = min(kwh[slot.start], remaining)
+        grams += amount * slot.co2
+        energy += amount
+        remaining -= amount
+    return grams / energy if energy > 1e-9 else None
+
+
+def _greener(window, chosen, need: float, kwh: dict, factor: float) -> bool:
+    """The window is cleaner than the chosen slots and costs at most GREEN_TIE more."""
+    if not chosen or {slot.start for slot in window} == {slot.start for slot in chosen}:
+        return False
+    window_co2, chosen_co2 = _co2(window, need, kwh), _co2(chosen, need, kwh)
+    if window_co2 is None or (chosen_co2 is not None and window_co2 >= chosen_co2):
+        return False
+    cost = _allocation_cost(chosen, need, kwh, factor)
+    return _allocation_cost(window, need, kwh, factor) <= cost + max(cost * GREEN_TIE, GREEN_TIE_MIN) + 1e-9
+
+
 def _cheapest_window(slots: list[TimelineSlot], need: float, kwh: dict, factor: float,
-                     keep_start: datetime | None = None) -> list[TimelineSlot] | None:
+                     keep_start: datetime | None = None, green: bool = False) -> list[TimelineSlot] | None:
     """The cheapest run of consecutive slots that holds need kWh. Runs within WINDOW_TIE of the cheapest count as
     equally cheap: the one starting at keep_start (the charge running or announced) is kept, otherwise the latest
     wins (the battery sits full for the shortest time). So the plan does not jump for a fraction of a cent."""
@@ -575,4 +622,11 @@ def _cheapest_window(slots: list[TimelineSlot], need: float, kwh: dict, factor: 
         kept = next((run for run in near if run[0].start <= keep_start < run[0].end), None)
         if kept is not None:
             return kept
+    if green:
+        # Nearly as cheap and cleaner: the window with the least CO2 per kWh among those within GREEN_TIE.
+        close = [(co2, run) for cost, run in runs
+                 if cost <= cheapest + max(cheapest * GREEN_TIE, GREEN_TIE_MIN) + 1e-9
+                 and (co2 := _co2(run, need, kwh)) is not None]
+        if close:
+            return min(close, key=lambda item: item[0])[1]
     return near[-1]

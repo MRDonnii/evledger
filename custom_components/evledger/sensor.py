@@ -14,6 +14,13 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_BATTERY_ENTITY,
+    CONF_CHARGING_BINARY_ENTITY,
+    CONF_DEVICE_TRACKER_ENTITY,
+    CONF_LOCKED_ENTITY,
+    CONF_ODOMETER_ENTITY,
+    CONF_OUTSIDE_TEMP_ENTITY,
+    CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
     CONF_MODEL_LABEL,
     CONF_RATED_WH_PER_KM,
     CONF_ZAPTEC_POWER_ENTITY,
@@ -157,9 +164,15 @@ class EvLedgerChargingStatusSensor(_EvLedgerBaseSensor):
         open_charge: ChargeSession | None = self.coordinator.data.get(
             "open_charge_home"
         ) or self.coordinator.data.get("open_charge_public")
-        if open_charge is None:
-            return {}
-        return open_charge.to_dict()
+        # The car and charger sensors the ledger reads, so a dashboard card can find the car from this entity alone.
+        data = self._entry.data
+        sources = {key: data.get(conf) for key, conf in (
+            ("battery", CONF_BATTERY_ENTITY), ("odometer", CONF_ODOMETER_ENTITY),
+            ("location", CONF_DEVICE_TRACKER_ENTITY), ("charging", CONF_CHARGING_BINARY_ENTITY),
+            ("lock", CONF_LOCKED_ENTITY), ("outside_temperature", CONF_OUTSIDE_TEMP_ENTITY),
+            ("charger_power", CONF_ZAPTEC_POWER_ENTITY), ("charger_session", CONF_ZAPTEC_SESSION_ENERGY_ENTITY),
+        ) if data.get(conf)}
+        return {**(open_charge.to_dict() if open_charge is not None else {}), "source_entities": sources}
 
 
 class EvLedgerCostPerKmSensor(_EvLedgerBaseSensor):

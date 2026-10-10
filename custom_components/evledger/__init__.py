@@ -105,7 +105,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.smart = ChargePlanner(
             hass, entry, options=lambda: options, vehicle=lambda: ledger_vehicle(entry),
             open_charge=lambda: coordinator.store.get_open_charge(LOCATION_HOME) is not None,
-            charges=lambda: coordinator.store.charges)
+            charges=lambda: coordinator.store.charges, trips=lambda: coordinator.store.trips)
+        coordinator.smart.ledger = coordinator
         coordinator.platforms += SMART_PLATFORMS
 
     await hass.config_entries.async_forward_entry_setups(entry, coordinator.platforms)

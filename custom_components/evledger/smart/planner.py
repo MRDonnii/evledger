@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, time, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON
@@ -17,6 +17,8 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.util import dt as dt_util
 
 from ..device_resolve import all_devices
+from . import co2 as grid_co2
+from . import departures as learned_departures
 from . import share as charger_share
 from . import trip, vehicles
 from .charger import ChargerBackend, create_backend
@@ -48,6 +50,7 @@ from .const import (
     DEFAULT_TRIP_MARGIN,
     DEFAULT_TRIP_RESERVE,
     INPUT_WAIT_SECONDS,
+    MIN_USE_HISTORY_DAYS,
     START_DELAY_SECONDS,
     STARTUP_GRACE_SECONDS,
     STATUS_AWAITING_CONFIRMATION,
@@ -64,7 +67,12 @@ from .const import (
     STATUS_UNKNOWN,
     STATUS_WAITING,
     UNPLUG_GRACE_SECONDS,
+    USE_DAYS,
     VEHICLE_AUTO,
+    WAIT_MAX_DAYS,
+    WAIT_MIN_KR,
+    WAIT_MIN_SHARE,
+    WAIT_RESERVE,
 )
 from .control import CONNECTED, Action, ChargerState, Controller
 from .control import Event as ChargerEvent
@@ -133,7 +141,8 @@ class ChargePlanner:
                  options: Callable[[], dict] | None = None,
                  vehicle: Callable[[], vehicles.Vehicle | None] | None = None,
                  open_charge: Callable[[], bool] | None = None,
-                 charges: Callable[[], list] | None = None) -> None:
+                 charges: Callable[[], list] | None = None,
+                 trips: Callable[[], list] | None = None) -> None:
         self.hass = hass
         self.entry = entry
         # EV Ledger supplies the settings from its own vehicle and charger setup.
@@ -143,6 +152,10 @@ class ChargePlanner:
         self.open_charge = open_charge or (lambda: False)
         # The ledger's charges (home and public), for the monthly summary.
         self.charges = charges or (lambda: [])
+        # The ledger's trips: the daily driving ("wait for a cheaper day") and the departure times it learns.
+        self.trips = trips or (lambda: [])
+        # The ledger itself (set by EV Ledger), for a public charge's price answered on the phone.
+        self.ledger = None
         self.settings: dict[str, float] = {
             "target_soc": DEFAULT_TARGET_SOC,
             "charge_power_kw": DEFAULT_POWER_KW,
@@ -169,7 +182,21 @@ class ChargePlanner:
         self.flags: dict[str, bool] = {"notify_start": True, "notify_done": True,
                                        "plug_reminder": True, "weekend_ready_by": False,
                                        "precondition": False, "learn": True, "monthly_summary": True,
-                                       "low_price_alert": False}
+                                       "low_price_alert": False, "wait_cheaper_day": False,
+                                       "learn_departure": False, "prefer_green": False,
+                                       "ask_public_price": False, "morning_check": False}
+        # Learned departure times ({"history_days", "times"}), the cheaper day waited for, the grid's CO2 forecast,
+        # and the ready-by time that just passed with the level the plan aimed at (for the morning check).
+        self.learned_departures: dict = {"history_days": 0, "times": None}
+        self.waiting: dict | None = None
+        self.regular_deadline: datetime | None = None
+        self.co2: dict[datetime, float] = {}
+        self.co2_area: str | None = None
+        self.co2_updated: datetime | None = None
+        self._co2_task = None
+        self.passed_deadline: datetime | None = None
+        self.passed_target: float | None = None
+        self._deadline_target: float | None = None
         # The default plan runs when a car is plugged in; any other plan returns to it once it has run.
         self.default_mode = MODE_SMART
         # Plan in quarters or in whole hours (the mean price of the hour).
@@ -361,10 +388,14 @@ class ChargePlanner:
         if self.routines.calendar_due(now):
             self.entry.async_create_background_task(self.hass, self.routines.async_calendar(now),
                                                     "ev_smart_charge_calendar")
+        if self._co2_due():
+            self._co2_task = self.entry.async_create_background_task(self.hass, self.async_refresh_co2(),
+                                                                     "ev_smart_charge_co2")
         self.async_recalculate()
         self.routines.evening(now)
         self.routines.precondition(now)
         self.routines.monthly(now)
+        self.routines.morning_check(now)
 
     # -- setters used by the entities ----------------------------------------------------------
 
@@ -767,10 +798,18 @@ class ChargePlanner:
     def constraints(self, now: datetime, mode: str | None = None) -> tuple[Constraint, ...]:
         target = self.target
         result = []
+        mode = mode or self.mode
         # The price cap is ready by the same time: above the cap only what is needed for that (and only
         # while the phones have not said no).
-        if (mode or self.mode) in (MODE_SMART, MODE_MANUAL, MODE_PRICE_CAP):
+        if mode == MODE_SMART and self.waiting:
+            # Waiting for a cheaper day: the target is due on that day's departure instead.
+            result.append(Constraint(self.waiting["deadline"], target))
+        elif mode in (MODE_SMART, MODE_MANUAL, MODE_PRICE_CAP):
             result.append(Constraint(self.deadline, target))
+        if (mode in (MODE_SMART, MODE_MANUAL, MODE_PRICE_CAP) and self.regular_deadline
+                and self.regular_deadline < result[-1].deadline and self.settings["min_soc"]):
+            # A later departure (learned, or the cheaper day): the usual ready-by time still keeps the minimum level.
+            result.append(Constraint(self.regular_deadline, self.settings["min_soc"]))
         if self.trip_active and self.trip.departure > now:
             trip_target = self.trip_target_soc
             limit = self.car_limit() or 100.0
@@ -831,7 +870,14 @@ class ChargePlanner:
         unique = {slot.start: slot for slot in slots}
         ordered = [unique[key] for key in sorted(unique)]
         self.slot_count = len(ordered)
-        self.deadline = next_deadline(now, self.ready_by, self.ready_by_weekend)
+        previous, previous_target = self.deadline, self._deadline_target
+        if self.flags["learn_departure"]:
+            self.learned_departures = learned_departures.learn(self.trips(), self._home(), now)
+        self.regular_deadline = next_deadline(now, self.ready_by, self.ready_by_weekend)
+        self.deadline = self.upcoming_deadlines(now, 1)[0]
+        if previous is not None and previous <= now and previous != self.deadline:
+            # The ready-by time just passed: the morning check looks at what the plan aimed for then.
+            self.passed_deadline, self.passed_target = previous, previous_target
         soc = self._battery_soc()
         self.soc_assumed = False
         if soc is not None:
@@ -853,9 +899,9 @@ class ChargePlanner:
         ), now)
 
         window = fixed_window(now, self.times["fixed_start"], self.times["fixed_end"])
-        constraints = self.constraints(now)
-        horizon = max([self.deadline, window[1], *(c.deadline for c in constraints)])
-        timeline = build_timeline(now, ordered, horizon, self.slot_minutes)
+        later = self.upcoming_deadlines(now, WAIT_MAX_DAYS + 1) if self.flags["wait_cheaper_day"] else []
+        horizon = max([self.deadline, window[1], *later, *(c.deadline for c in self.constraints(now))])
+        timeline = self._with_co2(build_timeline(now, ordered, horizon, self.slot_minutes))
         self.timeline, self.horizon = timeline, horizon
 
         # The charge running now, or the start already announced, stays while it is still among the cheapest.
@@ -865,7 +911,8 @@ class ChargePlanner:
         elif (announced := self.schedule.next_block(now)) is not None:
             keep = max(announced.start, now)
 
-        def plan_for(mode: str) -> Schedule:
+        def plan_for(mode: str, constraints_for: tuple[Constraint, ...] | None = None,
+                     keep_plan: bool = True) -> Schedule:
             return build_schedule(ScheduleInput(
                 mode=mode,
                 soc=soc,
@@ -875,15 +922,24 @@ class ChargePlanner:
                 power_kw=self.settings["charge_power_kw"],
                 price_factor=self.settings["price_factor"],
                 timeline=timeline,
-                constraints=constraints if mode == self.mode else self.constraints(now, mode),
+                constraints=constraints_for if constraints_for is not None else self.constraints(now, mode),
                 window=window if mode == MODE_FIXED else None,
                 price_cap=self.settings["price_cap"],
                 min_soc=self.settings["min_soc"],
                 cap_override=self.cap_override,
-                keep_start=keep if mode == self.mode else None,
+                keep_start=keep if mode == self.mode and keep_plan else None,
+                green=self.flags["prefer_green"],
             ), now)
 
-        self.schedule = plan_for(self.mode)
+        self.waiting = None
+        # A charge already running is not stopped to wait for another day.
+        if later and self.mode == MODE_SMART and soc is not None and self.charger_state != ChargerState.CHARGING:
+            self.waiting = self._cheaper_day(now, soc, later, plan_for)
+        constraints = self.constraints(now)
+        self._deadline_target = None if self.waiting else (
+            self.target if self.mode in (MODE_SMART, MODE_PRICE_CAP) else None)
+
+        self.schedule = plan_for(self.mode, constraints)
         # What the other plans would cost right now, so they can be compared before choosing.
         self.alternatives = {mode: self.schedule if mode == self.mode else plan_for(mode)
                              for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)}
@@ -1083,6 +1139,93 @@ class ChargePlanner:
             self._alerted.add(self.status)
             self.entry.async_create_background_task(
                 self.hass, self.notify.async_send_alert(text), "ev_smart_charge_notify_alert")
+
+    def upcoming_deadlines(self, now: datetime, count: int) -> list[datetime]:
+        """The next ready-by times: the learned departures (when that is on and learned), else the set time."""
+        times = self.learned_departures.get("times") if self.flags["learn_departure"] else None
+        if times and any(times.values()):
+            found = learned_departures.deadlines(now, times, count)
+            if found:
+                return found
+        result, moment = [], now
+        for _ in range(count):
+            moment = next_deadline(moment, self.ready_by, self.ready_by_weekend)
+            result.append(moment)
+            moment += timedelta(minutes=1)
+        return result
+
+    def daily_use_kwh(self, now: datetime) -> float | None:
+        """The battery energy the car uses on an average day: the ledger's trips of the last USE_DAYS days times
+        the consumption. None with too short a history."""
+        trips = self.trips()
+        starts = [dt_util.parse_datetime(trip.started_at or "") for trip in trips]
+        starts = [start for start in starts if start is not None]
+        if not starts or now - min(starts) < timedelta(days=MIN_USE_HISTORY_DAYS):
+            return None
+        since = now - timedelta(days=USE_DAYS)
+        days = min(USE_DAYS, (now - min(starts)).total_seconds() / 86400)
+        km = sum(trip.distance_km or 0.0 for trip in trips
+                 if (start := dt_util.parse_datetime(trip.started_at or "")) is not None and start >= since)
+        return km / days * self.settings["consumption"] / 1000
+
+    def _cheaper_day(self, now: datetime, soc: float, later: list[datetime], plan_for) -> dict | None:
+        """A later departure whose night is clearly cheaper, when the battery lasts until then."""
+        use = self.daily_use_kwh(now)
+        if use is None or self.trip_active or self.capacity <= 0:
+            return None
+        base = plan_for(MODE_SMART, (Constraint(later[0], self.target),), keep_plan=False)
+        if not base.blocks or not base.energy_kwh or base.cost is None:
+            return None
+        price_now = base.cost / base.energy_kwh
+        floor = max(self.settings["min_soc"], 0.0) + WAIT_RESERVE
+        best = None
+        for deadline in later[1:]:
+            days = (deadline - now).total_seconds() / 86400
+            soc_then = soc - use * days / self.capacity * 100
+            if soc_then < floor:
+                break
+            plan = plan_for(MODE_SMART, (Constraint(deadline, self.target),), keep_plan=False)
+            if not plan.blocks or plan.cost is None or not plan.energy_kwh or plan.blocks[0].start < later[0]:
+                continue
+            price = plan.cost / plan.energy_kwh
+            saving = (price_now - price) * plan.energy_kwh
+            if price <= price_now * (1 - WAIT_MIN_SHARE) and saving >= WAIT_MIN_KR and (
+                    best is None or saving > best["saving"]):
+                best = {"deadline": deadline, "price": round(price, 4), "price_now": round(price_now, 4),
+                        "saving": round(saving, 2), "soc_then": round(soc_then), "estimated": plan.estimated}
+        return best
+
+    def _with_co2(self, timeline: list) -> list:
+        """The grid's CO2 per kWh on each slot ("prefer green power"), when the forecast covers it."""
+        if not self.flags["prefer_green"] or not self.co2:
+            return timeline
+        result = []
+        for slot in timeline:
+            values, quarter = [], slot.start
+            while quarter < slot.end:
+                if (value := self.co2.get(quarter.astimezone(UTC))) is not None:
+                    values.append(value)
+                quarter += timedelta(minutes=15)
+            result.append(replace(slot, co2=sum(values) / len(values)) if values else slot)
+        return result
+
+    async def async_refresh_co2(self) -> None:
+        """Fetch the grid's CO2 forecast (Denmark) for "prefer green power"."""
+        self.co2_area = grid_co2.price_area(*self._home())
+        if self.co2_area is None:
+            return
+        try:
+            self.co2 = await grid_co2.async_fetch(async_get_clientsession(self.hass), self.co2_area, dt_util.now())
+            self.co2_updated = dt_util.utcnow()
+        except Exception as err:  # noqa: BLE001 - the plan goes on without the CO2 forecast
+            _LOGGER.debug("CO2 forecast not available: %s", err)
+        finally:
+            self._co2_task = None
+        self.async_recalculate()
+
+    def _co2_due(self) -> bool:
+        return (self.flags["prefer_green"] and self._co2_task is None
+                and (self.co2_updated is None or dt_util.utcnow() - self.co2_updated >= grid_co2.REFRESH))
 
     def goal_time(self, now: datetime) -> datetime | None:
         """When the target has to be reached: the ready-by time, or an earlier temporary departure."""

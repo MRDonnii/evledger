@@ -387,6 +387,21 @@
       },
       "low_price_alert": {
         "name": "Message when power is cheap"
+      },
+      "wait_cheaper_day": {
+        "name": "Wait for a cheaper day"
+      },
+      "learn_departure": {
+        "name": "Learn departure times"
+      },
+      "prefer_green": {
+        "name": "Prefer green power"
+      },
+      "ask_public_price": {
+        "name": "Ask for the price of public charges"
+      },
+      "morning_check": {
+        "name": "Message if the target is not reached"
       }
     },
     "button": {

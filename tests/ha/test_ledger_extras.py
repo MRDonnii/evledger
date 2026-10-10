@@ -108,3 +108,10 @@ async def test_a_home_charge_can_be_corrected(hass: HomeAssistant, request):
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(DOMAIN, "update_charge", {"entry_id": entry.entry_id, "charge_id": "nope",
                                                                  "kwh": 1.0}, blocking=True)
+
+
+async def test_the_status_names_the_cars_sensors(hass: HomeAssistant, request):
+    await setup(hass, request)
+    sources = hass.states.get("sensor.bil_charging_status").attributes["source_entities"]
+    assert sources["battery"] == "sensor.car_battery" and sources["location"] == "device_tracker.car"
+    assert sources["charger_power"] == "sensor.charger_power"

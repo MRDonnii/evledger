@@ -40,6 +40,19 @@ NAMES = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MOD
          MODE_MANUAL: "Manuel"}
 
 
+DAYS = ("man.", "tir.", "ons.", "tor.", "fre.", "lør.", "søn.")
+
+
+def wait_text(waiting: dict, unit: str = "kr") -> str:
+    """Why the plan waits: the cheaper day, its price against tonight's, the saving and the battery until then."""
+    def money(value: float) -> str:
+        return f"{value:.2f}".replace(".", ",")
+
+    day = DAYS[dt_util.as_local(waiting["deadline"]).weekday()]
+    return (f"Venter til {day}: ca. {money(waiting['price'])} {unit}/kWh mod {money(waiting['price_now'])} i nat "
+            f"(spar ca. {money(waiting['saving'])} {unit}). Batteriet rækker (ca. {waiting['soc_then']} %).")
+
+
 def tracker_for(service: str) -> str:
     """The Companion app's device tracker for its notify service (notify.mobile_app_<device>)."""
     return f"device_tracker.{service.removeprefix('notify.').removeprefix('mobile_app_')}"
@@ -87,6 +100,8 @@ class PhoneNotifier:
                 planner.async_set_cap_override(answer == "CAP_OK")
             elif answer in ("PRE_ON", "PRE_SKIP"):
                 planner.routines.answer_precondition(answer == "PRE_ON")
+            elif answer.startswith("PUBLIC_"):
+                planner.routines.answer_public(answer.removeprefix("PUBLIC_"), str(event.data.get("reply_text") or ""))
             elif mode := ANSWERS.get(answer):
                 planner.async_answer(mode)
 
@@ -113,7 +128,8 @@ class PhoneNotifier:
             return "Plan: Pause\nBilen lades ikke."
         lines = [f"Plan: {NAMES.get(planner.mode, planner.mode)}"]
         if not schedule.blocks:
-            lines.append("Batteriet er allerede ladet til målet.")
+            lines.append(wait_text(planner.waiting, unit) if planner.waiting
+                         else "Batteriet er allerede ladet til målet.")
             return "\n".join(lines)
         first, last = schedule.blocks[0].start, planner.block_end(schedule.blocks[-1], dt_util.now())
         start = "nu" if first <= dt_util.now() else when(first)
@@ -135,6 +151,10 @@ class PhoneNotifier:
         lines.append(energy)
         if planner.deadline and planner.mode in (MODE_SMART, MODE_PRICE_CAP):
             lines.append(f"Klar senest: {when(planner.deadline)}")
+        if planner.waiting:
+            lines.append(wait_text(planner.waiting, unit))
+        if schedule.co2 is not None:
+            lines.append(f"CO₂: ca. {schedule.co2:.0f} g/kWh")
         return "\n".join(lines)
 
     def money(self, planner: ChargePlanner, value: float, per_kwh: bool = False) -> str:

@@ -11,6 +11,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
+from . import departures
 from .entity import EvSmartChargeListenerEntity
 
 
@@ -26,7 +27,9 @@ FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-chec
               "plug_reminder": "mdi:power-plug-outline",
               "weekend_ready_by": "mdi:calendar-weekend", "precondition": "mdi:car-defrost-front",
               "learn": "mdi:school-outline", "monthly_summary": "mdi:calendar-month-outline",
-              "low_price_alert": "mdi:cash-check"}
+              "low_price_alert": "mdi:cash-check", "wait_cheaper_day": "mdi:calendar-arrow-right",
+              "learn_departure": "mdi:clock-start", "prefer_green": "mdi:leaf",
+              "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -35,7 +38,8 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
     def __init__(self, planner, key: str) -> None:
         super().__init__(planner, key)
         self._attr_icon = FLAG_ICONS[key]
-        if key in ("notify_start", "notify_done", "plug_reminder", "learn", "monthly_summary", "low_price_alert"):
+        if key in ("notify_start", "notify_done", "plug_reminder", "learn", "monthly_summary", "low_price_alert",
+                   "wait_cheaper_day", "learn_departure", "prefer_green", "ask_public_price", "morning_check"):
             self._attr_entity_category = EntityCategory.CONFIG
 
     async def async_added_to_hass(self) -> None:
@@ -81,6 +85,19 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         if self._attr_translation_key == "precondition":
             # The car's climate entity (needs a car integration that can send commands to the car).
             return {"climate_entity": routines.climate_entity()}
+        planner = self.planner
+        if self._attr_translation_key == "wait_cheaper_day":
+            waiting = planner.waiting
+            use = planner.daily_use_kwh(dt_util.now())
+            return {"waiting_for": {**waiting, "deadline": waiting["deadline"].isoformat()} if waiting else None,
+                    "daily_use_kwh": round(use, 1) if use is not None else None}
+        if self._attr_translation_key == "learn_departure":
+            learned = planner.learned_departures
+            return {"departures": departures.as_text(learned.get("times")),
+                    "history_days": learned.get("history_days"), "next_ready_by": planner.deadline}
+        if self._attr_translation_key == "prefer_green":
+            return {"price_area": planner.co2_area, "plan_co2": planner.schedule.co2,
+                    "co2_updated": planner.co2_updated}
         return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:

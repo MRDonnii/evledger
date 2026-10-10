@@ -310,6 +310,8 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "%s: public charging ended, waiting for price (log_public_charge service)",
                 self.vehicle_name,
             )
+            if (smart := getattr(self, "smart", None)) is not None:
+                smart.routines.ask_public_price(open_public)
 
     def _billed_cost(self, now: datetime, kwh: float | None, spot: bool):
         for provider in self._charger_providers.values():

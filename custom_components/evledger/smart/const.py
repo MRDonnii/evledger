@@ -130,3 +130,17 @@ LOW_PRICE_FROM = time(8, 0)
 LOW_PRICE_UNTIL = time(21, 0)
 LOW_PRICE_EVERY_HOURS = 3
 DEFAULT_LOW_PRICE = 0.5
+
+# "Wait for a cheaper day": skip charging tonight when a night within WAIT_MAX_DAYS is clearly cheaper (at least
+# WAIT_MIN_SHARE per kWh and WAIT_MIN_KR in all) and the battery lasts until then with WAIT_RESERVE % above the
+# minimum level, judged from the driving of the last USE_DAYS days (at least MIN_USE_HISTORY_DAYS of history).
+WAIT_MAX_DAYS = 3
+WAIT_MIN_SHARE = 0.15
+WAIT_MIN_KR = 2.0
+WAIT_RESERVE = 10.0
+USE_DAYS = 14
+MIN_USE_HISTORY_DAYS = 7
+# "Message if the target is not reached": checked this long after the ready-by time; a shortfall of more than
+# MORNING_SHORT % counts.
+MORNING_CHECK_MINUTES = 30
+MORNING_SHORT = 3.0
