@@ -9,12 +9,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
     CONF_MODEL_LABEL,
     CONF_RATED_WH_PER_KM,
     DOMAIN,
+    LOCATION_HOME,
     TEMP_BUCKET_COLD_MAX_C,
     TEMP_BUCKET_MILD_MAX_C,
 )
@@ -41,6 +43,7 @@ async def async_setup_entry(
         EvLedgerTotalDistanceSensor(coordinator, entry),
         EvLedgerLastTripSensor(coordinator, entry),
         EvLedgerLastChargeSensor(coordinator, entry),
+        EvLedgerHomeCostTodaySensor(coordinator, entry),
     ]
     if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
         entities.append(EvLedgerEfficiencySensor(coordinator, entry))
@@ -216,6 +219,50 @@ class EvLedgerTotalCostSensor(_EvLedgerBaseSensor):
     @property
     def native_unit_of_measurement(self) -> str:
         return self.coordinator.currency
+
+
+class EvLedgerHomeCostTodaySensor(_EvLedgerBaseSensor):
+    """What charging at home cost today: the charges that ended today and the one running, priced as it charges."""
+
+    _attr_icon = "mdi:home-lightning-bolt-outline"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "home_cost_today", "Home charging cost today")
+
+    def _today(self) -> tuple[float, float]:
+        today = dt_util.now().date()
+        cost = kwh = 0.0
+        for charge in self.coordinator.store.charges:
+            if charge.location_kind != LOCATION_HOME:
+                continue
+            if charge.ended_at:
+                ended = dt_util.parse_datetime(charge.ended_at)
+                if ended and dt_util.as_local(ended).date() == today:
+                    cost += charge.price or 0.0
+                    kwh += charge.kwh or 0.0
+            elif (meter := self.coordinator.store.meter(charge.id)):
+                cost += float(meter.get("cost") or 0.0)
+                kwh += float(meter.get("priced") or 0.0)
+        return round(cost, 2), round(kwh, 2)
+
+    @property
+    def native_value(self) -> float:
+        return self._today()[0]
+
+    @property
+    def last_reset(self):
+        return dt_util.start_of_local_day()
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"kwh": self._today()[1]}
 
 
 class EvLedgerTotalDistanceSensor(_EvLedgerBaseSensor):

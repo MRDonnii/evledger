@@ -188,6 +188,9 @@
           "waiting": "Venter på billig strøm",
           "awaiting_confirmation": "Venter på bekræftelse"
         }
+      },
+      "home_cost_today": {
+        "name": "Hjemmeladning i dag"
       }
     },
     "number": {

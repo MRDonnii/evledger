@@ -44,3 +44,17 @@ async def test_a_new_plug_in_counts_from_zero(hass: HomeAssistant, request):
     await step(hass, entry, 11000, 9.0)
     await step(hass, entry, 0, 9.0)
     assert [c.kwh for c in home_charges(hass, entry)] == [pytest.approx(9.0, abs=0.01)]
+
+
+async def test_home_charging_cost_today(hass: HomeAssistant, request):
+    from .test_new_features import quarter_prices
+    entry, _ = await setup(hass, request)
+    quarter_prices(hass, {}, default=2.0)
+    await step(hass, entry, 0, 0.0)
+    await step(hass, entry, 11000, 0.0)
+    await step(hass, entry, 11000, 3.0)
+    running = float(hass.states.get("sensor.bil_home_charging_cost_today").state)
+    assert running == pytest.approx(6.0), "the running charge"
+    await step(hass, entry, 0, 3.0)
+    state = hass.states.get("sensor.bil_home_charging_cost_today")
+    assert float(state.state) == pytest.approx(6.0) and state.attributes["kwh"] == pytest.approx(3.0)

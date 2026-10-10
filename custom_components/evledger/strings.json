@@ -188,6 +188,9 @@
           "waiting": "Waiting for cheap power",
           "awaiting_confirmation": "Waiting for confirmation"
         }
+      },
+      "home_cost_today": {
+        "name": "Home charging cost today"
       }
     },
     "number": {
