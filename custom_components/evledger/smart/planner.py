@@ -22,6 +22,7 @@ from . import departures as learned_departures
 from . import share as charger_share
 from . import trip, vehicles
 from . import week as week_plan
+from .car_refresh import CarRefresh
 from .charger import ChargerBackend, create_backend
 from .const import (
     ASSUMED_SOC,
@@ -283,6 +284,8 @@ class ChargePlanner:
         self.routines = Routines(self)
         self._guessed: vehicles.Vehicle | None = None
         self._started_at: datetime | None = None
+        # Fetches the car's data again when the car integrations have none (after a restart).
+        self.car_refresh = CarRefresh(self)
         self._listeners: list[Callable[[], None]] = []
         self._unsubs: list[CALLBACK_TYPE] = []
 
@@ -411,6 +414,7 @@ class ChargePlanner:
 
     @callback
     def _on_tick(self, _now) -> None:
+        self.car_refresh.check(dt_util.utcnow(), self._started_at, self.charger_state in CONNECTED)
         trip_state = self.trip
         if (trip_state.destination and trip_state.route is None and not trip_state.looking_up
                 and trip_state.error == "lookup_failed" and trip_state.last_lookup
