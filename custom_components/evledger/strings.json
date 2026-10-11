@@ -350,6 +350,9 @@
     "datetime": {
       "trip_departure": {
         "name": "Temporary departure"
+      },
+      "ready_by_once": {
+        "name": "Ready by once"
       }
     },
     "text": {
@@ -414,6 +417,9 @@
       },
       "quiet_night": {
         "name": "Silent messages at night"
+      },
+      "week_plan": {
+        "name": "Week plan"
       }
     },
     "button": {
@@ -454,6 +460,18 @@
     },
     "public_charge_no_kwh": {
       "message": "Enter the public charge's kWh first."
+    },
+    "ready_by_once_out_of_range": {
+      "message": "The one-time ready-by time must be in the future and at most 14 days ahead."
+    },
+    "no_smart_charging": {
+      "message": "{entity_id} does not belong to an EV Ledger car with smart charging."
+    },
+    "bad_week_plan": {
+      "message": "The week plan is not valid: {error}"
+    },
+    "empty_week_plan": {
+      "message": "The week plan needs a ready-by time on at least one day."
     }
   }
 }

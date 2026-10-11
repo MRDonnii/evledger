@@ -359,6 +359,31 @@ New entities on the car's device:
 | `switch.<car>_ask_for_the_price_of_public_charges` | When the car has charged away from home, a message asks for the price: answer in the message with the price (the kWh estimated from the battery) or kWh and price ("23,4 82,50"), and the charge is saved. Off by default. |
 | `switch.<car>_message_if_the_target_is_not_reached` | Half an hour after the ready-by time: a message (with **Charge now**) when the car is home on the charger more than 3 % below the level the plan aimed for, e.g. after Home Assistant or the charger was down in the night. Off by default. |
 | `switch.<car>_another_time_at_the_weekend`, `time.<car>_ready_by_at_the_weekend` | Another ready-by time on Saturdays and Sundays (09:00 by default), e.g. later than on workdays. |
+| `switch.<car>_week_plan` | **Week plan**: a ready-by time for each weekday, each with the normal target or its own (e.g. 90 % on Fridays), and free days without a time (the plan then aims at the next day with one). While on, it is used instead of the ready-by time, the weekend time and the learned departure times; the minimum level is still kept by the week's earliest time every day. Switched on the first time, it starts from the ready-by times used so far. The days are on the switch (`days`), with the next ready-by time, its target and what set it (`next_ready_by`, `next_target`, `next_source`: `once`, `week`, `learned` or `time`). Set it with `evledger.set_week_plan`. Off by default. |
+| `datetime.<car>_ready_by_once` | **One-time ready-by time** (at most 14 days ahead, with the normal target or its own in the `target` attribute): the plan aims at it instead of the normal ready-by time. A normal ready-by time before it keeps the minimum level, and "wait for a cheaper day" does not wait past it. Once it has passed it is cleared and the normal times apply again. Set it with `evledger.set_ready_by_once`, clear it with `evledger.clear_ready_by_once`. |
+
+A ready-by time with its own target (week plan day, one-time time) also sets the car's own charge limit to that target while the car is on the charger, since the car would otherwise stop at its old limit; afterwards the car gets the normal target back. The plan messages say "(ugeplan)" or "(engangstid)" and the target.
+
+```yaml
+service: evledger.set_week_plan
+data:
+  entity_id: select.my_car_charge_mode   # any EV Ledger entity of the car
+  enabled: true
+  days:
+    mon: {time: "06:30"}
+    tue: {time: "06:30"}
+    wed: null                            # free day
+    thu: {time: "06:30"}
+    fri: {time: "06:00", target: 90}
+    sat: null
+    sun: {time: "10:00"}
+---
+service: evledger.set_ready_by_once
+data:
+  entity_id: select.my_car_charge_mode
+  at: "2026-10-14 05:30"
+  target: 95                             # leave out for the normal target
+```
 | `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | 20 minutes (by default) before the ready-by time or a trip's departure, while the car is home, the phones are asked **Forvarm / Spring over**; the climate is only turned on after **Forvarm** (no answer, nothing happens). If the car is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
 
 Prices without a published value yet (e.g. tomorrow's before 13:00) are estimated from the same

@@ -21,6 +21,7 @@ from . import co2 as grid_co2
 from . import departures as learned_departures
 from . import share as charger_share
 from . import trip, vehicles
+from . import week as week_plan
 from .charger import ChargerBackend, create_backend
 from .const import (
     ASSUMED_SOC,
@@ -189,10 +190,26 @@ class ChargePlanner:
                                        "precondition": False, "learn": True, "monthly_summary": True,
                                        "low_price_alert": False, "wait_cheaper_day": False,
                                        "learn_departure": False, "prefer_green": False,
-                                       "ask_public_price": False, "morning_check": False, "quiet_night": True}
+                                       "ask_public_price": False, "morning_check": False, "quiet_night": True,
+                                       "week_plan": False}
         # Learned departure times ({"history_days", "times"}), the cheaper day waited for, the grid's CO2 forecast,
         # and the ready-by time that just passed with the level the plan aimed at (for the morning check).
         self.learned_departures: dict = {"history_days": 0, "times": None}
+        # The week plan: a ready-by time (and, if wanted, its own target) per weekday, or a free day. Used instead of
+        # the ready-by time (and the learned departures) while switched on.
+        self.week: dict[int, dict | None] = week_plan.default_week(self.times["ready_by_time"])
+        self.week_set = False  # set by hand or restored; else made from the ready-by times when it is switched on
+        # A one-time ready-by time ({"at": datetime, "target": float | None}): the next deadline until it has passed,
+        # then the normal ready-by times again.
+        self.once: dict | None = None
+        # What decides the next ready-by time ("once", "week", "learned" or "time") and that deadline's own target.
+        self.deadline_source = "time"
+        self.deadline_target: float | None = None
+        # A target of its own (a day of the week plan, the one-time time) is also set as the car's charge limit while
+        # the car is plugged in; afterwards the car gets the normal target back.
+        self._limit_goal: float | None = None
+        self._limit_tried: tuple | None = None
+        self._later_targets: dict[datetime, float | None] = {}
         self.waiting: dict | None = None
         self.regular_deadline: datetime | None = None
         self.co2: dict[datetime, float] = {}
@@ -433,6 +450,23 @@ class ChargePlanner:
         self.async_set_time("ready_by_time", value)
 
     @callback
+    def async_set_week(self, week: dict[int, dict | None], enabled: bool | None = None) -> None:
+        """A new week plan (and, if given, switch it on or off)."""
+        self._rewarn()
+        self.week = week
+        self.week_set = True
+        if enabled is not None:
+            self.flags["week_plan"] = enabled
+        self.async_recalculate()
+
+    @callback
+    def async_set_once(self, at: datetime | None, target: float | None = None) -> None:
+        """Set (or with None clear) the one-time ready-by time."""
+        self._rewarn()
+        self.once = {"at": at.replace(second=0, microsecond=0), "target": target} if at is not None else None
+        self.async_recalculate()
+
+    @callback
     def async_set_mode(self, mode: str, restore: bool = False) -> None:
         if (mode == MODE_NOW and not restore and self.shared and self.charger_state in CONNECTED
                 and self.share.owner() is not self):
@@ -496,8 +530,12 @@ class ChargePlanner:
 
     @callback
     def async_set_flag(self, key: str, value: bool) -> None:
-        if self.flags.get(key) != value and key == "weekend_ready_by":
+        if self.flags.get(key) != value and key in ("weekend_ready_by", "week_plan"):
             self._rewarn()
+        if key == "week_plan" and value and not self.week_set:
+            # Switched on for the first time: start from the ready-by times used so far.
+            self.week = week_plan.default_week(self.ready_by, self.ready_by_weekend)
+            self.week_set = True
         self.flags[key] = value
         if key == "learn" and value:
             self.routines.apply_learned()
@@ -838,10 +876,20 @@ class ChargePlanner:
         return block.end
 
     @property
+    def active_target(self) -> float:
+        """The target for the next ready-by time: its own (one-time time, a day of the week plan) or the normal one."""
+        return self.deadline_target if self.deadline_target is not None else self.settings["target_soc"]
+
+    @property
     def target(self) -> float:
-        """The daily target, no higher than the car's own charge limit."""
+        """The target for the next ready-by time, no higher than the car's own charge limit."""
+        return self.capped(self.active_target)
+
+    def capped(self, target: float | None) -> float:
+        """A target (None: the normal one) no higher than the car's own charge limit."""
+        value = target if target is not None else self.settings["target_soc"]
         limit = self.car_limit()
-        return min(self.settings["target_soc"], limit) if limit else self.settings["target_soc"]
+        return min(value, limit) if limit else value
 
     @property
     def car_full(self) -> bool:
@@ -861,7 +909,7 @@ class ChargePlanner:
         # while the phones have not said no).
         if mode == MODE_SMART and self.waiting:
             # Waiting for a cheaper day: the target is due on that day's departure instead.
-            result.append(Constraint(self.waiting["deadline"], target))
+            result.append(Constraint(self.waiting["deadline"], self.waiting.get("target") or target))
         elif mode in (MODE_SMART, MODE_MANUAL, MODE_PRICE_CAP):
             result.append(Constraint(self.deadline, target))
         if (mode in (MODE_SMART, MODE_MANUAL, MODE_PRICE_CAP) and self.regular_deadline
@@ -932,8 +980,22 @@ class ChargePlanner:
         previous, previous_target = self.deadline, self._deadline_target
         if self.flags["learn_departure"]:
             self.learned_departures = learned_departures.learn(self.trips(), self._home(), now)
-        self.regular_deadline = next_deadline(now, self.ready_by, self.ready_by_weekend)
-        self.deadline = self.upcoming_deadlines(now, 1)[0]
+        if self.once is not None and self.once["at"] <= now:
+            _LOGGER.debug("The one-time ready-by time %s has passed, back to the normal times", self.once["at"])
+            self.once = None
+        normal, normal_target, normal_source = self.normal_deadlines(now, 1)[0]
+        if self.once is not None:
+            self.deadline, self.deadline_target, self.deadline_source = self.once["at"], self.once["target"], "once"
+        else:
+            self.deadline, self.deadline_target, self.deadline_source = normal, normal_target, normal_source
+        # The minimum level is kept by the usual time every day: the ready-by time, or the week plan's earliest time.
+        earliest = week_plan.earliest(self.week) if self.week_active else None
+        self.regular_deadline = (next_deadline(now, earliest) if earliest is not None
+                                 else next_deadline(now, self.ready_by, self.ready_by_weekend))
+        if self.once is not None and normal < self.once["at"]:
+            # A one-time time after the next normal one: until then the minimum level is kept.
+            self.regular_deadline = min(self.regular_deadline, normal)
+        self._follow_car_limit()
         if previous is not None and previous <= now and previous != self.deadline:
             # The ready-by time just passed: the morning check looks at what the plan aimed for then.
             self.passed_deadline, self.passed_target = previous, previous_target
@@ -958,7 +1020,10 @@ class ChargePlanner:
         ), now)
 
         window = fixed_window(now, self.times["fixed_start"], self.times["fixed_end"])
-        later = self.upcoming_deadlines(now, WAIT_MAX_DAYS + 1) if self.flags["wait_cheaper_day"] else []
+        later_with = (self.normal_deadlines(now, WAIT_MAX_DAYS + 1)
+                      if self.flags["wait_cheaper_day"] and self.once is None else [])
+        later = [moment for moment, _target, _source in later_with]
+        self._later_targets = {moment: target for moment, target, _source in later_with}
         horizon = max([self.deadline, window[1], *later, *(c.deadline for c in self.constraints(now))])
         timeline = self._with_co2(build_timeline(now, ordered, horizon, self.slot_minutes))
         self.timeline, self.horizon = timeline, horizon
@@ -1220,19 +1285,55 @@ class ChargePlanner:
             self.now_seen_connected = False
             self._now_charged, self._now_done_since = False, None
 
-    def upcoming_deadlines(self, now: datetime, count: int) -> list[datetime]:
-        """The next ready-by times: the learned departures (when that is on and learned), else the set time."""
+    @property
+    def week_active(self) -> bool:
+        return self.flags["week_plan"] and week_plan.has_days(self.week)
+
+    def normal_deadlines(self, now: datetime, count: int) -> list[tuple[datetime, float | None, str]]:
+        """The next normal ready-by times (without the one-time time), each with its own target and what set it:
+        the week plan (when it is on), else the learned departures (when that is on and learned), else the set time."""
+        if self.week_active:
+            found = week_plan.deadlines(now, self.week, count)
+            if found:
+                return [(moment, target, "week") for moment, target in found]
         times = self.learned_departures.get("times") if self.flags["learn_departure"] else None
         if times and any(times.values()):
             found = learned_departures.deadlines(now, times, count)
             if found:
-                return found
+                return [(moment, None, "learned") for moment in found]
         result, moment = [], now
         for _ in range(count):
             moment = next_deadline(moment, self.ready_by, self.ready_by_weekend)
-            result.append(moment)
+            result.append((moment, None, "time"))
             moment += timedelta(minutes=1)
         return result
+
+    def _follow_car_limit(self) -> None:
+        """A ready-by time with its own target sets the car's charge limit to it while the car is on the charger (the
+        car would stop at its old limit), and the normal target back afterwards. Tried once per target and time."""
+        if not (self.backend and self.charger_state in CONNECTED and self.car_present):
+            return
+        if self.deadline_target is not None:
+            want = self.deadline_target
+        elif self._limit_goal is not None:
+            want = self.settings["target_soc"]  # the own target is over: the normal one again
+        else:
+            return
+        limit = self.car_limit()
+        if limit is not None and abs(limit - min(max(want, 50.0), 100.0)) < 0.5:
+            self._limit_goal = want if self.deadline_target is not None else None
+            return
+        key = (round(want), self.deadline)
+        if self._limit_tried == key:
+            return
+        self._limit_tried = key
+        self._limit_goal = want if self.deadline_target is not None else None
+        _LOGGER.debug("Setting the car's charge limit to %s %% for the ready-by time %s", want, self.deadline)
+        self.entry.async_create_background_task(self.hass, self.async_sync_car_limit(want), "evledger_follow_limit")
+
+    def upcoming_deadlines(self, now: datetime, count: int) -> list[datetime]:
+        """The next normal ready-by times."""
+        return [moment for moment, _target, _source in self.normal_deadlines(now, count)]
 
     def daily_use_kwh(self, now: datetime) -> float | None:
         """The battery energy the car uses on an average day: the ledger's trips of the last USE_DAYS days times
@@ -1253,7 +1354,8 @@ class ChargePlanner:
         use = self.daily_use_kwh(now)
         if use is None or self.trip_active or self.capacity <= 0:
             return None
-        base = plan_for(MODE_SMART, (Constraint(later[0], self.target),), keep_plan=False)
+        targets = getattr(self, "_later_targets", {})
+        base = plan_for(MODE_SMART, (Constraint(later[0], self.capped(targets.get(later[0]))),), keep_plan=False)
         if not base.blocks or not base.energy_kwh or base.cost is None:
             return None
         price_now = base.cost / base.energy_kwh
@@ -1264,15 +1366,17 @@ class ChargePlanner:
             soc_then = soc - use * days / self.capacity * 100
             if soc_then < floor:
                 break
-            plan = plan_for(MODE_SMART, (Constraint(deadline, self.target),), keep_plan=False)
+            target = self.capped(targets.get(deadline))
+            plan = plan_for(MODE_SMART, (Constraint(deadline, target),), keep_plan=False)
             if not plan.blocks or plan.cost is None or not plan.energy_kwh or plan.blocks[0].start < later[0]:
                 continue
             price = plan.cost / plan.energy_kwh
             saving = (price_now - price) * plan.energy_kwh
             if price <= price_now * (1 - WAIT_MIN_SHARE) and saving >= WAIT_MIN_KR and (
                     best is None or saving > best["saving"]):
-                best = {"deadline": deadline, "price": round(price, 4), "price_now": round(price_now, 4),
-                        "saving": round(saving, 2), "soc_then": round(soc_then), "estimated": plan.estimated}
+                best = {"deadline": deadline, "target": target, "price": round(price, 4),
+                        "price_now": round(price_now, 4), "saving": round(saving, 2),
+                        "soc_then": round(soc_then), "estimated": plan.estimated}
         return best
 
     def _with_co2(self, timeline: list) -> list:

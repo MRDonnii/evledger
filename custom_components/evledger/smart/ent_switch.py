@@ -12,6 +12,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
 from . import departures
+from . import week as week_plan
 from .entity import EvSmartChargeListenerEntity
 
 
@@ -30,7 +31,7 @@ FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-chec
               "low_price_alert": "mdi:cash-check", "wait_cheaper_day": "mdi:calendar-arrow-right",
               "learn_departure": "mdi:clock-start", "prefer_green": "mdi:leaf",
               "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check",
-              "quiet_night": "mdi:bell-sleep"}
+              "quiet_night": "mdi:bell-sleep", "week_plan": "mdi:calendar-week"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -49,6 +50,12 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         last = await self.async_get_last_state()
         if last and last.state in ("on", "off"):
             self.planner.flags[self._attr_translation_key] = last.state == "on"
+        if last and self._attr_translation_key == "week_plan" and isinstance(last.attributes.get("days"), dict):
+            try:
+                self.planner.week = week_plan.parse_week(last.attributes["days"])
+                self.planner.week_set = True
+            except (TypeError, ValueError):
+                pass
         if last and self._attr_translation_key == "plug_reminder":
             # The evening check is made once a day, also across a restart in its window.
             checked = dt_util.parse_date(str(last.attributes.get("checked_on") or ""))
@@ -97,6 +104,13 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             learned = planner.learned_departures
             return {"departures": departures.as_text(learned.get("times")),
                     "history_days": learned.get("history_days"), "next_ready_by": planner.deadline}
+        if self._attr_translation_key == "week_plan":
+            # The week plan, and what the next ready-by time is and where it comes from (for the card).
+            once = planner.once
+            return {"days": week_plan.as_attribute(planner.week), "next_ready_by": planner.deadline,
+                    "next_target": planner.active_target, "next_source": planner.deadline_source,
+                    "once": {"at": once["at"].isoformat(), "target": once["target"]} if once else None,
+                    "normal_target": planner.settings["target_soc"]}
         if self._attr_translation_key == "quiet_night":
             return {"from": planner.times["quiet_from"].strftime("%H:%M"),
                     "until": planner.times["quiet_until"].strftime("%H:%M"), "silent_now": planner.notify.is_quiet()}

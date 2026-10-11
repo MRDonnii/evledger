@@ -350,6 +350,9 @@
     "datetime": {
       "trip_departure": {
         "name": "Midlertidig afgang"
+      },
+      "ready_by_once": {
+        "name": "Klar senest én gang"
       }
     },
     "text": {
@@ -414,6 +417,9 @@
       },
       "quiet_night": {
         "name": "Lydløse beskeder om natten"
+      },
+      "week_plan": {
+        "name": "Ugeplan"
       }
     },
     "button": {
@@ -454,6 +460,18 @@
     },
     "public_charge_no_kwh": {
       "message": "Skriv først kWh for den offentlige ladning."
+    },
+    "ready_by_once_out_of_range": {
+      "message": "Engangstiden skal ligge i fremtiden og højst 14 dage frem."
+    },
+    "no_smart_charging": {
+      "message": "{entity_id} hører ikke til en EV Ledger-bil med smart opladning."
+    },
+    "bad_week_plan": {
+      "message": "Ugeplanen er ikke gyldig: {error}"
+    },
+    "empty_week_plan": {
+      "message": "Ugeplanen skal have en klar-senest-tid på mindst én dag."
     }
   }
 }

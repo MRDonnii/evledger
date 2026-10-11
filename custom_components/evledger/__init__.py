@@ -7,12 +7,17 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     ATTR_ENDED_AT,
     ATTR_LOCATION,
     SERVICE_ADD_CHARGE,
+    SERVICE_CLEAR_READY_BY_ONCE,
+    SERVICE_SET_READY_BY_ONCE,
+    SERVICE_SET_WEEK_PLAN,
     ATTR_CHARGE_ID,
     ATTR_KWH,
     ATTR_LOCATION_NAME,
@@ -34,6 +39,8 @@ from .const import (
 )
 from .coordinator import EvLedgerCoordinator
 from .providers.registry import build_charger_providers, build_vehicle_provider
+from .smart import week as week_plan
+from .smart.ent_datetime import set_once
 from .smart.planner import ChargePlanner
 from .smart.setup import ledger_vehicle, planner_options, smart_enabled
 from .store import EvLedgerStore
@@ -63,6 +70,16 @@ ADD_CHARGE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_NOTE): cv.string,
     }
 )
+
+CAR_SCHEMA = vol.Schema({vol.Required(ATTR_ENTITY_ID): cv.entity_id})
+SET_WEEK_PLAN_SCHEMA = CAR_SCHEMA.extend({
+    vol.Required("days"): dict,
+    vol.Optional("enabled"): cv.boolean,
+})
+SET_READY_BY_ONCE_SCHEMA = CAR_SCHEMA.extend({
+    vol.Required("at"): cv.datetime,
+    vol.Optional("target"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=50, max=100))),
+})
 
 DELETE_CHARGE_SCHEMA = vol.Schema(
     {
@@ -154,6 +171,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 SERVICE_DELETE_CHARGE,
                 SERVICE_DELETE_TRIP,
                 SERVICE_ADD_CHARGE,
+                SERVICE_SET_WEEK_PLAN,
+                SERVICE_SET_READY_BY_ONCE,
+                SERVICE_CLEAR_READY_BY_ONCE,
             ):
                 if hass.services.has_service(DOMAIN, service):
                     hass.services.async_remove(DOMAIN, service)
@@ -185,6 +205,35 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call.data[ATTR_KWH], call.data.get(ATTR_PRICE), call.data[ATTR_STARTED_AT], call.data.get(ATTR_ENDED_AT),
             call.data[ATTR_LOCATION], call.data.get(ATTR_LOCATION_NAME), call.data.get(ATTR_NOTE),
         )
+
+    def _planner(call: ServiceCall) -> ChargePlanner:
+        """The smart charging of the car whose EV Ledger entity is given (any of its entities)."""
+        entry = er.async_get(hass).async_get(call.data[ATTR_ENTITY_ID])
+        coordinator = hass.data.get(DOMAIN, {}).get(entry.config_entry_id) if entry else None
+        planner = getattr(coordinator, "smart", None)
+        if planner is None:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_smart_charging",
+                                         translation_placeholders={"entity_id": call.data[ATTR_ENTITY_ID]})
+        return planner
+
+    async def _handle_set_week_plan(call: ServiceCall) -> None:
+        """A ready-by time (and maybe its own target) for each weekday; days left out or null are free."""
+        planner = _planner(call)
+        try:
+            week = week_plan.parse_week(call.data["days"])
+        except (TypeError, ValueError) as err:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="bad_week_plan",
+                                         translation_placeholders={"error": str(err)}) from err
+        if not week_plan.has_days(week):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="empty_week_plan")
+        planner.async_set_week(week, call.data.get("enabled"))
+
+    async def _handle_set_ready_by_once(call: ServiceCall) -> None:
+        planner = _planner(call)
+        set_once(planner, call.data["at"], call.data.get("target"))
+
+    async def _handle_clear_ready_by_once(call: ServiceCall) -> None:
+        _planner(call).async_set_once(None)
 
     async def _handle_delete_charge(call: ServiceCall) -> None:
         entry_id = call.data["entry_id"]
@@ -239,6 +288,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         (SERVICE_DELETE_CHARGE, _handle_delete_charge, DELETE_CHARGE_SCHEMA),
         (SERVICE_DELETE_TRIP, _handle_delete_trip, DELETE_TRIP_SCHEMA),
         (SERVICE_ADD_CHARGE, _handle_add_charge, ADD_CHARGE_SCHEMA),
+        (SERVICE_SET_WEEK_PLAN, _handle_set_week_plan, SET_WEEK_PLAN_SCHEMA),
+        (SERVICE_SET_READY_BY_ONCE, _handle_set_ready_by_once, SET_READY_BY_ONCE_SCHEMA),
+        (SERVICE_CLEAR_READY_BY_ONCE, _handle_clear_ready_by_once, CAR_SCHEMA),
     )
     for service, handler, schema in services:
         if not hass.services.has_service(DOMAIN, service):

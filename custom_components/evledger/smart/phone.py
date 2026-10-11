@@ -154,7 +154,10 @@ class PhoneNotifier:
             energy += f" · mål {schedule.target_soc:.0f} %"
         lines.append(energy)
         if planner.deadline and planner.mode in (MODE_SMART, MODE_PRICE_CAP):
-            lines.append(f"Klar senest: {when(planner.deadline)}")
+            extra = {"once": " (engangstid)", "week": " (ugeplan)"}.get(planner.deadline_source, "")
+            if planner.deadline_target is not None:
+                extra += f" · {planner.deadline_target:.0f} %"
+            lines.append(f"Klar senest: {when(planner.deadline)}{extra}")
         if planner.waiting:
             lines.append(wait_text(planner.waiting, unit))
         if schedule.co2 is not None:

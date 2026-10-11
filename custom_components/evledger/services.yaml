@@ -206,3 +206,74 @@ add_charge:
       required: false
       selector:
         text:
+
+set_week_plan:
+  name: Set week plan
+  description: >-
+    A ready-by time for each weekday for smart charging, each day with the normal target or its own. Days left out
+    (or null) are free: the plan then aims at the next day with a time. While the week plan is on it is used instead
+    of the ready-by time and the learned departure times.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its charge mode).
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    days:
+      name: Days
+      description: >-
+        mon … sun, each {"time": "07:00"} or {"time": "07:00", "target": 90} (50–100 %), or null for a free day.
+      required: true
+      example: '{"mon": {"time": "06:30"}, "tue": {"time": "06:30"}, "fri": {"time": "06:30", "target": 90}, "sat": null}'
+      selector:
+        object:
+    enabled:
+      name: Switch on
+      description: Also switch the week plan on (true) or off (false).
+      required: false
+      selector:
+        boolean:
+
+set_ready_by_once:
+  name: Set one-time ready-by time
+  description: >-
+    Ready by this time once (e.g. an early morning), with the normal target or its own. Until then it replaces the
+    normal ready-by times (which keep the minimum level); once it has passed, the normal times take over again.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its charge mode).
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    at:
+      name: Ready by
+      description: When the car must be ready, at most 14 days ahead.
+      required: true
+      selector:
+        datetime:
+    target:
+      name: Target
+      description: Its own target in %. Leave it out for the normal target.
+      required: false
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+clear_ready_by_once:
+  name: Clear one-time ready-by time
+  description: Forget the one-time ready-by time; the normal ready-by times apply again.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its charge mode).
+      required: true
+      selector:
+        entity:
+          integration: evledger

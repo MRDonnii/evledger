@@ -139,6 +139,9 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                     for block in schedule.blocks
                 ],
                 "deadline": planner.deadline,
+                # The ready-by time's own target (week plan, one-time time) and what set it.
+                "deadline_target": planner.active_target,
+                "deadline_source": planner.deadline_source,
                 "trip_departure": planner.trip.departure,
                 "estimated_prices": schedule.estimated,
                 "shortfall_kwh": schedule.shortfall_kwh,
