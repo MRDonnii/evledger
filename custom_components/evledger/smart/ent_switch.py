@@ -50,7 +50,8 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         last = await self.async_get_last_state()
         if last and last.state in ("on", "off"):
             self.planner.flags[self._attr_translation_key] = last.state == "on"
-        if last and self._attr_translation_key == "week_plan" and isinstance(last.attributes.get("days"), dict):
+        if (last and self._attr_translation_key == "week_plan" and isinstance(last.attributes.get("days"), dict)
+                and last.attributes.get("days_set", True)):
             try:
                 self.planner.week = week_plan.parse_week(last.attributes["days"])
                 self.planner.week_set = True
@@ -107,7 +108,11 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         if self._attr_translation_key == "week_plan":
             # The week plan, and what the next ready-by time is and where it comes from (for the card).
             once = planner.once
-            return {"days": week_plan.as_attribute(planner.week), "next_ready_by": planner.deadline,
+            # Until the week plan has been set, the days follow the ready-by times used so far.
+            days = planner.week if planner.week_set else week_plan.default_week(planner.ready_by,
+                                                                                planner.ready_by_weekend)
+            return {"days": week_plan.as_attribute(days), "days_set": planner.week_set,
+                    "next_ready_by": planner.deadline,
                     "next_target": planner.active_target, "next_source": planner.deadline_source,
                     "once": {"at": once["at"].isoformat(), "target": once["target"]} if once else None,
                     "normal_target": planner.settings["target_soc"]}

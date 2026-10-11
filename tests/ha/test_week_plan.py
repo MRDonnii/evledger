@@ -58,6 +58,10 @@ async def test_first_switch_on_starts_from_the_ready_by_times(hass: HomeAssistan
     planner.async_set_ready_by(time(6, 15))
     planner.times["ready_by_weekend"] = time(9, 30)
     planner.async_set_flag("weekend_ready_by", True)
+    hass.states.async_set("sensor.car_battery", "51")  # any update writes the switch again
+    await hass.async_block_till_done()
+    before = hass.states.get("switch.bil_week_plan").attributes
+    assert before["days_set"] is False and before["days"]["mon"]["time"] == "06:15", "the days follow the times so far"
     await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_week_plan"}, blocking=True)
     days = hass.states.get("switch.bil_week_plan").attributes["days"]
     assert days["mon"]["time"] == "06:15" and days["sat"]["time"] == "09:30" and days["sun"]["time"] == "09:30"
