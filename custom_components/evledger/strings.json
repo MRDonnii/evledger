@@ -306,6 +306,12 @@
       },
       "reminder_time": {
         "name": "Evening check at"
+      },
+      "quiet_from": {
+        "name": "Silent from"
+      },
+      "quiet_until": {
+        "name": "Silent until"
       }
     },
     "select": {
@@ -402,6 +408,9 @@
       },
       "morning_check": {
         "name": "Message if the target is not reached"
+      },
+      "quiet_night": {
+        "name": "Silent messages at night"
       }
     },
     "button": {

@@ -306,6 +306,12 @@
       },
       "reminder_time": {
         "name": "Aftentjek kl."
+      },
+      "quiet_from": {
+        "name": "Lydløs fra"
+      },
+      "quiet_until": {
+        "name": "Lydløs til"
       }
     },
     "select": {
@@ -402,6 +408,9 @@
       },
       "morning_check": {
         "name": "Besked hvis målet ikke nås"
+      },
+      "quiet_night": {
+        "name": "Lydløse beskeder om natten"
       }
     },
     "button": {

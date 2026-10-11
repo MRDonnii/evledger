@@ -348,8 +348,10 @@ planned start does not lose the charge. A charger that is offline for 10 minutes
 wants to charge is reported on the phones at once; the charge starts as soon as it answers again. A car that stops at its own charge limit is done:
 it is neither started again nor reported as stopped from outside. Settings, the chosen plan, a temporary plan, an
 open phone question and the periods charged so far (for the done message) all survive a restart. Messages that only tell what happens (the active plan,
-charging started, charge done) arrive without sound between 22:00 and 07:00 (iOS "passive"); questions
-and warnings keep their sound. The
+charging started, charge done, plug in soon) arrive without sound at night: `switch.<car>_silent_messages_at_night`
+(on by default) with `time.<car>_silent_from` / `time.<car>_silent_until` (22:00–07:00 by default; the window may
+cross midnight). iOS gets the "passive" interruption level (into the notification centre without sound or lighting
+the screen), Android the low-importance channel "EV Ledger lydløs". Questions and warnings keep their sound. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)
 shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
 

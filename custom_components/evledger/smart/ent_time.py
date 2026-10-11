@@ -11,7 +11,8 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .entity import EvSmartChargeEntity
 
 ICONS = {"ready_by_time": "mdi:clock-check-outline", "ready_by_weekend": "mdi:calendar-weekend-outline",
-         "fixed_start": "mdi:clock-start", "fixed_end": "mdi:clock-end", "reminder_time": "mdi:bell-ring-outline"}
+         "fixed_start": "mdi:clock-start", "fixed_end": "mdi:clock-end", "reminder_time": "mdi:bell-ring-outline",
+         "quiet_from": "mdi:bell-sleep-outline", "quiet_until": "mdi:bell-outline"}
 
 
 def build(planner) -> list:

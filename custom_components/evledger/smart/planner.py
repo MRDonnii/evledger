@@ -42,6 +42,8 @@ from .const import (
     DEFAULT_PRECONDITION_MINUTES,
     DEFAULT_PRICE_CAP,
     DEFAULT_PRICE_FACTOR,
+    DEFAULT_QUIET_FROM,
+    DEFAULT_QUIET_UNTIL,
     DEFAULT_READY_BY,
     DEFAULT_READY_BY_WEEKEND,
     DEFAULT_REMINDER_SOC,
@@ -177,6 +179,8 @@ class ChargePlanner:
             "fixed_start": time.fromisoformat(DEFAULT_FIXED_START),
             "fixed_end": time.fromisoformat(DEFAULT_FIXED_END),
             "reminder_time": time.fromisoformat(DEFAULT_REMINDER_TIME),
+            "quiet_from": time.fromisoformat(DEFAULT_QUIET_FROM),
+            "quiet_until": time.fromisoformat(DEFAULT_QUIET_UNTIL),
         }
         # On/off settings: the message when a charge is done, the evening reminder, another ready-by time at the
         # weekend and the car's climate before the ready-by time.
@@ -185,7 +189,7 @@ class ChargePlanner:
                                        "precondition": False, "learn": True, "monthly_summary": True,
                                        "low_price_alert": False, "wait_cheaper_day": False,
                                        "learn_departure": False, "prefer_green": False,
-                                       "ask_public_price": False, "morning_check": False}
+                                       "ask_public_price": False, "morning_check": False, "quiet_night": True}
         # Learned departure times ({"history_days", "times"}), the cheaper day waited for, the grid's CO2 forecast,
         # and the ready-by time that just passed with the level the plan aimed at (for the morning check).
         self.learned_departures: dict = {"history_days": 0, "times": None}
@@ -256,6 +260,9 @@ class ChargePlanner:
         # loaded again, so a restart right at the planned start does not lose the start.
         self.restored_blocks: list[tuple[datetime, datetime]] = []
         self.notify = PhoneNotifier(hass, entry, lambda: self.options)
+        # Silent messages at night: on/off and the clock times.
+        self.notify.quiet_window = lambda: (self.flags["quiet_night"], self.times["quiet_from"],
+                                            self.times["quiet_until"])
         self.routines = Routines(self)
         self._guessed: vehicles.Vehicle | None = None
         self._started_at: datetime | None = None

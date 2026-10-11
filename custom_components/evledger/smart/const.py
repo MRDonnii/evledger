@@ -61,6 +61,9 @@ DEFAULT_READY_BY_WEEKEND = "09:00"
 # The evening check: a reminder when the car is home without the cable and its battery is below the level, and
 # a warning when the charger is offline while the car is plugged in.
 DEFAULT_REMINDER_TIME = "21:00"
+# Messages that only tell what happens arrive without sound between these clock times (the window may cross midnight).
+DEFAULT_QUIET_FROM = "22:00"
+DEFAULT_QUIET_UNTIL = "07:00"
 DEFAULT_REMINDER_SOC = 50.0
 # The evening check is only made this long after its time (not when Home Assistant starts at night).
 REMINDER_WINDOW_HOURS = 3

@@ -29,7 +29,8 @@ FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-chec
               "learn": "mdi:school-outline", "monthly_summary": "mdi:calendar-month-outline",
               "low_price_alert": "mdi:cash-check", "wait_cheaper_day": "mdi:calendar-arrow-right",
               "learn_departure": "mdi:clock-start", "prefer_green": "mdi:leaf",
-              "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check"}
+              "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check",
+              "quiet_night": "mdi:bell-sleep"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -39,7 +40,8 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         super().__init__(planner, key)
         self._attr_icon = FLAG_ICONS[key]
         if key in ("notify_start", "notify_done", "plug_reminder", "learn", "monthly_summary", "low_price_alert",
-                   "wait_cheaper_day", "learn_departure", "prefer_green", "ask_public_price", "morning_check"):
+                   "wait_cheaper_day", "learn_departure", "prefer_green", "ask_public_price", "morning_check",
+                   "quiet_night"):
             self._attr_entity_category = EntityCategory.CONFIG
 
     async def async_added_to_hass(self) -> None:
@@ -95,6 +97,9 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             learned = planner.learned_departures
             return {"departures": departures.as_text(learned.get("times")),
                     "history_days": learned.get("history_days"), "next_ready_by": planner.deadline}
+        if self._attr_translation_key == "quiet_night":
+            return {"from": planner.times["quiet_from"].strftime("%H:%M"),
+                    "until": planner.times["quiet_until"].strftime("%H:%M"), "silent_now": planner.notify.is_quiet()}
         if self._attr_translation_key == "prefer_green":
             return {"price_area": planner.co2_area, "plan_co2": planner.schedule.co2,
                     "co2_updated": planner.co2_updated}

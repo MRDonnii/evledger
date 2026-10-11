@@ -35,6 +35,8 @@ ACTION_EVENT = "mobile_app_notification_action"
 QUIET_FROM = time(22, 0)
 QUIET_UNTIL = time(7, 0)
 QUIET_KINDS = ("start", "done", "plug_soon")
+# Android: a notification channel without sound for the silent messages (iOS uses the "passive" interruption level).
+QUIET_CHANNEL = "EV Ledger lydløs"
 ANSWERS = {"NOW": MODE_NOW, "OFF": MODE_OFF}
 NAMES = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft",
          MODE_MANUAL: "Manuel"}
@@ -64,6 +66,8 @@ class PhoneNotifier:
         self.entry = entry
         self._options = options
         self.prefix = f"EVSC_{entry.entry_id}_"
+        # (on, from, until) for silent messages at night; set by the planner.
+        self.quiet_window: Callable[[], tuple[bool, time, time]] = lambda: (True, QUIET_FROM, QUIET_UNTIL)
         self.tag = f"ev_smart_charge_{entry.entry_id}"
 
     @property
@@ -222,11 +226,20 @@ class PhoneNotifier:
                  "notification_icon_color": "white", "color": NOTIFY_COLOR}
         return data
 
-    @staticmethod
-    def quiet() -> dict:
-        """iOS "passive" at night: into the notification centre without sound or lighting the screen."""
+    def is_quiet(self) -> bool:
+        """Inside the silent window (it may cross midnight)."""
+        enabled, start, end = self.quiet_window()
+        if not enabled or start == end:
+            return False
         now = dt_util.now().time()
-        return {"push": {"interruption-level": "passive"}} if now >= QUIET_FROM or now < QUIET_UNTIL else {}
+        return start <= now < end if start < end else now >= start or now < end
+
+    def quiet(self) -> dict:
+        """Without sound in the silent window: iOS "passive" (into the notification centre without sound or lighting
+        the screen), Android a low-importance channel."""
+        if not self.is_quiet():
+            return {}
+        return {"push": {"interruption-level": "passive"}, "channel": QUIET_CHANNEL, "importance": "low"}
 
     async def async_send_info(self, planner: ChargePlanner) -> None:
         """Tell the phones which plan is active, with times and price; the same tag replaces an older one."""

@@ -372,3 +372,28 @@ async def test_message_when_power_is_cheap(hass: HomeAssistant, request, freezer
     cheap = [m for m in sent if m["title"] == "Bil: strømmen er billig"]
     assert len(cheap) == 1 and "0,40 kr/kWh (under 0,50)." in cheap[0]["message"], cheap
     assert cheap[0]["data"]["actions"][0]["title"] == "Lad nu"
+
+
+async def test_the_silent_window_can_be_set_and_turned_off(hass: HomeAssistant, request, freezer):
+    freezer.move_to(dt_util.now().replace(hour=21, minute=30, second=5))
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, charger_state="connected_finished", cheap_now=True)
+    planner = await with_options(hass, entry)
+    assert not planner.notify.is_quiet(), "21:30 is before 22:00"
+    await set_time(hass, "time.bil_silent_from", time(21, 0))
+    assert planner.notify.is_quiet()
+    quiet = planner.notify.quiet()
+    assert quiet["push"] == {"interruption-level": "passive"} and quiet["importance"] == "low", "iOS and Android"
+    hass.states.async_set(MODE, "connected_charging")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    started = [m for m in sent if "ladning startet" in m.get("title", "")]
+    assert started and started[0]["data"]["channel"] == "EV Ledger lydløs"
+    attrs = hass.states.get("switch.bil_silent_messages_at_night").attributes
+    assert attrs["from"] == "21:00" and attrs["until"] == "07:00" and attrs["silent_now"] is True
+    await switch(hass, "switch.bil_silent_messages_at_night", on=False)
+    assert planner.notify.quiet() == {}, "off: with sound all night"
+    # A window inside the day works too.
+    await switch(hass, "switch.bil_silent_messages_at_night")
+    await set_time(hass, "time.bil_silent_from", time(13, 0))
+    await set_time(hass, "time.bil_silent_until", time(15, 0))
+    assert not planner.notify.is_quiet()
