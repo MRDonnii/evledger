@@ -254,6 +254,9 @@ data:
 ```
 
 Added charges from before the first recorded trip do not count in the cost per km (there are no kilometres for them).
+Added home charges also count in the lifetime `home_charging_energy` total, so adding a long history makes it jump
+once. Home Assistant's statistics count that jump as charging at the moment it happened: correct it once with
+Developer tools → Statistics (adjust sum) or `recorder.adjust_sum_statistics` by minus the added kWh.
 
 Two services remove a record permanently (there's no undo):
 
