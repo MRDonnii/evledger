@@ -380,7 +380,7 @@ class EvLedgerCostThisYearSensor(_EvLedgerBaseSensor):
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_suggested_display_precision = 0
-    _unrecorded_attributes = frozenset({"months"})
+    _unrecorded_attributes = frozenset({"months", "months_year_before"})
 
     def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "cost_this_year", "Charging cost this year")
@@ -412,14 +412,20 @@ class EvLedgerCostThisYearSensor(_EvLedgerBaseSensor):
             keys.append(cursor.strftime("%Y-%m"))
             cursor = (cursor - timedelta(days=1)).replace(day=1)
         empty = {"cost": 0.0, "kwh": 0.0, "home_cost": 0.0, "public_cost": 0.0, "charges": 0, "unpriced": 0}
+
+        def month(key: str) -> dict:
+            found = months.get(key, empty)
+            return {**empty, **found, "month": key,
+                    **{k: round(found[k], 2) for k in ("cost", "kwh", "home_cost", "public_cost")}}
+
         return {
             "kwh": round(sum(m["kwh"] for key, m in months.items() if key.startswith(year)), 1),
             "unpriced": sum(m["unpriced"] for key, m in months.items() if key.startswith(year)),
             "previous_year": round(sum(m["cost"] for key, m in months.items() if key.startswith(last_year)), 2),
-            # The last 12 months, oldest first.
-            "months": [{**empty, **months.get(key, {}), "month": key,
-                        **{k: round(months.get(key, empty)[k], 2) for k in ("cost", "kwh", "home_cost", "public_cost")}}
-                       for key in reversed(keys)],
+            "previous_year_kwh": round(sum(m["kwh"] for key, m in months.items() if key.startswith(last_year)), 1),
+            # The last 12 months, oldest first, and the same months a year before (for comparing).
+            "months": [month(key) for key in reversed(keys)],
+            "months_year_before": [month(f"{int(key[:4]) - 1}{key[4:]}") for key in reversed(keys)],
         }
 
 

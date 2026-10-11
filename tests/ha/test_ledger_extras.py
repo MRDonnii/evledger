@@ -144,5 +144,9 @@ async def test_added_charges_and_the_cost_this_year(hass: HomeAssistant, request
     assert months[-1]["public_cost"] == pytest.approx(90.0)
     assert next(m for m in months if m["month"] == "2026-03")["home_cost"] == pytest.approx(30.0)
     assert next(m for m in months if m["month"] == "2025-12")["unpriced"] == 1, "no price: waits for one"
+    before = st.attributes["months_year_before"]
+    assert [m["month"] for m in before][:2] == ["2024-11", "2024-12"] and before[-1]["month"] == "2025-10"
+    assert st.attributes["previous_year_kwh"] == pytest.approx(10.0)
+    assert st.attributes["previous_year"] == 0, "last year's only charge has no price yet"
     # The cost per km only counts charges from the period with trips (the March one has no kilometres).
     assert float(state(hass, "sensor.bil_cost_per_km")) == pytest.approx(90.0 / 20.0)

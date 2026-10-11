@@ -292,7 +292,7 @@ Each vehicle gets:
 | `sensor.<vehicle>_home_charging_power` | the home charger's power while this car charges, in kW whatever unit the charger reports (0 while another car on a shared charger has it) | — |
 | `sensor.<vehicle>_home_charging_energy` (+ `_today`, `_this_month`) | kWh charged at home: in total, today and this month (the charges that ended in the period and the one running; `state_class: total`, works in the Energy dashboard) | — |
 | `sensor.<vehicle>_home_charging_cost_today` | what charging at home cost today | `kwh` |
-| `sensor.<vehicle>_charging_cost_this_year` | what charging cost this year, home and away | `kwh`, `unpriced`, `previous_year`, `months` (the last 12 months, oldest first: `month`, `cost`, `kwh`, `home_cost`, `public_cost`, `charges`, `unpriced`) |
+| `sensor.<vehicle>_charging_cost_this_year` | what charging cost this year, home and away | `kwh`, `unpriced`, `previous_year`, `previous_year_kwh`, `months` (the last 12 months, oldest first: `month`, `cost`, `kwh`, `home_cost`, `public_cost`, `charges`, `unpriced`), `months_year_before` (the same 12 months a year earlier, for comparing) |
 
 `total_cost` and `total_distance` carry proper `device_class`/`state_class`,
 so Home Assistant's own **Statistics graph** card gives you month-over-month
