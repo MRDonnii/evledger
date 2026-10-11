@@ -355,6 +355,9 @@ class ChargePlanner:
             watched.append(tracker)
         if self.backend:
             watched.extend(self.backend.entities)
+        # The car's own charge limit caps the target: a new limit (also one set from the target) re-plans at once.
+        if limit := self._limit_entity():
+            watched.append(limit)
         self._unsubs.append(async_track_state_change_event(self.hass, list(dict.fromkeys(watched)), self._on_state))
         self._unsubs.append(async_track_time_interval(self.hass, self._on_tick, timedelta(minutes=1)))
         self._unsubs.append(self.notify.async_listen(self))
@@ -731,6 +734,49 @@ class ChargePlanner:
                         self._limit_id = other.entity_id
                         break
         return self._limit_id or None
+
+    def _limit_command_entity(self) -> str | None:
+        """The charge limit to send a new limit to: on the car's device or a device with the same name, preferring
+        an integration that can command the car (Tesla Fleet, Teslemetry, Tessie) over Tesla Custom, whose owner
+        API commands newer cars ignore."""
+        registry = er.async_get(self.hass)
+        devices = dr.async_get(self.hass)
+        battery = registry.async_get(self.battery_entity)
+        car = devices.async_get(battery.device_id) if battery is not None and battery.device_id else None
+        if car is None:
+            return self._limit_entity()
+        name = car.name_by_user or car.name
+        same_car = [device.id for device in all_devices(devices)
+                    if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
+        found = [other for device_id in same_car for other in er.async_entries_for_device(registry, device_id)
+                 if other.domain == "number" and not other.disabled_by
+                 and other.unique_id.endswith(CHARGE_LIMIT_SUFFIXES)
+                 and (state := self.hass.states.get(other.entity_id)) is not None and state.state != "unavailable"]
+        found.sort(key=lambda entry: entry.platform == "tesla_custom")
+        return found[0].entity_id if found else self._limit_entity()
+
+    async def async_sync_car_limit(self, target: float) -> None:
+        """Set the car's own charge limit to a new target, so the car does not stop below it (or charge past it
+        on its own). Clamped to what the car accepts (Tesla: 50–100 %)."""
+        if not (entity_id := self._limit_command_entity()) or (state := self.hass.states.get(entity_id)) is None:
+            return
+        try:
+            low = float(state.attributes.get("min", 50))
+            high = float(state.attributes.get("max", 100))
+        except (TypeError, ValueError):
+            low, high = 50.0, 100.0
+        value = min(max(float(target), low), high)
+        try:
+            if abs(float(state.state) - value) < 0.5:
+                return
+        except (TypeError, ValueError):
+            pass  # unknown while the car sleeps: set it anyway
+        try:
+            await self.hass.services.async_call("number", "set_value", {"entity_id": entity_id, "value": value},
+                                                blocking=True)
+            self.async_recalculate()
+        except Exception as err:  # noqa: BLE001 - the car may be asleep or offline; the plan keeps its own target
+            _LOGGER.warning("Could not set the car's charge limit %s to %s %%: %s", entity_id, value, err)
 
     def car_limit(self) -> float | None:
         """The charge limit set in the car: it stops there whatever the plan says."""

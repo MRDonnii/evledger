@@ -89,3 +89,7 @@ class PlanNumber(EvSmartChargeEntity, RestoreNumber):
     async def async_set_native_value(self, value: float) -> None:
         self.planner.async_set_setting(self.entity_description.key, float(value))
         self.async_write_ha_state()
+        if self.entity_description.key == "target_soc":
+            # The car's own charge limit follows the target (in the background: a sleeping car can take a while).
+            self.hass.async_create_background_task(self.planner.async_sync_car_limit(float(value)),
+                                                   "evledger_sync_car_limit")

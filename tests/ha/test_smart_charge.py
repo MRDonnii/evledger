@@ -263,6 +263,64 @@ async def test_car_limit_caps_the_plan_target(hass: HomeAssistant, request):
     assert hass.states.get("select.bil_charge_mode").attributes["car_limit"] == 70
 
 
+async def test_target_soc_sets_the_car_charge_limit(hass: HomeAssistant, request):
+    car_with_limit(hass, 70)
+    hass.states.async_set("number.car_charge_limit", "70", {"unit_of_measurement": "%", "min": 50, "max": 100})
+    calls = []
+
+    async def fake_set(call):
+        calls.append(dict(call.data))
+        hass.states.async_set("number.car_charge_limit", str(call.data["value"]), {"min": 50, "max": 100})
+
+    await setup(hass, request, cheap_now=False)
+    hass.services.async_register("number", "set_value", fake_set)  # after setup: the number component has its own
+    target = hass.data["entity_components"]["number"].get_entity("number.bil_target_soc")
+
+    async def set_target(value):
+        await target.async_set_native_value(value)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    await set_target(85)
+    assert {"entity_id": "number.car_charge_limit", "value": 85.0} in calls
+    assert float(state(hass, "sensor.bil_plan_target_soc")) == 85
+    # Below what the car accepts: the car gets its lowest limit, the plan keeps the lower target.
+    await set_target(40)
+    assert calls[-1] == {"entity_id": "number.car_charge_limit", "value": 50.0}
+    assert float(state(hass, "sensor.bil_plan_target_soc")) == 40
+    # Already the same: no command to the car.
+    count = len(calls)
+    await set_target(50)
+    assert len(calls) == count
+
+
+async def test_target_soc_prefers_a_commanding_integration_for_the_limit(hass: HomeAssistant, request):
+    """Tesla Custom reads the limit, Tesla Fleet (same car name) gets the command."""
+    car_with_limit(hass, 70)
+    registry = er.async_get(hass)
+    devices = dr.async_get(hass)
+    battery = registry.async_get("sensor.car_battery")
+    name = "Bil"
+    devices.async_update_device(battery.device_id, name=name)
+    fleet = MockConfigEntry(domain="tesla_fleet")
+    fleet.add_to_hass(hass)
+    device = devices.async_get_or_create(config_entry_id=fleet.entry_id, identifiers={("tesla_fleet", "vin")},
+                                         name=name)
+    registry.async_get_or_create("number", "tesla_fleet", "vin-charge_state_charge_limit_soc", device_id=device.id,
+                                 config_entry=fleet, suggested_object_id="car_fleet_charge_limit")
+    hass.states.async_set("number.car_fleet_charge_limit", "70", {"min": 50, "max": 100})
+    calls = []
+
+    async def fake_set(call):
+        calls.append(dict(call.data))
+
+    await setup(hass, request, cheap_now=False)
+    hass.services.async_register("number", "set_value", fake_set)
+    target = hass.data["entity_components"]["number"].get_entity("number.bil_target_soc")
+    await target.async_set_native_value(90)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert calls == [{"entity_id": "number.car_fleet_charge_limit", "value": 90.0}]
+
+
 async def test_full_car_is_done_not_stopped_from_outside(hass: HomeAssistant, request, freezer):
     sent = phones(hass)
     car_with_limit(hass, 80)
