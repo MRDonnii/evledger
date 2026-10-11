@@ -137,3 +137,72 @@ delete_trip:
       required: true
       selector:
         text:
+
+add_charge:
+  name: Add charge
+  description: >-
+    Add a finished charge, at home or away, that EV Ledger did not record itself — for example
+    charges from before EV Ledger was set up, so the monthly and yearly costs are complete.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this charge belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    kwh:
+      name: Energy added
+      description: How much energy was added, in kWh.
+      required: true
+      example: 24.5
+      selector:
+        number:
+          min: 0
+          max: 2000
+          step: 0.1
+          unit_of_measurement: kWh
+    price:
+      name: Total price
+      description: What the charge cost in total. Leave it out when unknown; the charge then waits for a price.
+      required: false
+      example: 18.4
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 0.01
+    started_at:
+      name: Started at
+      description: When the charge started.
+      required: true
+      selector:
+        datetime:
+    ended_at:
+      name: Ended at
+      description: When the charge ended (it counts in that month). Defaults to the start.
+      required: false
+      selector:
+        datetime:
+    location:
+      name: Where
+      description: At home or away (public).
+      required: false
+      default: home
+      selector:
+        select:
+          options:
+            - home
+            - public
+    location_name:
+      name: Location
+      description: Where you charged.
+      required: false
+      selector:
+        text:
+    note:
+      name: Note
+      description: Anything worth remembering, e.g. where the numbers came from.
+      required: false
+      selector:
+        text:

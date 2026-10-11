@@ -205,6 +205,51 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 total += float(meter.get("priced") or 0.0)
         return round(total, 2)
 
+    async def async_add_charge(self, kwh: float, price: float | None, started_at: datetime,
+                               ended_at: datetime | None = None, location: str = LOCATION_HOME,
+                               location_name: str | None = None, note: str | None = None) -> None:
+        """A finished charge the ledger did not record itself (home or public), e.g. from before EV Ledger."""
+        zone = dt_util.get_default_time_zone()
+        started = dt_util.as_utc(started_at if started_at.tzinfo else started_at.replace(tzinfo=zone))
+        ended = ended_at or started_at
+        ended = dt_util.as_utc(ended if ended.tzinfo else ended.replace(tzinfo=zone))
+        await self.store.async_upsert_charge(ChargeSession(
+            id=self.store.new_id(), location_kind=LOCATION_PUBLIC if location == "public" else LOCATION_HOME,
+            provider="manual", started_at=started.isoformat(), ended_at=max(ended, started).isoformat(), kwh=kwh,
+            price=price, price_currency=self.currency, location_name=location_name, start_battery_pct=None,
+            end_battery_pct=None, needs_review=price is None, note=note,
+        ))
+        await self.async_request_refresh()
+
+    def costs_by_month(self) -> dict[str, dict]:
+        """Charging per calendar month (local time, by when the charge ended): kWh and cost, home and away."""
+        months: dict[str, dict] = {}
+
+        def month(key: str) -> dict:
+            return months.setdefault(key, {"month": key, "cost": 0.0, "kwh": 0.0, "home_cost": 0.0,
+                                           "public_cost": 0.0, "charges": 0, "unpriced": 0})
+
+        for charge in self.store.charges:
+            ended = dt_util.parse_datetime(charge.ended_at or "")
+            if ended is None:
+                continue
+            bucket = month(dt_util.as_local(ended).strftime("%Y-%m"))
+            bucket["charges"] += 1
+            bucket["kwh"] += charge.kwh or 0.0
+            if charge.price is None:
+                bucket["unpriced"] += 1
+                continue
+            bucket["cost"] += charge.price
+            bucket["public_cost" if charge.location_kind == LOCATION_PUBLIC else "home_cost"] += charge.price
+        # The home charge running now counts in this month, priced as it charges.
+        open_home = self.store.get_open_charge(LOCATION_HOME)
+        if open_home is not None and (meter := self.store.meter(open_home.id)):
+            bucket = month(dt_util.now().strftime("%Y-%m"))
+            bucket["cost"] += float(meter.get("cost") or 0.0)
+            bucket["home_cost"] += float(meter.get("cost") or 0.0)
+            bucket["kwh"] += float(meter.get("priced") or 0.0)
+        return months
+
     def distance_today(self) -> float:
         """Kilometres driven today: the trips that ended today and the one under way."""
         today = dt_util.now().date()

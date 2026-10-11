@@ -238,6 +238,23 @@ data:
   note: "Counted twice by the charger"
 ```
 
+A charge EV Ledger did not record itself (for example from before it was set up) can be added, so the monthly and
+yearly costs are complete; it counts in the month it ended:
+
+```yaml
+service: evledger.add_charge
+data:
+  entry_id: <your vehicle's config entry id>
+  kwh: 35.5
+  price: 21.30            # leave out when unknown: the charge then waits for a price
+  started_at: "2026-03-05 01:00"
+  ended_at: "2026-03-05 05:00"
+  location: home          # or public
+  note: "From the old charge log"
+```
+
+Added charges from before the first recorded trip do not count in the cost per km (there are no kilometres for them).
+
 Two services remove a record permanently (there's no undo):
 
 ```yaml
@@ -275,6 +292,7 @@ Each vehicle gets:
 | `sensor.<vehicle>_home_charging_power` | the home charger's power while this car charges, in kW whatever unit the charger reports (0 while another car on a shared charger has it) | — |
 | `sensor.<vehicle>_home_charging_energy` (+ `_today`, `_this_month`) | kWh charged at home: in total, today and this month (the charges that ended in the period and the one running; `state_class: total`, works in the Energy dashboard) | — |
 | `sensor.<vehicle>_home_charging_cost_today` | what charging at home cost today | `kwh` |
+| `sensor.<vehicle>_charging_cost_this_year` | what charging cost this year, home and away | `kwh`, `unpriced`, `previous_year`, `months` (the last 12 months, oldest first: `month`, `cost`, `kwh`, `home_cost`, `public_cost`, `charges`, `unpriced`) |
 
 `total_cost` and `total_distance` carry proper `device_class`/`state_class`,
 so Home Assistant's own **Statistics graph** card gives you month-over-month

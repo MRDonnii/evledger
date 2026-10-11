@@ -1,6 +1,7 @@
 """Sensor platform for EV Ledger."""
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -58,6 +59,7 @@ async def async_setup_entry(
         EvLedgerHomeEnergySensor(coordinator, entry),
         EvLedgerHomeEnergySensor(coordinator, entry, "today"),
         EvLedgerHomeEnergySensor(coordinator, entry, "month"),
+        EvLedgerCostThisYearSensor(coordinator, entry),
     ]
     if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
         entities.append(EvLedgerEfficiencySensor(coordinator, entry))
@@ -189,9 +191,13 @@ class EvLedgerCostPerKmSensor(_EvLedgerBaseSensor):
         trips: list[Trip] = self.coordinator.data.get("trips", [])
         charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
         total_km = sum(t.distance_km or 0 for t in trips)
-        total_price = sum(c.price or 0 for c in charges if c.ended_at is not None)
         if total_km <= 0:
             return None
+        # Only the charges from the period the ledger has trips for: charges added from before (e.g. imported
+        # history) have no kilometres to go with them.
+        first_trip = min((t.started_at for t in trips if t.started_at), default=None)
+        total_price = sum(c.price or 0 for c in charges
+                          if c.ended_at is not None and (first_trip is None or c.ended_at >= first_trip))
         return round(total_price / total_km, 2)
 
     @property
@@ -365,6 +371,56 @@ class EvLedgerHomeEnergySensor(_EvLedgerBaseSensor):
     @property
     def last_reset(self):
         return self._start()
+
+
+class EvLedgerCostThisYearSensor(_EvLedgerBaseSensor):
+    """What charging cost this year (home and away), with the last 12 months for a chart."""
+
+    _attr_icon = "mdi:calendar-cash"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_suggested_display_precision = 0
+    _unrecorded_attributes = frozenset({"months"})
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "cost_this_year", "Charging cost this year")
+
+    def _months(self) -> dict[str, dict]:
+        return self.coordinator.costs_by_month()
+
+    @property
+    def native_value(self) -> float:
+        year = str(dt_util.now().year)
+        return round(sum(m["cost"] for key, m in self._months().items() if key.startswith(year)), 2)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+    @property
+    def last_reset(self):
+        return dt_util.start_of_local_day().replace(month=1, day=1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        months = self._months()
+        now = dt_util.now()
+        year, last_year = str(now.year), str(now.year - 1)
+        keys = []
+        cursor = now.replace(day=1)
+        for _ in range(12):
+            keys.append(cursor.strftime("%Y-%m"))
+            cursor = (cursor - timedelta(days=1)).replace(day=1)
+        empty = {"cost": 0.0, "kwh": 0.0, "home_cost": 0.0, "public_cost": 0.0, "charges": 0, "unpriced": 0}
+        return {
+            "kwh": round(sum(m["kwh"] for key, m in months.items() if key.startswith(year)), 1),
+            "unpriced": sum(m["unpriced"] for key, m in months.items() if key.startswith(year)),
+            "previous_year": round(sum(m["cost"] for key, m in months.items() if key.startswith(last_year)), 2),
+            # The last 12 months, oldest first.
+            "months": [{**empty, **months.get(key, {}), "month": key,
+                        **{k: round(months.get(key, empty)[k], 2) for k in ("cost", "kwh", "home_cost", "public_cost")}}
+                       for key in reversed(keys)],
+        }
 
 
 class EvLedgerTotalDistanceSensor(_EvLedgerBaseSensor):

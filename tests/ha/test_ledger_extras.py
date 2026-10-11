@@ -115,3 +115,34 @@ async def test_the_status_names_the_cars_sensors(hass: HomeAssistant, request):
     sources = hass.states.get("sensor.bil_charging_status").attributes["source_entities"]
     assert sources["battery"] == "sensor.car_battery" and sources["location"] == "device_tracker.car"
     assert sources["charger_power"] == "sensor.charger_power"
+
+
+async def test_added_charges_and_the_cost_this_year(hass: HomeAssistant, request, freezer):
+    from datetime import datetime
+    freezer.move_to(datetime(2026, 10, 11, 12, 0, tzinfo=dt_util.get_default_time_zone()))
+    entry, _ = await setup(hass, request)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    first = trip(2, 20.0)  # the ledger's trips start on 1 October
+    zone = dt_util.get_default_time_zone()
+    first.started_at = datetime(2026, 10, 1, 8, 0, tzinfo=zone).astimezone(dt_util.UTC).isoformat()
+    await coordinator.store.async_upsert_trip(first)
+    await hass.services.async_call(DOMAIN, "add_charge", {
+        "entry_id": entry.entry_id, "kwh": 40.0, "price": 30.0, "started_at": "2026-03-05T01:00:00",
+        "ended_at": "2026-03-05T05:00:00", "note": "old history"}, blocking=True)
+    await hass.services.async_call(DOMAIN, "add_charge", {
+        "entry_id": entry.entry_id, "kwh": 20.0, "price": 90.0, "started_at": "2026-10-02T14:00:00",
+        "location": "public", "location_name": "Ionity"}, blocking=True)
+    await hass.services.async_call(DOMAIN, "add_charge", {
+        "entry_id": entry.entry_id, "kwh": 10.0, "started_at": "2025-12-30T02:00:00"}, blocking=True)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    st = hass.states.get("sensor.bil_charging_cost_this_year")
+    assert float(st.state) == pytest.approx(120.0), "this year's charges, home and away"
+    assert st.attributes["kwh"] == pytest.approx(60.0)
+    months = st.attributes["months"]
+    assert len(months) == 12 and months[-1]["month"] == "2026-10" and months[0]["month"] == "2025-11"
+    assert months[-1]["public_cost"] == pytest.approx(90.0)
+    assert next(m for m in months if m["month"] == "2026-03")["home_cost"] == pytest.approx(30.0)
+    assert next(m for m in months if m["month"] == "2025-12")["unpriced"] == 1, "no price: waits for one"
+    # The cost per km only counts charges from the period with trips (the March one has no kilometres).
+    assert float(state(hass, "sensor.bil_cost_per_km")) == pytest.approx(90.0 / 20.0)

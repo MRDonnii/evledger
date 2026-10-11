@@ -245,6 +245,9 @@
       },
       "home_charging_energy_month": {
         "name": "Hjemmeladning kWh denne måned"
+      },
+      "cost_this_year": {
+        "name": "Ladeudgift i år"
       }
     },
     "number": {

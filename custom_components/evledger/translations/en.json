@@ -245,6 +245,9 @@
       },
       "home_charging_energy_month": {
         "name": "Home charging energy this month"
+      },
+      "cost_this_year": {
+        "name": "Charging cost this year"
       }
     },
     "number": {

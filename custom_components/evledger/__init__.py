@@ -10,6 +10,9 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
+    ATTR_ENDED_AT,
+    ATTR_LOCATION,
+    SERVICE_ADD_CHARGE,
     ATTR_CHARGE_ID,
     ATTR_KWH,
     ATTR_LOCATION_NAME,
@@ -44,6 +47,19 @@ LOG_PUBLIC_CHARGE_SCHEMA = vol.Schema(
         vol.Required(ATTR_PRICE): vol.Coerce(float),
         vol.Optional(ATTR_LOCATION_NAME): cv.string,
         vol.Optional(ATTR_STARTED_AT): cv.datetime,
+        vol.Optional(ATTR_NOTE): cv.string,
+    }
+)
+
+ADD_CHARGE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entry_id"): cv.string,
+        vol.Required(ATTR_KWH): vol.Coerce(float),
+        vol.Optional(ATTR_PRICE): vol.Coerce(float),
+        vol.Required(ATTR_STARTED_AT): cv.datetime,
+        vol.Optional(ATTR_ENDED_AT): cv.datetime,
+        vol.Optional(ATTR_LOCATION, default="home"): vol.In(["home", "public"]),
+        vol.Optional(ATTR_LOCATION_NAME): cv.string,
         vol.Optional(ATTR_NOTE): cv.string,
     }
 )
@@ -137,6 +153,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 SERVICE_UPDATE_CHARGE,
                 SERVICE_DELETE_CHARGE,
                 SERVICE_DELETE_TRIP,
+                SERVICE_ADD_CHARGE,
             ):
                 if hass.services.has_service(DOMAIN, service):
                     hass.services.async_remove(DOMAIN, service)
@@ -157,6 +174,16 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await coordinator.async_log_public_charge(
             call.data[ATTR_KWH], call.data[ATTR_PRICE], call.data.get(ATTR_LOCATION_NAME),
             call.data.get(ATTR_NOTE), call.data.get(ATTR_STARTED_AT),
+        )
+
+    async def _handle_add_charge(call: ServiceCall) -> None:
+        """A finished charge at home or away that the ledger did not record (e.g. from before EV Ledger)."""
+        coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(call.data["entry_id"])
+        if coordinator is None:
+            raise ServiceValidationError(f"Unknown EV Ledger entry_id: {call.data['entry_id']}")
+        await coordinator.async_add_charge(
+            call.data[ATTR_KWH], call.data.get(ATTR_PRICE), call.data[ATTR_STARTED_AT], call.data.get(ATTR_ENDED_AT),
+            call.data[ATTR_LOCATION], call.data.get(ATTR_LOCATION_NAME), call.data.get(ATTR_NOTE),
         )
 
     async def _handle_delete_charge(call: ServiceCall) -> None:
@@ -211,6 +238,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         (SERVICE_UPDATE_CHARGE, _handle_update_charge, UPDATE_CHARGE_SCHEMA),
         (SERVICE_DELETE_CHARGE, _handle_delete_charge, DELETE_CHARGE_SCHEMA),
         (SERVICE_DELETE_TRIP, _handle_delete_trip, DELETE_TRIP_SCHEMA),
+        (SERVICE_ADD_CHARGE, _handle_add_charge, ADD_CHARGE_SCHEMA),
     )
     for service, handler, schema in services:
         if not hass.services.has_service(DOMAIN, service):
