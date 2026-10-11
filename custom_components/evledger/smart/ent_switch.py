@@ -51,7 +51,7 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         if last and last.state in ("on", "off"):
             self.planner.flags[self._attr_translation_key] = last.state == "on"
         if (last and self._attr_translation_key == "week_plan" and isinstance(last.attributes.get("days"), dict)
-                and last.attributes.get("days_set", True)):
+                and last.attributes.get("days_set") is True):
             try:
                 self.planner.week = week_plan.parse_week(last.attributes["days"])
                 self.planner.week_set = True

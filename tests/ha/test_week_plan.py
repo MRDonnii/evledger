@@ -123,7 +123,7 @@ async def test_bad_input_is_refused(hass: HomeAssistant, request, freezer):
 async def test_week_plan_and_one_time_time_survive_a_restart(hass: HomeAssistant, request, freezer):
     freezer.move_to(at(0, 12))
     mock_restore_cache(hass, (
-        State("switch.bil_week_plan", "on", {"days": {"mon": None, "tue": {"time": "06:00", "target": 85}}}),
+        State("switch.bil_week_plan", "on", {"days": {"mon": None, "tue": {"time": "06:00", "target": 85}}, "days_set": True}),
         State("datetime.bil_ready_by_once", at(2, 4, 30).isoformat(), {"target": 90}),
     ))
     entry, _ = await setup(hass, request)
