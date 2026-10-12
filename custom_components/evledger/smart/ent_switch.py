@@ -31,7 +31,8 @@ FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-chec
               "low_price_alert": "mdi:cash-check", "wait_cheaper_day": "mdi:calendar-arrow-right",
               "learn_departure": "mdi:clock-start", "prefer_green": "mdi:leaf",
               "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check",
-              "quiet_night": "mdi:bell-sleep", "week_plan": "mdi:calendar-week"}
+              "quiet_night": "mdi:bell-sleep", "week_plan": "mdi:calendar-week",
+              "heat_hold": "mdi:car-seat-heater"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -116,6 +117,10 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
                     "next_target": planner.active_target, "next_source": planner.deadline_source,
                     "once": {"at": once["at"].isoformat(), "target": once["target"]} if once else None,
                     "normal_target": planner.settings["target_soc"]}
+        if self._attr_translation_key == "heat_hold":
+            return {"active": planner.heat_holding, "reason": planner.heat_hold_reason,
+                    "price_now": planner.price_now(dt_util.now()), "price_limit": planner.settings["heat_hold_price"],
+                    "target": planner.target, "climate_entity": planner.routines.climate_entity()}
         if self._attr_translation_key == "quiet_night":
             return {"from": planner.times["quiet_from"].strftime("%H:%M"),
                     "until": planner.times["quiet_until"].strftime("%H:%M"), "silent_now": planner.notify.is_quiet()}

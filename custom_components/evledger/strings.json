@@ -292,6 +292,9 @@
       },
       "public_charge_price": {
         "name": "Public charge price"
+      },
+      "heat_hold_price": {
+        "name": "Price limit while heating"
       }
     },
     "time": {
@@ -420,6 +423,9 @@
       },
       "week_plan": {
         "name": "Week plan"
+      },
+      "heat_hold": {
+        "name": "Keep the battery at the target while heating"
       }
     },
     "button": {

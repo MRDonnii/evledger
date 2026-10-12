@@ -292,6 +292,9 @@
       },
       "public_charge_price": {
         "name": "Offentlig ladning pris"
+      },
+      "heat_hold_price": {
+        "name": "Prisgrænse under opvarmning"
       }
     },
     "time": {
@@ -420,6 +423,9 @@
       },
       "week_plan": {
         "name": "Ugeplan"
+      },
+      "heat_hold": {
+        "name": "Hold batteriet på målet under opvarmning"
       }
     },
     "button": {

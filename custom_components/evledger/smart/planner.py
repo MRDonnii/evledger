@@ -38,6 +38,7 @@ from .const import (
     DEFAULT_EFFICIENCY,
     DEFAULT_FIXED_END,
     DEFAULT_FIXED_START,
+    DEFAULT_HEAT_HOLD_PRICE,
     DEFAULT_LOW_PRICE,
     DEFAULT_MIN_SOC,
     DEFAULT_POWER_KW,
@@ -53,6 +54,7 @@ from .const import (
     DEFAULT_TARGET_SOC,
     DEFAULT_TRIP_MARGIN,
     DEFAULT_TRIP_RESERVE,
+    HEAT_HOLD_MARGIN,
     INPUT_WAIT_SECONDS,
     MIN_USE_HISTORY_DAYS,
     NOW_DONE_MINUTES,
@@ -174,6 +176,7 @@ class ChargePlanner:
             "reminder_soc": DEFAULT_REMINDER_SOC,
             "precondition_minutes": DEFAULT_PRECONDITION_MINUTES,
             "low_price": DEFAULT_LOW_PRICE,
+            "heat_hold_price": DEFAULT_HEAT_HOLD_PRICE,
         }
         self.times: dict[str, time] = {
             "ready_by_time": time.fromisoformat(DEFAULT_READY_BY),
@@ -192,7 +195,7 @@ class ChargePlanner:
                                        "low_price_alert": False, "wait_cheaper_day": False,
                                        "learn_departure": False, "prefer_green": False,
                                        "ask_public_price": False, "morning_check": False, "quiet_night": True,
-                                       "week_plan": False}
+                                       "week_plan": False, "heat_hold": False}
         # Learned departure times ({"history_days", "times"}), the cheaper day waited for, the grid's CO2 forecast,
         # and the ready-by time that just passed with the level the plan aimed at (for the morning check).
         self.learned_departures: dict = {"history_days": 0, "times": None}
@@ -211,6 +214,9 @@ class ChargePlanner:
         self._limit_goal: float | None = None
         self._limit_tried: tuple | None = None
         self._later_targets: dict[datetime, float | None] = {}
+        # Keeping the battery at the target while the car heats on the charger: holding now, and why not (for the card).
+        self.heat_holding = False
+        self.heat_hold_reason: str | None = None
         self.waiting: dict | None = None
         self.regular_deadline: datetime | None = None
         self.co2: dict[datetime, float] = {}
@@ -385,6 +391,9 @@ class ChargePlanner:
         # The car's own charge limit caps the target: a new limit (also one set from the target) re-plans at once.
         if limit := self._limit_entity():
             watched.append(limit)
+        # The car's climate: keeping the battery at the target while it heats follows it at once.
+        if climate := self.routines.climate_entity():
+            watched.append(climate)
         self._unsubs.append(async_track_state_change_event(self.hass, list(dict.fromkeys(watched)), self._on_state))
         self._unsubs.append(async_track_time_interval(self.hass, self._on_tick, timedelta(minutes=1)))
         self._unsubs.append(self.notify.async_listen(self))
@@ -1176,13 +1185,60 @@ class ChargePlanner:
         """The plan from before a restart still has a charging period that has not ended."""
         return any(end > now for _, end in self.restored_blocks)
 
+    def price_now(self, now: datetime) -> float | None:
+        """The power price of the slot running now (as the price sensor gives it)."""
+        for slot in self.timeline:
+            if slot.start <= now < slot.end:
+                return slot.price
+        return None
+
+    def heat_hold(self, now: datetime) -> bool:
+        """While the car heats (or cools) on the charger, keep the battery at the target so the climate does not use
+        it: start when it is HEAT_HOLD_MARGIN below the target, go on to the target, only up to the price limit."""
+        reason = None
+        if not self.flags["heat_hold"]:
+            reason = "off"
+        elif self.mode in (MODE_OFF, MODE_MANUAL):
+            reason = "paused"
+        elif not (self.charger_state in CONNECTED and self.car_present):
+            reason = "not_plugged_in"
+        elif not self._climate_on():
+            reason = "climate_off"
+        else:
+            soc = self._battery_soc()
+            price = self.price_now(now)
+            if soc is None:
+                reason = "no_battery_level"
+            elif price is None:
+                reason = "no_price"
+            elif price > self.settings["heat_hold_price"]:
+                reason = "too_expensive"
+            elif soc >= self.target - 0.5:
+                reason = "at_target"
+            elif not self.heat_holding and soc > self.target - HEAT_HOLD_MARGIN:
+                reason = "at_target"
+        holding = reason is None
+        if holding != self.heat_holding:
+            _LOGGER.debug("Keeping the battery at the target while heating: %s (%s)", holding, reason)
+        self.heat_holding, self.heat_hold_reason = holding, reason
+        return holding
+
+    def _climate_on(self) -> bool:
+        climate = self.routines.climate_entity()
+        state = self.hass.states.get(climate) if climate else None
+        return state is not None and state.state not in ("off", "unknown", "unavailable")
+
     def desired(self, now: datetime) -> bool:
         """Should the car charge right now according to the plan."""
         if self.mode in (MODE_OFF, MODE_MANUAL) or self.awaiting_since:
+            self.heat_hold(now)
             return False
         if self.car_full and self.charger_state != ChargerState.CHARGING:
             # Full to the car's own limit: starting again would only be refused (and look like a fault).
+            self.heat_hold(now)
             return False
+        if self.heat_hold(now):
+            return True
         if not self.slot_count and self._restored_ahead(now) and self.mode != MODE_NOW:
             # No prices yet (just restarted): follow the plan from before the restart.
             return any(start <= now < end for start, end in self.restored_blocks)

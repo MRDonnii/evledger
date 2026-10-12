@@ -133,6 +133,10 @@ LOW_PRICE_FROM = time(8, 0)
 LOW_PRICE_UNTIL = time(21, 0)
 LOW_PRICE_EVERY_HOURS = 3
 DEFAULT_LOW_PRICE = 0.5
+# Keep the battery at the target while the car heats (or cools) on the charger: up to this price per kWh, starting
+# when the battery is this far below the target.
+DEFAULT_HEAT_HOLD_PRICE = 3.0
+HEAT_HOLD_MARGIN = 1.0
 
 # "Wait for a cheaper day": skip charging tonight when a night within WAIT_MAX_DAYS is clearly cheaper (at least
 # WAIT_MIN_SHARE per kWh and WAIT_MIN_KR in all) and the battery lasts until then with WAIT_RESERVE % above the
