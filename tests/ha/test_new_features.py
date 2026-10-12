@@ -148,3 +148,28 @@ async def test_the_plan_has_its_prices_for_a_chart(hass: HomeAssistant, request)
     assert attributes["slot_minutes"] == 15 and len(prices) > 4
     assert dt_util.parse_datetime(prices[0]["t"]) <= dt_util.now() < dt_util.parse_datetime(prices[1]["t"])
     assert {"t", "p"} <= set(prices[0])
+
+
+async def test_the_months_saving_is_written_and_kept(hass: HomeAssistant, request, freezer):
+    """The saving per month is written to the switch at once (as a new dict), so it survives a restart."""
+    entry, _ = await setup(hass, request)
+    planner = entry.runtime_data
+    switch = "switch.bil_monthly_summary_on_the_phone"
+    before = hass.states.get(switch)
+    planner.routines.saved["2026-10"] = 3.3
+    planner.async_recalculate()
+    await hass.async_block_till_done()
+    after = hass.states.get(switch)
+    assert after.attributes["saved"] == {"2026-10": 3.3}
+    assert after.last_updated > before.last_updated or after is not before, "a new state, not the old one changed"
+    assert before.attributes["saved"] == {}, "the old state is not changed in place"
+    assert '"2026-10":3.3' in after.as_dict_json.decode().replace(" ", ""), "what is stored for a restart"
+
+
+async def test_the_cheap_power_message_time_survives_a_restart(hass: HomeAssistant, request):
+    from homeassistant.core import State
+    from pytest_homeassistant_custom_component.common import mock_restore_cache
+    sent = dt_util.now() - timedelta(minutes=30)
+    mock_restore_cache(hass, (State("switch.bil_message_when_power_is_cheap", "on", {"last_sent": sent.isoformat()}),))
+    entry, _ = await setup(hass, request)
+    assert entry.runtime_data.routines.low_sent == sent

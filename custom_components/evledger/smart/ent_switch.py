@@ -70,6 +70,8 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             routines.learned = {key: value for key, value in last.attributes["learned"].items()
                                 if isinstance(value, (int, float))}
             routines.apply_learned()
+        if last and self._attr_translation_key == "low_price_alert":
+            routines.low_sent = dt_util.parse_datetime(str(last.attributes.get("last_sent") or ""))
         if last and self._attr_translation_key == "monthly_summary":
             routines.summary_sent = last.attributes.get("sent_for") or None
             if isinstance(last.attributes.get("saved"), dict):
@@ -92,7 +94,12 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             # What was learned from the ledger's charges, and how many charges it rests on.
             return {"learned": {key: round(value, 3) for key, value in routines.learned.items()}}
         if self._attr_translation_key == "monthly_summary":
-            return {"sent_for": routines.summary_sent, "saved": routines.saved}
+            # A copy: the same dict changed in place would not count as a change, and the old (empty) value would be
+            # what survives a restart.
+            return {"sent_for": routines.summary_sent, "saved": dict(routines.saved)}
+        if self._attr_translation_key == "low_price_alert":
+            # When the last cheap power message went out, so a restart does not send another one at once.
+            return {"last_sent": routines.low_sent.isoformat() if routines.low_sent else None}
         if self._attr_translation_key == "precondition":
             # The car's climate entity (needs a car integration that can send commands to the car).
             return {"climate_entity": routines.climate_entity()}
