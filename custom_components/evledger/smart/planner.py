@@ -982,13 +982,17 @@ class ChargePlanner:
         self.price_unit = None
         for entity_id in self.price_entities:
             state = self.hass.states.get(entity_id)
-            if state is None:
+            if state is None or (state.domain == "binary_sensor" and state.state == STATE_OFF):
+                # Off: tomorrow's prices are not out yet (Strømligning's list is then a forecast, if any).
                 continue
             slots.extend(parse_price_attributes(dict(state.attributes)))
             unit = state.attributes.get("unit_of_measurement")
             if unit and not self.price_unit:
                 self.price_unit = str(unit).split("/")[0].strip() or None
-        unique = {slot.start: slot for slot in slots}
+        # Where two price lists cover the same time, the first price sensor (the ledger's own) counts.
+        unique: dict = {}
+        for slot in slots:
+            unique.setdefault(slot.start, slot)
         ordered = [unique[key] for key in sorted(unique)]
         self.slot_count = len(ordered)
         previous, previous_target = self.deadline, self._deadline_target

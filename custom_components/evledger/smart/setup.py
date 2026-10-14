@@ -29,10 +29,16 @@ from .const import (
     CONF_SMART_ENABLED,
     CONF_ZAPTEC_MODE_ENTITY,
 )
-from .plan import parse_price_attributes
 
 # Unique id suffix of the Zaptec integration's "Charger mode" sensor.
 ZAPTEC_MODE_SUFFIX = "_charger_operation_mode"
+# Strømligning has today's prices on each price sensor and tomorrow's on a binary sensor of its own, per kind of price.
+# Their unique ids are "<key>_<config entry id>".
+STROMLIGNING = "stromligning"
+STROMLIGNING_TOMORROW = {"current_price_vat": "tomorrow_available_vat",
+                         "current_price_ex_vat": "tomorrow_available_ex_vat",
+                         "spotprice_vat": "tomorrow_spotprice_vat",
+                         "spotprice_ex_vat": "tomorrow_spotprice_ex_vat"}
 
 # EV Ledger's Tesla model keys → the card's body artwork.
 BODIES = (("model3_2023", "model_3_highland"), ("model3_2024", "model_3_highland"), ("model3", "model_3"),
@@ -92,19 +98,21 @@ def planner_options_from(hass: HomeAssistant, data, smart: dict) -> dict:
 
 
 def price_entities(hass: HomeAssistant, spot_price: str) -> list[str]:
-    """The ledger's spot price sensor plus the price lists next to it, e.g. Strømligning's
-    separate "tomorrow" sensor, so the plan sees tomorrow's prices as soon as they are out."""
+    """The ledger's spot price sensor, and with Strømligning its own "tomorrow" sensor, so the plan sees tomorrow's
+    prices as soon as they are out. Only that one: the other price lists on Strømligning's device are parts of the
+    price (the spot price alone, the grid tariff) or without VAT. Found in the entity registry, so it does not matter
+    whether Strømligning has loaded yet."""
     found = [spot_price]
     registry = er.async_get(hass)
     entry = registry.async_get(spot_price)
-    if entry is None or entry.device_id is None:
+    if entry is None or entry.device_id is None or entry.platform != STROMLIGNING:
         return found
-    for other in er.async_entries_for_device(registry, entry.device_id):
-        if other.entity_id == spot_price or other.domain not in ("sensor", "binary_sensor") or other.disabled_by:
-            continue
-        state = hass.states.get(other.entity_id)
-        if state and parse_price_attributes(dict(state.attributes)):
-            found.append(other.entity_id)
+    key = next((key for key in STROMLIGNING_TOMORROW if entry.unique_id.startswith(f"{key}_")), None)
+    if key is None:
+        return found
+    tomorrow = STROMLIGNING_TOMORROW[key] + entry.unique_id.removeprefix(key)
+    found += [other.entity_id for other in er.async_entries_for_device(registry, entry.device_id)
+              if other.unique_id == tomorrow and other.platform == STROMLIGNING and not other.disabled_by]
     return found
 
 

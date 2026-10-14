@@ -98,7 +98,10 @@ What you need in Home Assistant first:
   charging. For Zaptec, turn on **Authorization required** in the Zaptec portal, so the car does not start
   by itself when it is plugged in and the plan decides. If the charger runs through Monta or another OCPP
   backend, that backend controls it: switch the charger back to Zaptec's own control first.
-- **The power price** with a price list in its attributes: Strømligning, Energi Data Service or Nord Pool.
+- **The power price** with a price list in its attributes: Strømligning, Energi Data Service or Nord Pool. With
+  Strømligning, pick its **current price** sensor (with VAT): it is the whole price you pay per kWh (spot price,
+  tariffs, fees and VAT), and EV Ledger takes tomorrow's prices from Strømligning's own "tomorrow" sensor by itself.
+  The other price lists on Strømligning's device (the spot price alone, the grid tariff) are not used.
 - **The Home Assistant app** on the phones that should get the messages.
 
 Then Settings → Devices & services → **Add Integration** → **EV Ledger**, and pick a device for each role:
@@ -427,7 +430,7 @@ data:
 | `switch.<car>_precondition_the_car_for_ready_by`, `number.<car>_precondition_minutes_before` | 20 minutes (by default) before the ready-by time or a trip's departure, while the car is home, the phones are asked **Forvarm / Spring over**; the climate is only turned on after **Forvarm** (no answer, nothing happens). If the car is still plugged in 30 minutes after, the climate is turned off again. Off by default; needs car control. |
 
 Prices without a published value yet (e.g. tomorrow's before 13:00) are estimated from the same
-time on earlier days. A start waits until the plan has wanted charging for 15 s; a stop the
+time on earlier days (also when Strømligning shows a forecast for tomorrow until the prices are out). A start waits until the plan has wanted charging for 15 s; a stop the
 charger did not act on is repeated after 45 s. Right after a restart the last battery level is used at once, and until the prices are
 loaded again the charging periods planned before the restart are followed, so a restart at the
 planned start does not lose the charge. A charger that is offline for 10 minutes while the plan
