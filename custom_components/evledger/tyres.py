@@ -32,7 +32,11 @@ STUDS_UNTIL = (4, 15)
 # cold, not the tyres.
 BANDS = (-99, 0, 5, 10, 15, 20)
 BAND_NAMES = ("under 0", "0–5", "5–10", "10–15", "15–20", "20+")
-COMPARE_MIN_KM = 30.0  # a band counts in the comparison when both sets drove at least this far in it
+# A band counts in the comparison when both sets drove at least this far in it: a trip's energy is read from whole
+# battery percent, and the routes vary, so short distances say little.
+COMPARE_MIN_KM = 100.0
+# How sure the difference is, by the km compared on the other set: below the first "low", below the second "medium".
+CONFIDENCE_KM = (500.0, 1500.0)
 
 
 def _when(value: Any) -> datetime | None:
@@ -247,20 +251,26 @@ def _use_out(use: dict) -> dict:
     }
 
 
-def _charges_in(charges: list[Any], period: Period, now: datetime) -> tuple[float, float, int]:
-    """kWh, cost and unpriced count of the charges that ended inside the period."""
-    kwh = cost = 0.0
-    unpriced = 0
+def _charges_in(charges: list[Any], period: Period, now: datetime) -> tuple[float, float, float]:
+    """kWh, cost and the priced kWh of the charges that ended inside the period."""
+    kwh = cost = priced = 0.0
     for charge in charges:
         ended = _when(charge.ended_at)
         if ended is None or not (period.start <= ended < (period.end or now + timedelta(days=1))):
             continue
         kwh += charge.kwh or 0.0
-        if charge.price is None:
-            unpriced += 1
-        else:
+        if charge.price is not None:
             cost += charge.price
-    return kwh, cost, unpriced
+            priced += charge.kwh or 0.0
+    return kwh, cost, priced
+
+
+def _cost_per_km(kwh: float, cost: float, priced: float, km: float) -> float | None:
+    """Cost per km; a few charges without a price are counted at the mean price of the others (at least 80 % of the
+    energy must have a price)."""
+    if km < 50 or kwh <= 0 or priced < kwh * 0.8:
+        return None
+    return round(cost * (kwh / priced) / km, 2)
 
 
 def _tread_rate(tyre: TyreSet, set_periods: list[Period]) -> dict:
@@ -314,10 +324,10 @@ def stats(sets: list[TyreSet], changes: list[TyreChange], trips: list[Any], char
                 break
 
     seasons = []
-    totals = {s.id: {"km": 0.0, "kwh_charged": 0.0, "cost": 0.0, "cost_km": 0.0, "unpriced": 0, "days": 0.0}
+    totals = {s.id: {"km": 0.0, "kwh_charged": 0.0, "cost": 0.0, "cost_km": 0.0, "priced": 0.0, "days": 0.0}
               for s in sets}
     for period, use in zip(all_periods, season_uses):
-        kwh, cost, unpriced = _charges_in(charges, period, now)
+        kwh, cost, priced = _charges_in(charges, period, now)
         km = period.km
         days = ((period.end or now) - period.start).total_seconds() / 86400
         tyre = by_id.get(period.set_id)
@@ -329,7 +339,7 @@ def stats(sets: list[TyreSet], changes: list[TyreChange], trips: list[Any], char
                 total["kwh_charged"] += kwh
                 total["cost"] += cost
                 total["cost_km"] += km
-                total["unpriced"] += unpriced
+                total["priced"] += priced
         seasons.append({
             "change_id": period.change_id, "set_id": period.set_id, "set": tyre.name if tyre else None,
             "kind": tyre.kind if tyre else None, "from": period.start.isoformat(),
@@ -338,7 +348,7 @@ def stats(sets: list[TyreSet], changes: list[TyreChange], trips: list[Any], char
             "odometer_to": round(period.odo_end) if period.odo_end is not None else None,
             "km": round(km, 1) if km is not None else None,
             "charged_kwh_per_100_km": round(kwh / km * 100, 1) if km and km >= 50 else None,
-            "cost_per_km": round(cost / km, 2) if km and km >= 50 and not unpriced else None,
+            "cost_per_km": _cost_per_km(kwh, cost, priced, km) if km else None,
             **_use_out(use),
         })
 
@@ -353,8 +363,7 @@ def stats(sets: list[TyreSet], changes: list[TyreChange], trips: list[Any], char
             "days_on": round(total["days"]),
             "charged_kwh_per_100_km": (round(total["kwh_charged"] / total["cost_km"] * 100, 1)
                                        if total["cost_km"] >= 50 else None),
-            "cost_per_km": (round(total["cost"] / total["cost_km"], 2)
-                            if total["cost_km"] >= 50 and not total["unpriced"] else None),
+            "cost_per_km": _cost_per_km(total["kwh_charged"], total["cost"], total["priced"], total["cost_km"]),
             **_use_out(use), **_tread_rate(tyre, own),
         })
 
@@ -383,10 +392,12 @@ def compare(sets: list[TyreSet], uses: dict[str, dict]) -> dict[str, Any] | None
             ref_wh = sum((ref["kwh"] / ref["km"]) * (ref["km"] + own["km"]) for _, ref, own in shared) / weight
             own_wh = sum((own["kwh"] / own["km"]) * (ref["km"] + own["km"]) for _, ref, own in shared) / weight
             diff = round((own_wh - ref_wh) / ref_wh * 100, 1) if ref_wh else None
+        km = sum(own["km"] for _, _, own in shared)
         result["sets"].append({
             "set_id": tyre.id, "set": tyre.name, "difference_pct": diff,
-            "bands": [BAND_NAMES[i] for i, _, _ in shared],
-            "km_compared": round(sum(own["km"] for _, _, own in shared), 1),
+            "bands": [BAND_NAMES[i] for i, _, _ in shared], "km_compared": round(km, 1),
+            "confidence": None if diff is None else ("low" if km < CONFIDENCE_KM[0]
+                                                     else "medium" if km < CONFIDENCE_KM[1] else "high"),
         })
     return result
 

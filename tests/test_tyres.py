@@ -62,24 +62,34 @@ def test_use_per_set_and_the_same_temperature_comparison():
                tyres.TyreChange("c2", "w", "2026-10-01T00:00:00+00:00", 2000)]
     trips = []
     # Summer: 5–10 °C at 150 Wh/km, 15–20 °C at 120 Wh/km. Winter: 5–10 °C at 165 Wh/km, 0–5 °C at 200 Wh/km.
-    for i in range(10):
-        trips.append(trip(datetime(2026, 4, 10 + i, tzinfo=UTC), 20, 20 * 0.150 / 60 * 100, 8, 1000 + i * 20))
-        trips.append(trip(datetime(2026, 7, 1 + i, tzinfo=UTC), 20, 20 * 0.120 / 60 * 100, 17, 1500 + i * 20))
-        trips.append(trip(datetime(2026, 10, 2 + i, tzinfo=UTC), 20, 20 * 0.165 / 60 * 100, 7, 2000 + i * 20))
-        trips.append(trip(datetime(2026, 10, 2 + i, 15, tzinfo=UTC), 20, 20 * 0.200 / 60 * 100, 2, 2010 + i * 20))
+    def wh(per_km: float) -> float:  # the battery drop of a 20 km trip at that use (60 kWh battery)
+        return 20 * per_km / 60 * 100
+
+    april, july, october = (datetime(2026, m, 1, tzinfo=UTC) for m in (4, 7, 10))
+    for i in range(30):
+        trips.append(trip(april + timedelta(days=i + 1), 20, wh(0.150), 8, 1000 + i * 20))
+        trips.append(trip(july + timedelta(days=i), 20, wh(0.120), 17, 1600 + i * 20))
+        trips.append(trip(october + timedelta(hours=i * 8 + 1), 20, wh(0.165), 7, 2000 + i * 40))
+        trips.append(trip(october + timedelta(hours=i * 8 + 5), 20, wh(0.200), 2, 2020 + i * 40))
     charges = [charge(datetime(2026, 5, 1, tzinfo=UTC), 150, 300.0), charge(datetime(2026, 10, 5, tzinfo=UTC), 90, 180)]
-    out = tyres.stats([SUMMER, WINTER], changes, trips, charges, 60, 2400, NOW)
+    out = tyres.stats([SUMMER, WINTER], changes, trips, charges, 60, 3200, NOW)
     summer, winter = out["sets"]
-    assert summer["wh_per_km"] == 135 and winter["wh_per_km"] == 182
-    assert summer["km"] == 1000 and winter["km"] == 400 and winter["mounted"] and not summer["mounted"]
+    assert summer["wh_per_km"] == 135 and winter["wh_per_km"] == 183
+    assert summer["km"] == 1000 and winter["km"] == 1200 and winter["mounted"] and not summer["mounted"]
     assert summer["bands"]["5–10"]["wh_per_km"] == 150 and winter["bands"]["0–5"]["wh_per_km"] == 200
     assert summer["charged_kwh_per_100_km"] == 15.0 and summer["cost_per_km"] == 0.3
-    assert winter["charged_kwh_per_100_km"] == 22.5 and winter["cost_per_km"] == 0.45
+    assert winter["charged_kwh_per_100_km"] == 7.5 and winter["cost_per_km"] == 0.15
     # Only the band both drove in counts: 165 against 150 is +10 %, not the +36 % of the plain averages.
     compared = out["comparison"]["sets"][0]
     assert out["comparison"]["reference"] == "Sommer"
     assert compared["bands"] == ["5–10"] and compared["difference_pct"] == 10.0
+    assert compared["km_compared"] == 600 and compared["confidence"] == "medium"
     assert [s["set"] for s in out["seasons"]] == ["Vinter", "Sommer"] and out["seasons"][0]["to"] is None
+
+
+def test_cost_per_km_counts_a_few_unpriced_charges_at_the_mean_price():
+    assert tyres._cost_per_km(100, 180, 90, 600) == 0.33, "10 kWh unpriced: 200 kr for 100 kWh"
+    assert tyres._cost_per_km(100, 100, 50, 600) is None, "half without a price says too little"
 
 
 def test_a_trip_with_a_charge_on_the_way_is_left_out():
