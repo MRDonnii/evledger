@@ -509,5 +509,15 @@
     "unknown_tread_reading": {
       "message": "Målingen af mønsterdybde findes ikke."
     }
+  },
+  "issues": {
+    "missing_entities": {
+      "title": "{name}: entiteter, som EV Ledger læser, er væk",
+      "description": "EV Ledger kan ikke finde disse entiteter for {name}: {entities}.\n\nIndtil de er tilbage, bliver ture, ladninger eller smart opladning måske ikke registreret eller styret. De er ofte væk, fordi bil-, lader- eller elpris-integrationen har omdøbt dem, er fjernet, eller fordi entiteterne er deaktiveret. Vælg de nye entiteter under **Indstillinger → Enheder og tjenester → EV Ledger → Konfigurer**, eller aktivér dem igen. Beskeden forsvinder af sig selv, når de er tilbage."
+    },
+    "missing_phones": {
+      "title": "{name}: mobiler til beskederne er væk",
+      "description": "Smart opladning for {name} sender beskeder til mobiler, som Home Assistant ikke længere har: {phones}.\n\nEn ny mobil eller en geninstalleret Companion-app får en ny notify-tjeneste. Vælg mobilerne igen under **Indstillinger → Enheder og tjenester → EV Ledger → Konfigurer → Smart opladning**. Beskeden forsvinder af sig selv, når de er tilbage."
+    }
   }
 }

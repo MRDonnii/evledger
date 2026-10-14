@@ -302,6 +302,11 @@ Something looks wrong and you want to report it? **Settings → Devices & servic
 diagnostics** gives what EV Ledger reads from the car, charger and price sensors, its open sessions and latest
 records, and (with smart charging) the plan and the charger control — with the car's positions and the phones left out.
 
+When an entity EV Ledger reads is gone — the car, charger or price integration renamed or removed it, or it was
+disabled — or a phone chosen for the messages no longer exists, **Settings → Repairs** says which ones, five minutes
+after a start (the other integrations may still be loading) and every half hour after that. The message goes away by
+itself when they are back, e.g. after choosing the new ones under **Configure**.
+
 ## Dashboard sensors
 
 Each vehicle gets:
@@ -470,7 +475,9 @@ commands to the car. Tesla now only accepts commands signed with a *virtual key*
    entity under **Smart charging → Car climate**.
 
 Every home session that ends also fires the event `evledger_charge_finished` (the vehicle and the
-ledger entry: kWh, price, start and end, battery before and after) for your own automations.
+ledger entry: kWh, price, start and end, battery before and after) for your own automations. It shows in the
+logbook too ("Bil finished charging at home: 7.5 kWh for 12.30 DKK"), as does a tyre change
+(`evledger_tyres_changed`).
 
 ## Roadmap
 
