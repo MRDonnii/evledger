@@ -509,5 +509,15 @@
     "unknown_tread_reading": {
       "message": "No such tread depth reading."
     }
+  },
+  "issues": {
+    "missing_entities": {
+      "title": "{name}: entities EV Ledger reads are gone",
+      "description": "EV Ledger cannot find these entities of {name}: {entities}.\n\nUntil they are back, trips, charges or smart charging may not be recorded or controlled. They are often gone because the car, charger or price integration renamed them, was removed, or the entities were disabled. Choose the new entities under **Settings → Devices & services → EV Ledger → Configure**, or enable them again. This message goes away by itself when they are back."
+    },
+    "missing_phones": {
+      "title": "{name}: phones for the messages are gone",
+      "description": "Smart charging for {name} sends messages to phones that Home Assistant no longer has: {phones}.\n\nA new phone or a reinstalled Companion app gets a new notify service. Choose the phones again under **Settings → Devices & services → EV Ledger → Configure → Smart charging**. This message goes away by itself when they are back."
+    }
   }
 }

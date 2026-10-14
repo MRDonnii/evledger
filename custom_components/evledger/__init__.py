@@ -46,6 +46,7 @@ from .const import (
     SERVICE_UPDATE_TYRE_CHANGE,
     TYRE_SERVICES,
 )
+from . import issues
 from .coordinator import EvLedgerCoordinator
 from .providers.registry import build_charger_providers, build_vehicle_provider
 from .smart import week as week_plan
@@ -205,6 +206,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.smart.async_start()
         entry.async_on_unload(coordinator.smart.async_stop)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    for cancel in issues.async_watch(hass, entry):
+        entry.async_on_unload(cancel)
 
     _async_register_services(hass)
 
@@ -213,6 +216,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """A removed car leaves no repair issues behind."""
+    issues.async_remove(hass, entry)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
