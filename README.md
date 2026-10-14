@@ -496,6 +496,9 @@ Issues and PRs welcome. The codebase is deliberately small — `coordinator.py`
 does trip/charge detection, `providers/` holds the pluggable data sources,
 `store.py` persists everything as a Home Assistant `Store`.
 
+What changed in each version: [CHANGELOG.md](CHANGELOG.md). A new version in `manifest.json` on `main` is published as
+a GitHub release by itself (`.github/workflows/release.yml`), with its CHANGELOG section as the notes.
+
 ## License
 
 [MIT](LICENSE)
