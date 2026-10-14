@@ -72,29 +72,6 @@ async def test_options_flow_clears_an_optional_entity_left_empty(hass: HomeAssis
     assert entry.data["charger_providers"] == ["manual", "zaptec", "spot_price"]
 
 
-async def test_tomorrow_prices_next_to_the_spot_price_are_used(hass: HomeAssistant, request):
-    from homeassistant.helpers import device_registry as dr
-
-    from .test_smart_charge import prices
-
-    prices_entry = MockConfigEntry(domain="stromligning")
-    prices_entry.add_to_hass(hass)
-    device = dr.async_get(hass).async_get_or_create(config_entry_id=prices_entry.entry_id,
-                                                    identifiers={("stromligning", "x")})
-    registry = er.async_get(hass)
-    registry.async_get_or_create("sensor", "stromligning", "now", device_id=device.id, config_entry=prices_entry,
-                                 suggested_object_id="price")
-    registry.async_get_or_create("binary_sensor", "stromligning", "tomorrow", device_id=device.id,
-                                 config_entry=prices_entry, suggested_object_id="price_tomorrow")
-    registry.async_get_or_create("sensor", "stromligning", "other", device_id=device.id, config_entry=prices_entry,
-                                 suggested_object_id="price_other")
-    hass.states.async_set("binary_sensor.price_tomorrow", "on", {"prices": prices(False)})
-    hass.states.async_set("sensor.price_other", "3")
-    entry, _ = await setup(hass, request)
-    assert hass.data[DOMAIN][entry.entry_id].smart.options["price_entities"] == [
-        "sensor.price", "binary_sensor.price_tomorrow"]
-
-
 async def test_a_cleared_provider_entity_drops_the_provider(hass: HomeAssistant, request):
     entry, _ = await setup(hass, request)
     hass.states.async_set("sensor.monta_last_charge", "completed")

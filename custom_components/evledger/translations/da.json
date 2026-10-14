@@ -62,7 +62,7 @@
         },
         "data_description": {
           "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
-          "price_entities": "Tom: ledgerens spotpris-sensor.",
+          "price_entities": "Tom: ledgerens elpris-sensor (med Strømligning også dens egen sensor for i morgen). Valgt selv: den første tæller, hvor de overlapper.",
           "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
           "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke.",
           "notify_url": "Dashboard-sti der åbnes, når man trykker på beskeden, fx /teknik-overblik/tesla.",
@@ -126,7 +126,7 @@
         },
         "data_description": {
           "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
-          "price_entities": "Tom: ledgerens spotpris-sensor.",
+          "price_entities": "Tom: ledgerens elpris-sensor (med Strømligning også dens egen sensor for i morgen). Valgt selv: den første tæller, hvor de overlapper.",
           "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
           "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke.",
           "notify_url": "Dashboard-sti der åbnes, når man trykker på beskeden, fx /teknik-overblik/tesla.",

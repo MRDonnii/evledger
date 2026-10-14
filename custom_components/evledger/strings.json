@@ -62,7 +62,7 @@
         },
         "data_description": {
           "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
-          "price_entities": "Empty: the ledger's spot price sensor.",
+          "price_entities": "Empty: the ledger's power price sensor (with Strømligning also its own sensor for tomorrow). Chosen by hand, the first one counts where they overlap.",
           "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
           "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone.",
           "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car.",
@@ -126,7 +126,7 @@
         },
         "data_description": {
           "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
-          "price_entities": "Empty: the ledger's spot price sensor.",
+          "price_entities": "Empty: the ledger's power price sensor (with Strømligning also its own sensor for tomorrow). Chosen by hand, the first one counts where they overlap.",
           "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
           "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone.",
           "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car.",
