@@ -227,6 +227,37 @@ async def test_public_charge_price_from_the_phone(hass: HomeAssistant, request):
     assert any("Gemt: 23,4 kWh for 82,50 kr" in m["message"] for m in sent)
 
 
+async def test_the_answer_prices_the_public_charge_it_was_asked_for(hass: HomeAssistant, request):
+    # A public charge asked about, then a newer home charge without a price and a newer public one: the answer is
+    # saved on the charge the message was about, not as a new charge and not on the newest one.
+    entry, _ = await setup(hass, request)
+    planner = await with_options(hass, entry)
+    ledger = hass.data[DOMAIN][entry.entry_id]
+    now = dt_util.utcnow()
+
+    def charge(charge_id: str, kind: str, hours_ago: float) -> ChargeSession:
+        return ChargeSession(id=charge_id, location_kind=kind, provider="vehicle" if kind == "public" else "zaptec",
+                             started_at=(now - timedelta(hours=hours_ago + 1)).isoformat(),
+                             ended_at=(now - timedelta(hours=hours_ago)).isoformat(),
+                             kwh=5.0 if kind == "home" else None, price=None, price_currency="DKK",
+                             location_name=None, start_battery_pct=20.0,
+                             end_battery_pct=60.0, needs_review=True)
+
+    for item in (charge("pub1", "public", 6), charge("home1", "home", 4), charge("pub2", "public", 2)):
+        await ledger.store.async_upsert_charge(item)
+    planner.routines.public_asked["pub1"] = 25.0
+    planner.routines.answer_public("pub1", "82,50")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    found = {c.id: (c.kwh, c.price, c.needs_review) for c in ledger.store.charges}
+    assert found == {"pub1": (25.0, 82.5, False), "home1": (5.0, None, True), "pub2": (None, None, True)}
+
+    # The service fills the public charge still waiting, also with a newer home charge waiting.
+    await hass.services.async_call(DOMAIN, "log_public_charge", {"entry_id": entry.entry_id, "kwh": 30, "price": 99},
+                                   blocking=True)
+    found = {c.id: (c.kwh, c.price, c.needs_review) for c in ledger.store.charges}
+    assert found["pub2"] == (30.0, 99.0, False) and len(found) == 3, found
+
+
 # -- the target was not reached --------------------------------------------------------------
 
 async def test_message_when_the_target_was_not_reached(hass: HomeAssistant, request):

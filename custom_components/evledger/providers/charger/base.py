@@ -38,6 +38,7 @@ class ChargerProvider(ABC):
         session_end: datetime,
         max_age_minutes: int = 30,
         known_kwh: float | None = None,
+        session_start: datetime | None = None,
     ) -> SessionCost | None:
         """Return the actual (or estimated) cost of a session that ended near `session_end`.
 
@@ -45,6 +46,7 @@ class ChargerProvider(ABC):
         live_power provider (e.g. Zaptec), passed through so a provider that
         only knows *price* (not energy) — a spot-price sensor — can still
         compute a cost. Providers with their own authoritative energy figure
-        (e.g. Monta) can ignore it.
+        (e.g. Monta) can ignore it. `session_start` is when the session began,
+        if known: a session that stopped before then is an earlier one.
         """
         return None

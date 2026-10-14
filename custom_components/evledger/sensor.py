@@ -94,6 +94,8 @@ class EvLedgerTripsSensor(_EvLedgerBaseSensor):
     """Total trip count, with recent trips and total distance as attributes."""
 
     _attr_icon = "mdi:map-marker-distance"
+    # The recent trips are for cards; kept in the recorder they would add a large row at every trip.
+    _unrecorded_attributes = frozenset({"trips"})
 
     def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "trips", "Trips")
@@ -116,6 +118,7 @@ class EvLedgerChargesSensor(_EvLedgerBaseSensor):
     """Total charge count, with home/public cost rollups and recent sessions as attributes."""
 
     _attr_icon = "mdi:battery-charging-100"
+    _unrecorded_attributes = frozenset({"charges"})
 
     def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "charges", "Charges")
@@ -210,6 +213,7 @@ class EvLedgerPendingReviewSensor(_EvLedgerBaseSensor):
     """Charge sessions still missing a price — usually public charges awaiting manual entry."""
 
     _attr_icon = "mdi:comment-question-outline"
+    _unrecorded_attributes = frozenset({"pending"})
 
     def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "pending_review", "Charges needing price")
@@ -272,7 +276,7 @@ class EvLedgerHomeCostTodaySensor(_EvLedgerBaseSensor):
                     kwh += charge.kwh or 0.0
             elif (meter := self.coordinator.store.meter(charge.id)):
                 cost += float(meter.get("cost") or 0.0)
-                kwh += float(meter.get("priced") or 0.0)
+                kwh += self.coordinator.running_kwh(charge.id)
         return round(cost, 2), round(kwh, 2)
 
     @property
@@ -718,6 +722,7 @@ class EvLedgerMonthlyPerformanceSensor(_EvLedgerBaseSensor):
     """
 
     _attr_icon = "mdi:calendar-month"
+    _unrecorded_attributes = frozenset({"months"})
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0

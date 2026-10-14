@@ -298,6 +298,10 @@ data:
   trip_id: <the trip's id, from sensor.<vehicle>_trips' `trips` list>
 ```
 
+Something looks wrong and you want to report it? **Settings → Devices & services → EV Ledger → ⋮ → Download
+diagnostics** gives what EV Ledger reads from the car, charger and price sensors, its open sessions and latest
+records, and (with smart charging) the plan and the charger control — with the car's positions and the phones left out.
+
 ## Dashboard sensors
 
 Each vehicle gets:
@@ -320,6 +324,9 @@ Each vehicle gets:
 | `sensor.<vehicle>_home_charging_energy` (+ `_today`, `_this_month`) | kWh charged at home: in total, today and this month (the charges that ended in the period and the one running; `state_class: total`, works in the Energy dashboard) | — |
 | `sensor.<vehicle>_home_charging_cost_today` | what charging at home cost today | `kwh` |
 | `sensor.<vehicle>_charging_cost_this_year` | what charging cost this year, home and away | `kwh`, `unpriced`, `previous_year`, `previous_year_kwh`, `months` (the last 12 months, oldest first: `month`, `cost`, `kwh`, `home_cost`, `public_cost`, `charges`, `unpriced`), `months_year_before` (the same 12 months a year earlier, for comparing) |
+
+The list attributes (`trips`, `charges`, `pending` and the `months` of the monthly performance and this year's
+cost) are there for cards; they are not kept in the recorder's history, so a long ledger does not fill the database.
 
 `total_cost` and `total_distance` carry proper `device_class`/`state_class`,
 so Home Assistant's own **Statistics graph** card gives you month-over-month

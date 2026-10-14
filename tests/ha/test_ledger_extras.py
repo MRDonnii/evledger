@@ -150,3 +150,25 @@ async def test_added_charges_and_the_cost_this_year(hass: HomeAssistant, request
     assert st.attributes["previous_year"] == 0, "last year's only charge has no price yet"
     # The cost per km only counts charges from the period with trips (the March one has no kilometres).
     assert float(state(hass, "sensor.bil_cost_per_km")) == pytest.approx(90.0 / 20.0)
+
+
+async def test_diagnostics_leave_out_positions_and_phones(hass: HomeAssistant, request, hass_client):
+    from homeassistant.setup import async_setup_component
+    from pytest_homeassistant_custom_component.components.diagnostics import get_diagnostics_for_config_entry
+
+    from .test_routines import with_options
+
+    assert await async_setup_component(hass, "diagnostics", {})
+    entry, _ = await setup(hass, request)
+    await with_options(hass, entry)
+    store = hass.data[DOMAIN][entry.entry_id].store
+    await store.async_upsert_trip(Trip(id="t1", started_at=dt_util.utcnow().isoformat(), ended_at=None,
+                                       start_odometer_km=1000.0, end_odometer_km=None, distance_km=None,
+                                       start_lat=56.1, start_lon=10.2, end_lat=None, end_lon=None,
+                                       start_battery_pct=50.0, end_battery_pct=None))
+    result = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    text = str(result)
+    assert "56.1" not in text and "10.2" not in text and "mobile_app" not in text, "no positions or phones"
+    assert result["ledger"]["trips"] == 1 and result["ledger"]["open_trip"]["start_lat"] == "**REDACTED**"
+    assert result["sources"]["device_tracker.car"]["attributes"]["latitude"] == "**REDACTED**"
+    assert result["smart_charging"]["mode"] == "smart" and result["smart_charging"]["controls_charger"] is True

@@ -16,7 +16,11 @@ async def test_without_smart_charging_only_ledger_sensors(hass: HomeAssistant, r
     assert await hass.config_entries.async_setup(other.entry_id)
     await hass.async_block_till_done()
     domains = {entity.domain for entity in er.async_entries_for_config_entry(er.async_get(hass), other.entry_id)}
-    assert domains == {"sensor", "select"}, "the ledger's sensors and its tyre set"
+    assert domains == {"sensor", "select", "number", "text", "button"}, "sensors, tyre set and public charge form"
+    assert {e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), other.entry_id)
+            if e.domain in ("number", "text", "button")} == {
+        "number.anden_public_charge_energy", "number.anden_public_charge_price", "text.anden_public_charge_location",
+        "button.anden_log_public_charge"}, "only the public charge form, no smart charging settings"
     assert {e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), other.entry_id)
             if e.domain == "select"} == {"select.anden_tyre_set"}
     assert hass.data[DOMAIN][other.entry_id].smart is None
@@ -46,6 +50,26 @@ async def test_options_flow_switches_smart_charging_on(hass: HomeAssistant, requ
     planner = hass.data[DOMAIN][entry.entry_id].smart
     assert planner.options["zaptec_mode_entity"] == "sensor.charger_mode", "Zaptec found from the ledger's charger"
     assert planner.options["price_entities"] == ["sensor.price"], "the ledger's spot price"
+
+
+async def test_options_flow_clears_an_optional_entity_left_empty(hass: HomeAssistant, request):
+    entry, _ = await setup(hass, request)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "locked_entity": "lock.car",
+                                                         "outside_temp_entity": "sensor.outside",
+                                                         "zaptec_completed_energy_entity": "sensor.completed"})
+    await hass.async_block_till_done()
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    keep = {key: entry.data[key] for key in ("battery_entity", "odometer_entity", "device_tracker_entity",
+                                              "charging_binary_entity", "spot_price_entity", "zaptec_power_entity",
+                                              "zaptec_session_energy_entity")}
+    result = await hass.config_entries.options.async_configure(result["flow_id"],
+                                                               {**keep, "outside_temp_entity": "sensor.outside"})
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"enabled": True})
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert "locked_entity" not in entry.data and "zaptec_completed_energy_entity" not in entry.data, "cleared"
+    assert entry.data["outside_temp_entity"] == "sensor.outside", "kept when still chosen"
+    assert entry.data["charger_providers"] == ["manual", "zaptec", "spot_price"]
 
 
 async def test_tomorrow_prices_next_to_the_spot_price_are_used(hass: HomeAssistant, request):
