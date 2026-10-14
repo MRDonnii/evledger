@@ -96,9 +96,10 @@ class EvLedgerStore:
                 return charge
         return None
 
-    def get_latest_pending_review_charge(self) -> ChargeSession | None:
+    def get_latest_pending_review_charge(self, location_kind: str | None = None) -> ChargeSession | None:
         candidates = [
             c for c in self._charges.values() if c.needs_review and c.ended_at is not None
+            and (location_kind is None or c.location_kind == location_kind)
         ]
         if not candidates:
             return None

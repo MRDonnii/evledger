@@ -268,7 +268,7 @@ class Routines:
             return
 
         async def save() -> None:
-            await p.ledger.async_log_public_charge(kwh, price)
+            await p.ledger.async_log_public_charge(kwh, price, charge_id=charge_id)
             per = f" ({self._kr(price / kwh)} kr/kWh)" if kwh else ""
             await p.notify.async_send_note("public_price", "offentlig ladning gemt",
                                            f"Gemt: {self._kr(kwh, 1)} kWh for {self._kr(price)} kr{per}.")

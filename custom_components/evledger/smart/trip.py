@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}"
-USER_AGENT = "ha-ev-smart-charge (+https://github.com/MRDonnii/ha-ev-smart-charge)"
+USER_AGENT = "evledger (+https://github.com/MRDonnii/evledger)"
 # Roads are longer than the straight line; used only when no route could be fetched.
 DETOUR_FACTOR = 1.3
 COORDINATES = re.compile(r"^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,; ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$")

@@ -85,6 +85,26 @@ REQUIRED_VEHICLE_FIELDS = (
 )
 REQUIRED_ZAPTEC_FIELDS = (CONF_ZAPTEC_POWER_ENTITY, CONF_ZAPTEC_SESSION_ENERGY_ENTITY)
 REQUIRED_MONTA_FIELDS = (CONF_MONTA_LAST_CHARGE_ENTITY,)
+OPTIONAL_ENTITY_FIELDS = (
+    CONF_LOCKED_ENTITY,
+    CONF_OUTSIDE_TEMP_ENTITY,
+    CONF_ZAPTEC_CHARGING_ENTITY,
+    CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
+    CONF_MONTA_WALLET_ENTITY,
+)
+
+
+def _suggested(defaults: dict[str, Any], key: str) -> dict[str, Any]:
+    """An optional entity is suggested, not a default: a default would be filled in again when the field is cleared."""
+    return {"suggested_value": defaults.get(key)}
+
+
+def _update(data: dict[str, Any], schema: vol.Schema, user_input: dict[str, Any]) -> None:
+    """Take a form's values. An optional entity on the form that was left empty is removed, not kept from before."""
+    for marker in schema.schema:
+        if isinstance(marker, vol.Optional) and str(marker) in OPTIONAL_ENTITY_FIELDS and str(marker) not in user_input:
+            data.pop(str(marker), None)
+    data.update(user_input)
 
 
 def _entity_selector(domain: str | list[str]) -> selector.EntitySelector:
@@ -194,11 +214,10 @@ def _vehicle_schema(defaults: dict[str, Any]) -> vol.Schema:
                 default=defaults.get(CONF_CHARGING_BINARY_ENTITY, vol.UNDEFINED),
             ): _entity_selector(["binary_sensor", "sensor"]),
             vol.Optional(
-                CONF_LOCKED_ENTITY, default=defaults.get(CONF_LOCKED_ENTITY, vol.UNDEFINED)
+                CONF_LOCKED_ENTITY, description=_suggested(defaults, CONF_LOCKED_ENTITY)
             ): _entity_selector("lock"),
             vol.Optional(
-                CONF_OUTSIDE_TEMP_ENTITY,
-                default=defaults.get(CONF_OUTSIDE_TEMP_ENTITY, vol.UNDEFINED),
+                CONF_OUTSIDE_TEMP_ENTITY, description=_suggested(defaults, CONF_OUTSIDE_TEMP_ENTITY)
             ): _entity_selector("sensor"),
         }
     )
@@ -216,12 +235,11 @@ def _zaptec_schema(defaults: dict[str, Any]) -> vol.Schema:
                 default=defaults.get(CONF_ZAPTEC_SESSION_ENERGY_ENTITY, vol.UNDEFINED),
             ): _entity_selector("sensor"),
             vol.Optional(
-                CONF_ZAPTEC_CHARGING_ENTITY,
-                default=defaults.get(CONF_ZAPTEC_CHARGING_ENTITY, vol.UNDEFINED),
+                CONF_ZAPTEC_CHARGING_ENTITY, description=_suggested(defaults, CONF_ZAPTEC_CHARGING_ENTITY)
             ): _entity_selector(["binary_sensor", "switch"]),
             vol.Optional(
                 CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY,
-                default=defaults.get(CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY, vol.UNDEFINED),
+                description=_suggested(defaults, CONF_ZAPTEC_COMPLETED_ENERGY_ENTITY),
             ): _entity_selector("sensor"),
         }
     )
@@ -235,8 +253,7 @@ def _monta_schema(defaults: dict[str, Any]) -> vol.Schema:
                 default=defaults.get(CONF_MONTA_LAST_CHARGE_ENTITY, vol.UNDEFINED),
             ): _entity_selector("sensor"),
             vol.Optional(
-                CONF_MONTA_WALLET_ENTITY,
-                default=defaults.get(CONF_MONTA_WALLET_ENTITY, vol.UNDEFINED),
+                CONF_MONTA_WALLET_ENTITY, description=_suggested(defaults, CONF_MONTA_WALLET_ENTITY)
             ): _entity_selector("sensor"),
         }
     )
@@ -421,10 +438,13 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_fill_missing(self, user_input: dict[str, Any] | None = None):
+        schema = self._fill_missing_schema()
         if user_input is not None:
-            self._data.update(user_input)
+            _update(self._data, schema, user_input)
             return await self.async_step_smart_charge()
+        return self.async_show_form(step_id="fill_missing", data_schema=schema)
 
+    def _fill_missing_schema(self) -> vol.Schema:
         schema_dict: dict[Any, Any] = {}
         if self._advanced or not all(self._data.get(f) for f in REQUIRED_VEHICLE_FIELDS):
             schema_dict.update(_vehicle_schema(self._data).schema)
@@ -438,7 +458,7 @@ class EvLedgerConfigFlow(ConfigFlow, domain=DOMAIN):
             schema_dict.update(_monta_schema(self._data).schema)
         if self._need_spot_price and (self._advanced or not self._data.get(CONF_SPOT_PRICE_ENTITY)):
             schema_dict.update(_spot_price_schema(self._data).schema)
-        return self.async_show_form(step_id="fill_missing", data_schema=vol.Schema(schema_dict))
+        return vol.Schema(schema_dict)
 
     async def async_step_smart_charge(self, user_input: dict[str, Any] | None = None):
         """Smart charging in the same setup: plans by price, control of the charger and the phones. Suggested
@@ -473,7 +493,7 @@ class EvLedgerOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
-            self._data.update(user_input)
+            _update(self._data, _options_schema(self._data), user_input)
 
             providers = [CHARGER_PROVIDER_MANUAL]
             if user_input.get(CONF_ZAPTEC_POWER_ENTITY) and user_input.get(

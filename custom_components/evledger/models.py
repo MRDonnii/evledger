@@ -1,8 +1,14 @@
 """Shared data models for EV Ledger."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import Any
+
+
+def _known(cls, data: dict[str, Any]) -> dict[str, Any]:
+    """The saved fields this version knows: a field added by a newer version must not stop the ledger loading."""
+    names = {field.name for field in fields(cls)}
+    return {key: value for key, value in data.items() if key in names}
 
 
 @dataclass
@@ -64,7 +70,7 @@ class Trip:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Trip":
-        return cls(**data)
+        return cls(**_known(cls, data))
 
 
 @dataclass
@@ -90,4 +96,4 @@ class ChargeSession:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ChargeSession":
-        return cls(**data)
+        return cls(**_known(cls, data))

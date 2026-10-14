@@ -33,6 +33,7 @@ class MontaChargerProvider(ChargerProvider):
         session_end: datetime,
         max_age_minutes: int = 30,
         known_kwh: float | None = None,
+        session_start: datetime | None = None,
     ) -> SessionCost | None:
         # Monta reports its own metered energy for the session — more
         # authoritative than any live_power reading — so known_kwh is unused.
@@ -56,6 +57,10 @@ class MontaChargerProvider(ChargerProvider):
             (dt_util.as_utc(session_end) - dt_util.as_utc(stopped_at)).total_seconds()
         ) / 60
         if delta_minutes > max_age_minutes:
+            return None
+        if session_start is not None and dt_util.as_utc(stopped_at) <= dt_util.as_utc(session_start):
+            # Monta still shows a charge that stopped before this one began (e.g. two short charges within half an
+            # hour, before Monta has the second): that cost is not this charge's.
             return None
 
         try:

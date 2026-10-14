@@ -32,6 +32,9 @@ _LOGGER = logging.getLogger(__name__)
 # mistaken for a brand-new public session (covers polling-tick lag between the
 # charger's own state and the vehicle's onboard charging flag).
 HOME_TO_PUBLIC_COOLDOWN_MINUTES = 2
+# The other way round: the car can report charging a poll or two before the home charger does. A public session it
+# opened this shortly before the home charger began was the start of that home charge, not a charge away from home.
+PUBLIC_BEFORE_HOME_MINUTES = 10
 
 
 class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -158,11 +161,15 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ---------------------------------------------------------- public charge
 
     async def async_log_public_charge(self, kwh: float, price: float, location_name: str | None = None,
-                                      note: str | None = None, started_at: datetime | None = None) -> None:
-        """A public charge with its price: fills in the public session waiting for its price, else a new one."""
+                                      note: str | None = None, started_at: datetime | None = None,
+                                      charge_id: str | None = None) -> None:
+        """A public charge with its price: fills in the given public session (the one a phone was asked about), else
+        the public session waiting for its price, else a new one. A home charge waiting for its price is left alone."""
         now = dt_util.utcnow()
-        pending = self.store.get_latest_pending_review_charge()
-        if pending is not None and pending.location_kind == LOCATION_PUBLIC:
+        pending = self.store.get_charge(charge_id) if charge_id else None
+        if pending is None or pending.location_kind != LOCATION_PUBLIC:
+            pending = self.store.get_latest_pending_review_charge(LOCATION_PUBLIC)
+        if pending is not None:
             pending.kwh = kwh
             pending.price = price
             pending.location_name = location_name or pending.location_name
@@ -207,9 +214,16 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ended = dt_util.parse_datetime(charge.ended_at)
                 if since is None or (ended is not None and ended >= since):
                     total += charge.kwh or 0.0
-            elif (meter := self.store.meter(charge.id)):
-                total += float(meter.get("priced") or 0.0)
+            else:
+                total += self.running_kwh(charge.id)
         return round(total, 2)
+
+    def running_kwh(self, charge_id: str) -> float:
+        """What the charger has counted for the open home charge so far, also the energy no price was found for."""
+        meter = self.store.meter(charge_id) or {}
+        start, last = meter.get("kwh"), meter.get("last")
+        counted = last - start if isinstance(start, (int, float)) and isinstance(last, (int, float)) else 0.0
+        return max(counted, float(meter.get("priced") or 0.0), 0.0)
 
     async def async_add_charge(self, kwh: float, price: float | None, started_at: datetime,
                                ended_at: datetime | None = None, location: str = LOCATION_HOME,
@@ -253,7 +267,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             bucket = month(dt_util.now().strftime("%Y-%m"))
             bucket["cost"] += float(meter.get("cost") or 0.0)
             bucket["home_cost"] += float(meter.get("cost") or 0.0)
-            bucket["kwh"] += float(meter.get("priced") or 0.0)
+            bucket["kwh"] += self.running_kwh(open_home.id)
         return months
 
     def distance_today(self) -> float:
@@ -445,6 +459,14 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._meter_tick(open_home, counter, now)
 
         if home_charging and open_home is None:
+            start_battery_pct = snapshot.battery_pct
+            if open_public is not None and self._opened_just_before(open_public, now):
+                # The car said it was charging before the home charger did: that was this home charge starting.
+                await self.store.async_delete_charge(open_public.id)
+                if open_public.start_battery_pct is not None:
+                    start_battery_pct = open_public.start_battery_pct
+                open_public = None
+                _LOGGER.info("%s: the public session just opened was the home charge starting", self.vehicle_name)
             open_home = ChargeSession(
                 id=self.store.new_id(),
                 location_kind=LOCATION_HOME,
@@ -455,7 +477,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 price=None,
                 price_currency=self.currency,
                 location_name="Home",
-                start_battery_pct=snapshot.battery_pct,
+                start_battery_pct=start_battery_pct,
                 end_battery_pct=None,
                 needs_review=False,
             )
@@ -509,10 +531,17 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if (smart := getattr(self, "smart", None)) is not None:
                 smart.routines.ask_public_price(open_public)
 
-    def _billed_cost(self, now: datetime, kwh: float | None, spot: bool):
+    @staticmethod
+    def _opened_just_before(charge: ChargeSession, now: datetime) -> bool:
+        """A public session the car opened (not one logged by hand) within PUBLIC_BEFORE_HOME_MINUTES."""
+        started = dt_util.parse_datetime(charge.started_at or "")
+        return (charge.provider == "vehicle" and charge.ended_at is None and started is not None
+                and now - started <= timedelta(minutes=PUBLIC_BEFORE_HOME_MINUTES))
+
+    def _billed_cost(self, now: datetime, kwh: float | None, spot: bool, started: datetime | None = None):
         for provider in self._charger_providers.values():
             if CAP_COST_LOOKUP in provider.capabilities and (provider.provider_id == "spot_price") == spot:
-                cost = provider.get_recent_session_cost(self.hass, now, known_kwh=kwh)
+                cost = provider.get_recent_session_cost(self.hass, now, known_kwh=kwh, session_start=started)
                 if cost is not None:
                     return cost
         return None
@@ -583,7 +612,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         charge.kwh = total
 
         # A billed cost (Monta) first, then the energy priced while it was counted, then the price at the end.
-        cost = self._billed_cost(now, charge.kwh, spot=False)
+        cost = self._billed_cost(now, charge.kwh, spot=False, started=dt_util.parse_datetime(charge.started_at or ""))
         metered = None if cost is not None else self._metered_cost(meter, charge.kwh, now)
         if cost is None and metered is None:
             cost = self._billed_cost(now, charge.kwh, spot=True)

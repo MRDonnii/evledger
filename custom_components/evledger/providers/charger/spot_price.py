@@ -44,6 +44,7 @@ class SpotPriceChargerProvider(ChargerProvider):
         session_end: datetime,
         max_age_minutes: int = 30,
         known_kwh: float | None = None,
+        session_start: datetime | None = None,
     ) -> SessionCost | None:
         if not self._price_entity or not known_kwh or known_kwh <= 0:
             return None
