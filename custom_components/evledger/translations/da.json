@@ -248,6 +248,9 @@
       },
       "cost_this_year": {
         "name": "Ladeudgift i år"
+      },
+      "tyres": {
+        "name": "Hjul"
       }
     },
     "number": {
@@ -348,6 +351,9 @@
           "quarter": "Kvarter (15 min)",
           "hour": "Time"
         }
+      },
+      "tyre_set": {
+        "name": "Hjulsæt"
       }
     },
     "datetime": {
@@ -426,6 +432,9 @@
       },
       "heat_hold": {
         "name": "Hold batteriet på målet under opvarmning"
+      },
+      "tyre_reminder": {
+        "name": "Påmindelse om hjulskift"
       }
     },
     "button": {
@@ -478,6 +487,27 @@
     },
     "empty_week_plan": {
       "message": "Ugeplanen skal have en klar-senest-tid på mindst én dag."
+    },
+    "not_ev_ledger": {
+      "message": "{entity_id} hører ikke til en bil i EV Ledger."
+    },
+    "unknown_tyre_set": {
+      "message": "Der er intet hjulsæt der hedder {set}."
+    },
+    "tyre_set_needs_name": {
+      "message": "Et nyt hjulsæt skal have et navn."
+    },
+    "tyre_set_name_taken": {
+      "message": "Der er allerede et hjulsæt der hedder {set}."
+    },
+    "tyre_set_already_on": {
+      "message": "{set} sidder allerede på bilen på det tidspunkt."
+    },
+    "unknown_tyre_change": {
+      "message": "Hjulskiftet findes ikke."
+    },
+    "unknown_tread_reading": {
+      "message": "Målingen af mønsterdybde findes ikke."
     }
   }
 }

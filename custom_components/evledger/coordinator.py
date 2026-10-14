@@ -23,6 +23,8 @@ from .providers.charger.base import CAP_COST_LOOKUP, CAP_LIVE_POWER, ChargerProv
 from .smart.plan import SLOT_MINUTES
 from .providers.vehicle.base import VehicleProvider
 from .store import EvLedgerStore
+from . import tyres as tyre_logic
+from .tyres import TyreChange, TyreSet
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +64,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_known_session_kwh: float | None = None
         self._home_cooldown_until: datetime | None = None
         self._vehicle_was_charging = False
+        self.battery_capacity_kwh: float | None = None  # set from the entry; trips' energy for the tyre use
 
     async def _async_update_data(self) -> dict[str, Any]:
         snapshot = self._vehicle_provider.get_snapshot(self.hass)
@@ -70,6 +73,9 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if snapshot is not None:
             await self._process_trip(snapshot, now)
             await self._process_charge(snapshot, now)
+            if snapshot.odometer_km is not None and self._last_odometer_km is None:
+                self._last_odometer_km = snapshot.odometer_km
+        self._tyre_reminder(now)
 
         return {
             "snapshot": snapshot,
@@ -263,6 +269,151 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if ended and dt_util.as_local(ended).date() == today:
                 total += trip.distance_km or 0.0
         return round(total, 1)
+
+    # ----------------------------------------------------------------- tyres
+
+    def odometer_now(self) -> float | None:
+        return self._last_odometer_km
+
+    def tyre_stats(self) -> dict[str, Any]:
+        """The tyre sets with their use, each season and the comparison (see tyres.stats)."""
+        return tyre_logic.stats(self.store.tyre_sets, self.store.tyre_changes, self.store.trips, self.store.charges,
+                                self.battery_capacity_kwh, self._last_odometer_km, dt_util.utcnow())
+
+    def active_tyre_set(self) -> TyreSet | None:
+        set_id = tyre_logic.active_set(self.store.tyre_changes)
+        return self.store.get_tyre_set(set_id) if set_id else None
+
+    def tyre_suggestion(self, now: datetime | None = None) -> dict[str, Any] | None:
+        now = now or dt_util.utcnow()
+        temps = [(start, trip.start_outside_temp_c) for trip in self.store.trips
+                 if trip.start_outside_temp_c is not None and (start := dt_util.parse_datetime(trip.started_at))]
+        return tyre_logic.suggestion(self.active_tyre_set(), self.store.tyre_sets, temps, now)
+
+    def find_tyre_set(self, key: str) -> TyreSet | None:
+        """A set by its id or (case-insensitive) name."""
+        found = self.store.get_tyre_set(key)
+        if found is None:
+            found = next((t for t in self.store.tyre_sets if t.name.casefold() == key.strip().casefold()), None)
+        return found
+
+    async def async_save_tyre_set(self, values: dict[str, Any], set_id: str | None = None) -> TyreSet:
+        """A new set, or the given fields of an existing one (None clears a field)."""
+        tyre = self.store.get_tyre_set(set_id) if set_id else None
+        if set_id and tyre is None:
+            raise KeyError(set_id)
+        if tyre is None:
+            tyre = TyreSet(id=self.store.new_id(), name=values.get("name") or "Hjulsæt")
+        for key, value in values.items():
+            if hasattr(tyre, key) and key not in ("id", "treads"):
+                setattr(tyre, key, value)
+        if tyre.km_before is None:
+            tyre.km_before = 0.0
+        await self.store.async_upsert_tyre_set(tyre)
+        self.async_update_listeners()  # show it now; no new reading of the car needed
+        return tyre
+
+    async def async_delete_tyre_set(self, set_id: str) -> bool:
+        deleted = await self.store.async_delete_tyre_set(set_id)
+        self.async_update_listeners()  # show it now; no new reading of the car needed
+        return deleted
+
+    def _odometer_at(self, at: datetime) -> float | None:
+        return tyre_logic.odometer_at(at, self.store.trips, self._last_odometer_km, dt_util.utcnow())
+
+    async def async_change_tyres(self, set_id: str, at: datetime | None = None, odometer_km: float | None = None,
+                                 note: str | None = None) -> TyreChange:
+        """The set went on the car then (now without a time); the odometer is read from the trips when not given."""
+        when = dt_util.as_utc(at) if at else dt_util.utcnow()
+        if tyre_logic.active_set(self.store.tyre_changes, when) == set_id:
+            raise ValueError("already_mounted")
+        change = TyreChange(id=self.store.new_id(), set_id=set_id, at=when.isoformat(),
+                            odometer_km=odometer_km if odometer_km is not None else self._odometer_at(when),
+                            note=note)
+        await self.store.async_upsert_tyre_change(change)
+        tyre = self.store.get_tyre_set(set_id)
+        if tyre is not None and tyre.retired:
+            tyre.retired = False
+            await self.store.async_upsert_tyre_set(tyre)
+        self.hass.bus.async_fire(f"{DOMAIN}_tyres_changed", {"vehicle": self.vehicle_name, "set_id": set_id,
+                                                              "set": tyre.name if tyre else None, **change.to_dict()})
+        self.async_update_listeners()  # show it now; no new reading of the car needed
+        return change
+
+    async def async_update_tyre_change(self, change_id: str, at: datetime | None = None,
+                                       odometer_km: float | None = None, note: str | None = None) -> TyreChange:
+        change = next((c for c in self.store.tyre_changes if c.id == change_id), None)
+        if change is None:
+            raise KeyError(change_id)
+        if at is not None:
+            change.at = dt_util.as_utc(at).isoformat()
+            if odometer_km is None:
+                change.odometer_km = self._odometer_at(dt_util.as_utc(at))
+        if odometer_km is not None:
+            change.odometer_km = odometer_km
+        if note is not None:
+            change.note = note or None
+        await self.store.async_upsert_tyre_change(change)
+        self.async_update_listeners()  # show it now; no new reading of the car needed
+        return change
+
+    async def async_delete_tyre_change(self, change_id: str) -> bool:
+        deleted = await self.store.async_delete_tyre_change(change_id)
+        self.async_update_listeners()  # show it now; no new reading of the car needed
+        return deleted
+
+    async def async_log_tread(self, set_id: str, mm: float | None = None, each: list[float] | None = None,
+                              at: datetime | None = None, odometer_km: float | None = None) -> dict:
+        """A tread depth reading: one value, or one per tyre (the least one counts)."""
+        tyre = self.store.get_tyre_set(set_id)
+        if tyre is None:
+            raise KeyError(set_id)
+        values = [float(v) for v in (each or []) if v is not None]
+        depth = min(values) if values else mm
+        if depth is None:
+            raise ValueError("no_depth")
+        when = dt_util.as_utc(at) if at else dt_util.utcnow()
+        reading = {"id": self.store.new_id(), "at": when.isoformat(), "mm": round(float(depth), 1),
+                   "each": values or None,
+                   "odometer_km": odometer_km if odometer_km is not None else self._odometer_at(when)}
+        tyre.treads = sorted([*tyre.treads, reading], key=lambda r: r["at"])
+        await self.store.async_upsert_tyre_set(tyre)
+        self.async_update_listeners()  # show it now; no new reading of the car needed
+        return reading
+
+    async def async_delete_tread(self, set_id: str, reading_id: str) -> bool:
+        tyre = self.store.get_tyre_set(set_id)
+        if tyre is None:
+            return False
+        kept = [r for r in tyre.treads if r.get("id") != reading_id]
+        if len(kept) == len(tyre.treads):
+            return False
+        tyre.treads = kept
+        await self.store.async_upsert_tyre_set(tyre)
+        self.async_update_listeners()  # show it now; no new reading of the car needed
+        return True
+
+    def _tyre_reminder(self, now: datetime) -> None:
+        """A phone message once a season when it is time to change (smart charging's phones, its own switch)."""
+        smart = getattr(self, "smart", None)
+        if smart is None or not smart.flags.get("tyre_reminder") or not smart.notify.targets:
+            return
+        local = dt_util.as_local(now)
+        if not 9 <= local.hour < 20:
+            return
+        tip = self.tyre_suggestion(now)
+        if tip is None or tip["key"] == self.store.tyre_notified:
+            return
+        active = self.active_tyre_set()
+        goal = {"winter": "vinterhjul", "summer": "sommerhjul"}.get(tip["to"], "andre hjul")
+        text = f"{tip['reason']} Tid til {goal}" + (f" ({tip['set']})." if tip.get("set") else ".")
+        if active is not None:
+            text += f" På bilen nu: {active.name}."
+        text += " Tryk Skift hjul i bilkortet, når de er skiftet."
+        self.hass.async_create_task(self.store.async_set_tyre_notified(tip["key"]))
+        self.hass.async_create_background_task(
+            smart.notify.async_send_note("tyres", f"skift til {goal}", text, icon="mdi:tire"),
+            "evledger_tyre_reminder")
 
     # -------------------------------------------------------------- charging
 

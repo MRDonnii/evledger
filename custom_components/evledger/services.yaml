@@ -277,3 +277,261 @@ clear_ready_by_once:
       selector:
         entity:
           integration: evledger
+
+save_tyre_set:
+  name: Save tyre set
+  description: >-
+    Add a tyre set (tyres and rims), or change the given fields of one (with set_id). Leave a field out to keep it.
+    Returns the set's id.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its Tyres sensor).
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      description: The set's id or name, to change it. Leave out to add a new set.
+      example: Vinter
+      selector:
+        text:
+    name:
+      name: Name
+      example: Vinter
+      selector:
+        text:
+    kind:
+      name: Kind
+      selector:
+        select:
+          options: [summer, winter, studded, all_season]
+    brand:
+      name: Tyre brand
+      example: Nokian
+      selector:
+        text:
+    model:
+      name: Tyre model
+      example: Hakkapeliitta R5 EV
+      selector:
+        text:
+    width_mm:
+      name: Width (mm)
+      example: 235
+      selector:
+        number: {min: 100, max: 400, step: 5}
+    aspect_pct:
+      name: Profile (%)
+      example: 45
+      selector:
+        number: {min: 20, max: 95, step: 5}
+    rim_inch:
+      name: Rim diameter (inch)
+      example: 18
+      selector:
+        number: {min: 10, max: 26, step: 1}
+    load_speed:
+      name: Load and speed index
+      example: 98T
+      selector:
+        text:
+    dot:
+      name: DOT (week and year made)
+      example: "2324"
+      selector:
+        text:
+    rim_name:
+      name: Rim
+      example: Aero 18
+      selector:
+        text:
+    rim_width_in:
+      name: Rim width (J)
+      example: 8.5
+      selector:
+        number: {min: 3, max: 14, step: 0.5}
+    rim_offset_mm:
+      name: Rim offset (ET)
+      example: 40
+      selector:
+        number: {min: -50, max: 90, step: 1}
+    purchased:
+      name: Bought
+      selector:
+        date:
+    price:
+      name: Price
+      selector:
+        number: {min: 0, max: 100000, step: 1}
+    km_before:
+      name: Km before EV Ledger
+      description: How far the set had driven before it was added.
+      selector:
+        number: {min: 0, max: 300000, step: 100, unit_of_measurement: km}
+    storage:
+      name: Stored at
+      description: Where the set is when it is not on the car.
+      example: Dækhotel
+      selector:
+        text:
+    note:
+      name: Note
+      selector:
+        text:
+    retired:
+      name: Retired
+      description: Worn out or sold; kept for its history.
+      selector:
+        boolean:
+
+delete_tyre_set:
+  name: Delete tyre set
+  description: Delete a tyre set and its changes.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      description: The set's id or name.
+      required: true
+      selector:
+        text:
+
+change_tyres:
+  name: Change tyres
+  description: >-
+    A tyre set went on the car, now or at a time in the past. The odometer then is read from the trips when not given.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      description: The set's id or name.
+      required: true
+      example: Vinter
+      selector:
+        text:
+    at:
+      name: When
+      description: Leave out for now.
+      selector:
+        datetime:
+    odometer_km:
+      name: Odometer
+      selector:
+        number: {min: 0, max: 1000000, step: 1, unit_of_measurement: km}
+    note:
+      name: Note
+      selector:
+        text:
+
+update_tyre_change:
+  name: Update tyre change
+  description: Correct when a tyre change was, its odometer or its note.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    change_id:
+      name: Change
+      required: true
+      selector:
+        text:
+    at:
+      name: When
+      selector:
+        datetime:
+    odometer_km:
+      name: Odometer
+      selector:
+        number: {min: 0, max: 1000000, step: 1, unit_of_measurement: km}
+    note:
+      name: Note
+      selector:
+        text:
+
+delete_tyre_change:
+  name: Delete tyre change
+  description: Delete a recorded tyre change.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    change_id:
+      name: Change
+      required: true
+      selector:
+        text:
+
+log_tread_depth:
+  name: Log tread depth
+  description: >-
+    A tread depth reading of a set: one value, or one per tyre (front left, front right, rear left, rear right; the
+    least counts). Two readings some km apart give the wear per 1000 km and the km left.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      required: true
+      selector:
+        text:
+    mm:
+      name: Depth
+      selector:
+        number: {min: 0, max: 20, step: 0.1, unit_of_measurement: mm}
+    each:
+      name: Each tyre
+      description: Up to four depths, front left, front right, rear left, rear right.
+      example: "[6.5, 6.4, 6.1, 6.2]"
+      selector:
+        object:
+    at:
+      name: When
+      selector:
+        datetime:
+    odometer_km:
+      name: Odometer
+      selector:
+        number: {min: 0, max: 1000000, step: 1, unit_of_measurement: km}
+
+delete_tread_depth:
+  name: Delete tread depth reading
+  description: Delete one tread depth reading of a set.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      required: true
+      selector:
+        text:
+    reading_id:
+      name: Reading
+      required: true
+      selector:
+        text:

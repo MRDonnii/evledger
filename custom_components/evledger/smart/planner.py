@@ -195,7 +195,8 @@ class ChargePlanner:
                                        "low_price_alert": False, "wait_cheaper_day": False,
                                        "learn_departure": False, "prefer_green": False,
                                        "ask_public_price": False, "morning_check": False, "quiet_night": True,
-                                       "week_plan": False, "heat_hold": False}
+                                       "week_plan": False, "heat_hold": False,
+                                       "tyre_reminder": False}
         # Learned departure times ({"history_days", "times"}), the cheaper day waited for, the grid's CO2 forecast,
         # and the ready-by time that just passed with the level the plan aimed at (for the morning check).
         self.learned_departures: dict = {"history_days": 0, "times": None}

@@ -16,7 +16,9 @@ async def test_without_smart_charging_only_ledger_sensors(hass: HomeAssistant, r
     assert await hass.config_entries.async_setup(other.entry_id)
     await hass.async_block_till_done()
     domains = {entity.domain for entity in er.async_entries_for_config_entry(er.async_get(hass), other.entry_id)}
-    assert domains == {"sensor"}
+    assert domains == {"sensor", "select"}, "the ledger's sensors and its tyre set"
+    assert {e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), other.entry_id)
+            if e.domain == "select"} == {"select.anden_tyre_set"}
     assert hass.data[DOMAIN][other.entry_id].smart is None
     assert hass.states.get("select.anden_charge_mode") is None
 

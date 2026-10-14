@@ -163,6 +163,30 @@ step and enter your own battery capacity and rated consumption (check your
 delivery paperwork or Tesla account for the exact number). Corrections and
 new model entries via PR are welcome.
 
+## Tyre sets (summer, winter, all-season, studded)
+
+Keep track of which wheels are on the car and what each set costs you to drive on:
+
+- **Sets** – add each set with `evledger.save_tyre_set`: name, kind (`summer`, `winter`, `studded`, `all_season`),
+  tyre brand/model, size (width, profile, rim diameter, load/speed index – shown as e.g. `235/45 R18 98W`), DOT,
+  rim (name, width in J, offset ET), bought, price, km driven before EV Ledger, where it is stored and a note.
+- **Changes** – `select.<car>_tyre_set` records a change now, at the odometer now. `evledger.change_tyres` can also
+  record one in the past (the odometer then is read from the recorded trips, or give it). `update_tyre_change` and
+  `delete_tyre_change` fix mistakes.
+- **Tread depth** – `evledger.log_tread_depth` (one value, or one per tyre; the least counts). Two readings some
+  hundred km apart give the wear per 1000 km on that set and the km left to the recommended least depth
+  (summer 3 mm, winter 4 mm; the legal minimum is 1.6 mm).
+- **`sensor.<car>_tyres`** – state is the set on the car; attributes `size`, `rim`, `mounted_at`, `season_km`,
+  `season_wh_per_km`, `tread_mm`, `suggestion`, `sets` (each set's km, driving Wh/km per outside temperature band,
+  charged kWh/100 km, cost/km, wear), `seasons` (every period on the car) and `comparison`.
+- **A fair comparison** – winter use is mostly the cold, not the tyres. `comparison` holds each set against the summer
+  set only in the outside temperature bands both have driven ≥ 30 km in, weighted by km: the tyres' own difference.
+- **Reminder** – `suggestion` follows the 7-degree rule (mean outside temperature of the last 5 days' trips) and the
+  Danish studded-tyre season (1 November – 15 April). With smart charging's phones,
+  `switch.<car>_tyre_change_reminder` (off by default) sends one message per season.
+
+Driving Wh/km comes from the trips' battery drop and needs the battery capacity (set by the model in the setup).
+
 ## Month-by-month history and performance score
 
 Every trip and charge is kept forever (nothing is ever pruned), so nothing

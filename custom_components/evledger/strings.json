@@ -248,6 +248,9 @@
       },
       "cost_this_year": {
         "name": "Charging cost this year"
+      },
+      "tyres": {
+        "name": "Tyres"
       }
     },
     "number": {
@@ -348,6 +351,9 @@
           "quarter": "Quarter (15 min)",
           "hour": "Hour"
         }
+      },
+      "tyre_set": {
+        "name": "Tyre set"
       }
     },
     "datetime": {
@@ -426,6 +432,9 @@
       },
       "heat_hold": {
         "name": "Keep the battery at the target while heating"
+      },
+      "tyre_reminder": {
+        "name": "Tyre change reminder"
       }
     },
     "button": {
@@ -478,6 +487,27 @@
     },
     "empty_week_plan": {
       "message": "The week plan needs a ready-by time on at least one day."
+    },
+    "not_ev_ledger": {
+      "message": "{entity_id} does not belong to an EV Ledger car."
+    },
+    "unknown_tyre_set": {
+      "message": "No tyre set called {set}."
+    },
+    "tyre_set_needs_name": {
+      "message": "A new tyre set needs a name."
+    },
+    "tyre_set_name_taken": {
+      "message": "There is already a tyre set called {set}."
+    },
+    "tyre_set_already_on": {
+      "message": "{set} is already on the car at that time."
+    },
+    "unknown_tyre_change": {
+      "message": "No such tyre change."
+    },
+    "unknown_tread_reading": {
+      "message": "No such tread depth reading."
     }
   }
 }

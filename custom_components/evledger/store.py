@@ -10,6 +10,7 @@ from .const import STORAGE_KEY_TEMPLATE, STORAGE_VERSION
 
 METER_SAVE_DELAY = 30
 from .models import ChargeSession, Trip
+from .tyres import TyreChange, TyreSet
 
 
 class EvLedgerStore:
@@ -24,6 +25,10 @@ class EvLedgerStore:
         # The charger's session counter when the open home charge began (Zaptec counts from plug-in to unplug,
         # through pauses), so a charge is not counted again in the next one.
         self._meter: dict = {}
+        # Tyre sets, when each went on the car, and the season a change message was sent for.
+        self._tyre_sets: dict[str, TyreSet] = {}
+        self._tyre_changes: dict[str, TyreChange] = {}
+        self.tyre_notified: str | None = None
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
@@ -31,12 +36,19 @@ class EvLedgerStore:
             self._trips = {t["id"]: Trip.from_dict(t) for t in data.get("trips", [])}
             self._charges = {c["id"]: ChargeSession.from_dict(c) for c in data.get("charges", [])}
             self._meter = data.get("meter") or {}
+            tyres = data.get("tyres") or {}
+            self._tyre_sets = {t["id"]: TyreSet.from_dict(t) for t in tyres.get("sets", [])}
+            self._tyre_changes = {c["id"]: TyreChange.from_dict(c) for c in tyres.get("changes", [])}
+            self.tyre_notified = tyres.get("notified")
 
     def _data(self) -> dict:
         return {
             "trips": [t.to_dict() for t in self._trips.values()],
             "charges": [c.to_dict() for c in self._charges.values()],
             "meter": self._meter,
+            "tyres": {"sets": [t.to_dict() for t in self._tyre_sets.values()],
+                      "changes": [c.to_dict() for c in self._tyre_changes.values()],
+                      "notified": self.tyre_notified},
         }
 
     async def _async_save(self) -> None:
@@ -117,6 +129,47 @@ class EvLedgerStore:
         del self._charges[charge_id]
         await self._async_save()
         return True
+
+    # ------------------------------------------------------------------ tyres
+
+    @property
+    def tyre_sets(self) -> list[TyreSet]:
+        """In the order they were added."""
+        return list(self._tyre_sets.values())
+
+    @property
+    def tyre_changes(self) -> list[TyreChange]:
+        """Newest first."""
+        return sorted(self._tyre_changes.values(), key=lambda c: c.at, reverse=True)
+
+    def get_tyre_set(self, set_id: str) -> TyreSet | None:
+        return self._tyre_sets.get(set_id)
+
+    async def async_upsert_tyre_set(self, tyre: TyreSet) -> None:
+        self._tyre_sets[tyre.id] = tyre
+        await self._async_save()
+
+    async def async_delete_tyre_set(self, set_id: str) -> bool:
+        """The set and its changes."""
+        if self._tyre_sets.pop(set_id, None) is None:
+            return False
+        self._tyre_changes = {k: c for k, c in self._tyre_changes.items() if c.set_id != set_id}
+        await self._async_save()
+        return True
+
+    async def async_upsert_tyre_change(self, change: TyreChange) -> None:
+        self._tyre_changes[change.id] = change
+        await self._async_save()
+
+    async def async_delete_tyre_change(self, change_id: str) -> bool:
+        if self._tyre_changes.pop(change_id, None) is None:
+            return False
+        await self._async_save()
+        return True
+
+    async def async_set_tyre_notified(self, key: str | None) -> None:
+        self.tyre_notified = key
+        await self._async_save()
 
     @staticmethod
     def new_id() -> str:

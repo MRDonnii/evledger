@@ -300,11 +300,13 @@ class PhoneNotifier:
         for service in self.recipients():
             await self._call(service, data)
 
-    async def async_send_note(self, kind: str, title: str, text: str, actions: list[dict] | None = None) -> None:
+    async def async_send_note(self, kind: str, title: str, text: str, actions: list[dict] | None = None,
+                              icon: str | None = None) -> None:
         """A message under its own tag: charging started (with Pause), the charge is done, a reminder to plug in,
         the charger is offline."""
         data = {"title": f"{self.entry.title}: {title}", "message": text,
-                "data": {**self._tap(), "tag": f"{self.tag}_{kind}", **({"actions": actions} if actions else {}),
+                "data": {**self._tap(), **({"notification_icon": icon} if icon else {}), "tag": f"{self.tag}_{kind}",
+                         **({"actions": actions} if actions else {}),
                          **(self.quiet() if kind in QUIET_KINDS else {})}}
         for service in self.recipients():
             await self._call(service, data)

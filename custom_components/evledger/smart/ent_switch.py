@@ -32,7 +32,7 @@ FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-chec
               "learn_departure": "mdi:clock-start", "prefer_green": "mdi:leaf",
               "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check",
               "quiet_night": "mdi:bell-sleep", "week_plan": "mdi:calendar-week",
-              "heat_hold": "mdi:car-seat-heater"}
+              "heat_hold": "mdi:car-seat-heater", "tyre_reminder": "mdi:tire"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -43,7 +43,7 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         self._attr_icon = FLAG_ICONS[key]
         if key in ("notify_start", "notify_done", "plug_reminder", "learn", "monthly_summary", "low_price_alert",
                    "wait_cheaper_day", "learn_departure", "prefer_green", "ask_public_price", "morning_check",
-                   "quiet_night"):
+                   "quiet_night", "tyre_reminder"):
             self._attr_entity_category = EntityCategory.CONFIG
 
     async def async_added_to_hass(self) -> None:

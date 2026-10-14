@@ -60,6 +60,7 @@ async def async_setup_entry(
         EvLedgerHomeEnergySensor(coordinator, entry, "today"),
         EvLedgerHomeEnergySensor(coordinator, entry, "month"),
         EvLedgerCostThisYearSensor(coordinator, entry),
+        EvLedgerTyresSensor(coordinator, entry),
     ]
     if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
         entities.append(EvLedgerEfficiencySensor(coordinator, entry))
@@ -503,6 +504,44 @@ class EvLedgerLastChargeSensor(_EvLedgerBaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         charge = self._last_charge()
         return charge.to_dict() if charge else {}
+
+
+class EvLedgerTyresSensor(_EvLedgerBaseSensor):
+    """The tyre set on the car, with every set's km, use, cost and wear, each season, the sets compared at the same
+    outside temperature, and whether it is time to change."""
+
+    _attr_icon = "mdi:tire"
+    _unrecorded_attributes = frozenset({"sets", "seasons", "comparison"})
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "tyres", "Tyres")
+
+    @property
+    def native_value(self) -> str | None:
+        active = self.coordinator.active_tyre_set()
+        return active.name if active else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        stats = self.coordinator.tyre_stats()
+        active = self.coordinator.active_tyre_set()
+        current = next((s for s in stats["sets"] if active and s["id"] == active.id), None)
+        season = stats["seasons"][0] if stats["seasons"] and stats["seasons"][0]["to"] is None else None
+        return {
+            "set_id": active.id if active else None,
+            "kind": active.kind if active else None,
+            "size": current["size"] if current else None,
+            "rim": current["rim"] if current else None,
+            "mounted_at": season["from"] if season else None,
+            "season_km": season["km"] if season else None,
+            "season_wh_per_km": season["wh_per_km"] if season else None,
+            "tread_mm": current["tread_mm"] if current else None,
+            "suggestion": self.coordinator.tyre_suggestion(),
+            "energy_from": "battery_drop" if self.coordinator.battery_capacity_kwh else None,
+            "sets": stats["sets"],
+            "seasons": stats["seasons"][:MAX_LIST_ITEMS],
+            "comparison": stats["comparison"],
+        }
 
 
 def _trip_energy_kwh(trip: Trip, battery_capacity_kwh: float) -> float | None:

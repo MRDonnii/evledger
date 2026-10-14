@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 DOMAIN = "evledger"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "select"]
 # Added when smart charging is switched on in the options.
-SMART_PLATFORMS = ["binary_sensor", "button", "datetime", "number", "select", "switch", "text", "time"]
+SMART_PLATFORMS = ["binary_sensor", "button", "datetime", "number", "switch", "text", "time"]
 
 STORAGE_VERSION = 1
 STORAGE_KEY_TEMPLATE = "evledger_{entry_id}"
@@ -80,6 +80,15 @@ SERVICE_ADD_CHARGE = "add_charge"
 SERVICE_SET_WEEK_PLAN = "set_week_plan"
 SERVICE_SET_READY_BY_ONCE = "set_ready_by_once"
 SERVICE_CLEAR_READY_BY_ONCE = "clear_ready_by_once"
+SERVICE_SAVE_TYRE_SET = "save_tyre_set"
+SERVICE_DELETE_TYRE_SET = "delete_tyre_set"
+SERVICE_CHANGE_TYRES = "change_tyres"
+SERVICE_UPDATE_TYRE_CHANGE = "update_tyre_change"
+SERVICE_DELETE_TYRE_CHANGE = "delete_tyre_change"
+SERVICE_LOG_TREAD_DEPTH = "log_tread_depth"
+SERVICE_DELETE_TREAD_DEPTH = "delete_tread_depth"
+TYRE_SERVICES = (SERVICE_SAVE_TYRE_SET, SERVICE_DELETE_TYRE_SET, SERVICE_CHANGE_TYRES, SERVICE_UPDATE_TYRE_CHANGE,
+                 SERVICE_DELETE_TYRE_CHANGE, SERVICE_LOG_TREAD_DEPTH, SERVICE_DELETE_TREAD_DEPTH)
 ATTR_ENDED_AT = "ended_at"
 ATTR_LOCATION = "location"
 ATTR_KWH = "kwh"
