@@ -239,9 +239,11 @@ class PhoneNotifier:
         for index, window in enumerate(view["windows"]):
             local_end = dt_util.as_local(window["end"]).strftime("%H:%M")
             lead = "Venter du med resten:" if index == 0 else "Eller"
-            lines.append(f"{lead} {'om dagen' if window['kind'] == 'day' else 'om natten'} {self.when(window['start'])}–"
+            part = "om dagen" if window["kind"] == "day" else "om natten"
+            lines.append(f"{lead} {part} {self.when(window['start'])}–"
                          f"{local_end}, ca. {self.money(planner, window['price'], True)}"
-                         f"{' (skøn)' if window['estimated'] else ''} – spar ca. {self.money(planner, window['saving'])}.")
+                         f"{' (skøn)' if window['estimated'] else ''} – "
+                         f"spar ca. {self.money(planner, window['saving'])}.")
         lines.append("Uden svar lader den til målet.")
         return "\n".join(lines)
 

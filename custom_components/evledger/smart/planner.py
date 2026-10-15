@@ -560,7 +560,7 @@ class ChargePlanner:
 
     @callback
     def async_set_limit_wait(self, value: bool) -> None:
-        """Wait with the energy above the price limit (only charge below it) for this plug-in, or charge to the target."""
+        """Wait with the energy above the price limit (charge only below it) this plug-in, or charge to the target."""
         self.limit_wait = value
         self.warned.add("price")  # answered: not asked again for this plug-in
         self.async_recalculate()
