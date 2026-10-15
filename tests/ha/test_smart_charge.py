@@ -665,6 +665,12 @@ async def test_price_limit_asks_whether_to_wait(hass: HomeAssistant, request, fr
     assert state(hass, "switch.bil_wait_above_the_price_limit") == "off"
     await later(hass, freezer, 5)
     assert len(asked_about_waiting(sent)) == 1, "asked once"
+    for value in (9, 11, 10):  # a number stepped up and down: the question is not asked again
+        await hass.services.async_call("number", "set_value", {
+            "entity_id": "number.bil_ask_when_waiting_saves_at_least", "value": value}, blocking=True)
+        await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 1)
+    assert len(asked_about_waiting(sent)) == 1, "a new setting does not ask again"
     hass.bus.async_fire("mobile_app_notification_action", {"action": asked[0]["data"]["actions"][0]["action"]})
     await hass.async_block_till_done(wait_background_tasks=True)
     assert state(hass, "switch.bil_wait_above_the_price_limit") == "on"

@@ -4,6 +4,16 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.1] - 2026-10-15
+
+### Fixed
+
+- The question *billigere at vente?* (and the one about going over the price cap) is asked once per plug-in. Before,
+  every changed setting asked it again, also after it was answered, so a number stepped up and down sent it several
+  times within seconds.
+- *Message when charging starts* is sent once per plug-in plan. A plan split into several periods sent it again for
+  every period that began more than half an hour after the last message.
+
 ## [0.9.0] - 2026-10-15
 
 ### Changed

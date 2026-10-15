@@ -440,13 +440,18 @@ class Routines:
 
     def check_started(self, now: datetime) -> None:
         """Tell the phones when the charger starts charging this car: plan, expected end, price and target. A short
-        stop and start (the car pausing, a charger reboot) does not send it again within half an hour."""
+        stop and start (the car pausing, a charger reboot) does not send it again within half an hour, and the next
+        period of a split plan not at all."""
         p = self.planner
         charging = p.charger_state == ChargerState.CHARGING and p.car_present
         was, self._was_charging = self._was_charging, charging
         if not charging or was is not False:
             return
         if self._started_note is not None and now - self._started_note < timedelta(minutes=STARTED_NOTE_QUIET_MINUTES):
+            return
+        if self.run.sessions:
+            # A later period of the same plan (a plan split into several pauses between them): the phones were told
+            # when it began, not again for every period (2026-10-15: five periods in one night).
             return
         self._started_note = now
         if not (p.flags["notify_start"] and p.notify.targets):

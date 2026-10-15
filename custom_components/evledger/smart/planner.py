@@ -121,6 +121,9 @@ from .setup import is_forecast
 
 _LOGGER = logging.getLogger(__name__)
 
+# The questions to the phones that are asked once per plug-in, whatever settings change after them.
+ASKED_ONCE = frozenset({"price", "cap"})
+
 PLUGGED_STATES = (STATE_ON, "true", "plugged", "connected", "plugged_in")
 # The car's own charge limit (a number on the car's device): Tesla Custom "_charge_limit", Tesla Fleet,
 # Teslemetry and Tessie "charge_state_charge_limit_soc".
@@ -550,9 +553,12 @@ class ChargePlanner:
         self.async_recalculate()
 
     def _rewarn(self) -> None:
-        """New settings: warn again if they cannot be met either (not while restoring after a restart)."""
+        """New settings: warn again if they cannot be met either (not while restoring after a restart). The questions
+        (wait with the dear part, go over the price cap) are asked once per plug-in: a new setting, or a number
+        stepped up and down, does not ask them again (2026-10-15: a limit moved 2.2 → 1.7 → 2.1 → 2.0 could ask
+        three times in seconds, also after an answer)."""
         if self._started_at is not None:
-            self.warned.clear()
+            self.warned &= ASKED_ONCE
 
     @callback
     def async_set_cap_override(self, value: bool) -> None:

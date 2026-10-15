@@ -328,6 +328,15 @@ async def test_charging_started_message(hass: HomeAssistant, request, freezer):
     hass.states.async_set(MODE, "connected_charging")
     await hass.async_block_till_done(wait_background_tasks=True)
     assert len([m for m in sent if "ladning startet" in m.get("title", "")]) == 1
+    # the plan's next period an hour later (a split plan): the phones were told when it began
+    planner = hass.data[DOMAIN][entry.entry_id].smart
+    planner.routines.charge_finished(session(5.5, 10.0, dt_util.now() - timedelta(minutes=30), 30, (40, 50)))
+    hass.states.async_set(MODE, "connected_finished")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 60)
+    hass.states.async_set(MODE, "connected_charging")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len([m for m in sent if "ladning startet" in m.get("title", "")]) == 1
 
 
 async def test_charging_started_is_quiet_at_night(hass: HomeAssistant, request, freezer):
