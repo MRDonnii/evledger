@@ -152,6 +152,10 @@ WAIT_MIN_SHARE = 0.15
 WAIT_MIN_KR = 2.0
 WAIT_RESERVE = 10.0
 USE_DAYS = 14
+# Price limit on the cheapest plan: the later periods for the energy above the limit are looked for this many hours
+# after the ready-by time, and the phones are only asked when waiting saves at least this much.
+LIMIT_LOOK_HOURS = 36
+LIMIT_MIN_SAVING = 1.0
 MIN_USE_HISTORY_DAYS = 7
 # "Message if the target is not reached": checked this long after the ready-by time; a shortfall of more than
 # MORNING_SHORT % counts.

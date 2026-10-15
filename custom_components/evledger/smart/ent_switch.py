@@ -21,6 +21,7 @@ def build(planner) -> list:
                         ConfirmOnPhone(planner, "confirm_on_phone"),
                         NotifyPlan(planner, "notify_plan"),
                         ExceedPriceCap(planner, "price_cap_override"),
+                        WaitBelowLimit(planner, "price_limit_wait"),
                         *(PlanFlag(planner, key) for key in FLAG_ICONS)])
 
 
@@ -250,3 +251,38 @@ class ExceedPriceCap(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.planner.async_set_cap_override(False)
+
+
+class WaitBelowLimit(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
+    """Price limit on the cheapest plan: on = charge only below the limit for this plug-in and wait with the rest for
+    a cheaper period (the answer "Vent med resten"); off = the plan charges to the target. Plugging in again turns it
+    off. The attributes tell what the plan spends above the limit and the cheaper later periods."""
+
+    _attr_icon = "mdi:timer-sand"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in ("on", "off"):
+            self.planner.limit_wait = last.state == "on"
+
+    @property
+    def is_on(self) -> bool:
+        return self.planner.limit_wait
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        view = self.planner.limit_view or {}
+        return {
+            "over_limit_kwh": view.get("over_kwh"),
+            "over_limit_cost": view.get("over_cost"),
+            "below_limit_soc": view.get("below_soc"),
+            "cheaper": [{**window, "start": window["start"].isoformat(), "end": window["end"].isoformat()}
+                        for window in view.get("windows", [])],
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.planner.async_set_limit_wait(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.planner.async_set_limit_wait(False)

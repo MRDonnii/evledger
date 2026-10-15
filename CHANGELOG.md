@@ -4,6 +4,23 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.8.0] - 2026-10-15
+
+### Changed
+
+- **The price limit asks whether to wait, and the plan charges to the target meanwhile.** With *Price limit in
+  cheapest* on, Cheapest plans to the target as without the limit. When part of that plan costs more than *Cheapest
+  max price*, the car is above *Always charge to* and a later period after the ready-by time is cheaper (the best
+  one in the day, 06–18, and the best one at night, each at or below the limit and saving at least 1 kr), the phones
+  get one question per plug-in: how much energy is above the limit and at what price, how far the car gets under the
+  limit, and when the cheaper periods are and what waiting saves. *Wait with the rest* charges only below the limit
+  for this plug-in; *Charge to the target* keeps the plan. Without an answer it charges to the target. This replaces
+  0.7.4's hard limit and 0.7.5's question.
+- New switch *Wait above the price limit* (the answer, reset at the next plug-in). The plan's sensor shows
+  `above_limit_kwh` (the energy above the limit), `above_limit_cost`, `limit_soc` (the level reached under the limit),
+  `limit_wait` and `limit_cheaper` (the cheaper periods with price and saving).
+- A plan split into several blocks is used when it saves at least 2 % (was 5 %) compared with one block.
+
 ## [0.7.5] - 2026-10-15
 
 ### Added

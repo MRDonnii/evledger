@@ -183,8 +183,8 @@ RESOLUTIONS = (RESOLUTION_QUARTER, RESOLUTION_HOUR)
 # How many days back an unknown price may be borrowed from (same clock time).
 ESTIMATE_DAYS_BACK = 7
 # A plan split into several blocks must be at least this much cheaper than the best single block;
-# every extra block is another start/stop of the charger and another wake-up of the car.
-SPLIT_MIN_SAVING = 0.05
+# every extra block is another start/stop of the charger and another wake-up of the car (2 %, user 2026-10-15).
+SPLIT_MIN_SAVING = 0.02
 # Charging windows whose cost differs by less than this share of the cheapest (and at least WINDOW_TIE_MIN in
 # money) are equally cheap: prices a fraction of a cent apart must not move or stop a planned charge.
 WINDOW_TIE = 0.005
@@ -563,6 +563,52 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         limit_kwh=round(max(limit_short, 0.0), 2),
         limit_soc=(min(data.soc + total * data.efficiency / data.capacity_kwh * 100, 100.0) if limited else None),
     )
+
+
+@dataclass(frozen=True)
+class LaterWindow:
+    """A cheaper period after the ready-by time for the energy that would cost more than the price limit."""
+
+    kind: str  # "day" (starts 06–18) or "night"
+    start: datetime
+    end: datetime
+    price: float  # mean price per kWh, with the price factor
+    estimated: bool
+
+
+def cheaper_later(timeline: list[TimelineSlot], after: datetime, need_kwh: float, power_kw: float, factor: float,
+                  max_price: float | None = None) -> list[LaterWindow]:
+    """The cheapest unbroken run of slots after `after` that holds need_kwh, one starting in the day (06–18 local
+    time) and one in the night, each only when its mean price (with the price factor) is at or below max_price."""
+    if need_kwh <= 0 or power_kw <= 0:
+        return []
+    slots = [slot for slot in timeline if slot.start >= after]
+    best: dict[str, LaterWindow] = {}
+    for index, first in enumerate(slots):
+        have = cost = 0.0
+        estimated = False
+        end = first.start
+        for slot in slots[index:]:
+            if slot.start != end:
+                break  # a gap in the prices
+            hours = (slot.end - slot.start).total_seconds() / 3600
+            take = min(hours * power_kw, need_kwh - have)
+            have += take
+            cost += take * slot.price * factor
+            estimated = estimated or slot.estimated
+            end = slot.start + timedelta(hours=take / power_kw)
+            if have >= need_kwh - 1e-9:
+                break
+        if have < need_kwh - 1e-9:
+            continue
+        price = cost / have
+        if max_price is not None and price > max_price + 1e-9:
+            continue
+        hour = first.start.hour  # the timeline is in the local time zone
+        kind = "day" if 6 <= hour < 18 else "night"
+        if kind not in best or price < best[kind].price - 1e-9:
+            best[kind] = LaterWindow(kind, first.start, end, round(price, 4), estimated)
+    return [best[kind] for kind in ("day", "night") if kind in best]
 
 
 def _contiguous(slots) -> bool:

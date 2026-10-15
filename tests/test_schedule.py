@@ -310,3 +310,23 @@ def test_price_limit_does_not_hold_back_a_trip():
 def test_price_limit_only_in_the_cheapest_plan():
     result = schedule(mode="now", soc=49, known=hourly(NIGHT, EXPENSIVE), max_price=2.0, floor_soc=20)
     assert result.charge_now and result.energy_kwh > 0
+
+
+def test_cheaper_later_finds_the_best_day_and_night_period_below_the_limit():
+    # From 22:00: 3.0 all night, the next day 10-13 at 1.5, the night after 02-05 at 1.2 and 1.0 (hours 28-30).
+    prices = [3.0] * 36
+    for hour in (12, 13, 14):
+        prices[hour] = 1.5
+    prices[28], prices[29], prices[30] = 1.2, 1.0, 1.0
+    timeline = plan.build_timeline(NIGHT, hourly(NIGHT, prices), NIGHT + timedelta(hours=36))
+    after = NIGHT + timedelta(hours=8)  # 06:00
+    found = plan.cheaper_later(timeline, after, 18.0, 12.0, 1.0, 2.0)  # 1.5 h of charging
+    assert [(w.kind, w.start.hour, w.end.strftime("%H:%M"), w.price) for w in found] == [
+        ("day", 10, "11:30", 1.5), ("night", 3, "04:30", 1.0)]
+    assert plan.cheaper_later(timeline, after, 18.0, 12.0, 1.0, 1.1) == [found[1]], "only periods below the limit"
+    assert plan.cheaper_later(timeline, after, 0.0, 12.0, 1.0, 2.0) == []
+
+
+def test_cheaper_later_needs_an_unbroken_run_of_prices():
+    timeline = plan.build_timeline(NIGHT, hourly(NIGHT, [3.0, 1.0]), NIGHT + timedelta(hours=2))
+    assert plan.cheaper_later(timeline[:4] + timeline[5:], NIGHT, 20.0, 12.0, 1.0) == []

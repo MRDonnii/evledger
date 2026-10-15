@@ -391,6 +391,9 @@
       "price_cap_override": {
         "name": "Overskrid prisloftet ved behov"
       },
+      "price_limit_wait": {
+        "name": "Vent med resten over prisgrænsen"
+      },
       "notify_done": {
         "name": "Besked når opladningen er færdig"
       },

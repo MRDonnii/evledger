@@ -102,6 +102,8 @@ class PhoneNotifier:
                 planner.async_answer(planner.mode)  # the plan that waits for the answer, e.g. the default plan
             elif answer in ("CAP_OK", "CAP_STOP"):
                 planner.async_set_cap_override(answer == "CAP_OK")
+            elif answer in ("WAIT", "FULL"):
+                planner.async_set_limit_wait(answer == "WAIT")
             elif answer in ("PRE_ON", "PRE_SKIP"):
                 planner.routines.answer_precondition(answer == "PRE_ON")
             elif answer.startswith("PUBLIC_"):
@@ -135,14 +137,14 @@ class PhoneNotifier:
             if planner.waiting:
                 lines.append(wait_text(planner.waiting, unit))
             elif schedule.limit_kwh >= 0.5:
-                lines.append(f"Prisen er over din grænse på {money(planner.settings['smart_max_price'])}/kWh, "
-                             "så bilen lades ikke nu.")
+                lines.append(f"Du valgte at vente: prisen er over din grænse på "
+                             f"{money(planner.settings['smart_max_price'])}/kWh, så bilen lades ikke nu.")
             else:
                 lines.append("Batteriet er allerede ladet til målet.")
             return "\n".join(lines)
         if schedule.limit_kwh >= 0.5:
-            lines.append(f"Prisgrænse {money(planner.settings['smart_max_price'])}/kWh: lader til ca. "
-                         f"{schedule.limit_soc or 0:.0f} % (resten er for dyrt).")
+            lines.append(f"Du valgte at vente: lader til ca. {schedule.limit_soc or 0:.0f} % under "
+                         f"{money(planner.settings['smart_max_price'])}/kWh, resten i en billigere periode.")
         first, last = schedule.blocks[0].start, planner.block_end(schedule.blocks[-1], dt_util.now())
         start = "nu" if first <= dt_util.now() else when(first)
         same_day = dt_util.as_local(first).date() == dt_util.as_local(last).date()
@@ -218,20 +220,29 @@ class PhoneNotifier:
         ]
         return "\n".join(lines)
 
-    def price_text(self, planner: ChargePlanner, now, soc: float) -> str:
-        """The price limit holds the car back above the floor: say what it does, and what charging anyway costs."""
-        schedule = planner.schedule
+    def price_text(self, planner: ChargePlanner, now, soc: float, view: dict) -> str:
+        """Part of the plan to the target costs more than the price limit and a later period is cheaper: what charging
+        only below the limit reaches, and what waiting with the rest saves (day and night)."""
         limit = self.money(planner, planner.settings["smart_max_price"], True)
-        lines = [f"Bilen er på {soc:.0f} %, og prisen er over din grænse på {limit}."]
-        if schedule.blocks and schedule.limit_soc is not None:
-            lines.append(f"Den lader kun til ca. {schedule.limit_soc:.0f} % og venter med resten.")
+        target = planner.schedule.target_soc or planner.target
+
+        def kwh(value: float) -> str:
+            return f"{value:.1f}".replace(".", ",")
+
+        lines = [f"Bilen er på {soc:.0f} %. Til målet {target:.0f} % koster de sidste {kwh(view['over_kwh'])} kWh "
+                 f"over din grænse på {limit} (ca. {self.money(planner, view['over_price'], True)})."]
+        if view["below_kwh"] >= 0.5:
+            lines.append(f"Under grænsen når den ca. {view['below_soc']:.0f} % for ca. "
+                         f"{self.money(planner, view['below_cost'])}.")
         else:
-            lines.append("Den venter på billigere kvarterer.")
-        everything = planner.alternatives.get(MODE_NOW)
-        if everything and everything.cost:
-            kwh = f"{everything.energy_kwh:.1f}".replace(".", ",")
-            lines.append(f"Lad alligevel: ca. {kwh} kWh for ca. {self.money(planner, everything.cost)}.")
-        lines.append("Uden svar venter den.")
+            lines.append("Under grænsen lader den ikke før næste billige periode.")
+        for index, window in enumerate(view["windows"]):
+            local_end = dt_util.as_local(window["end"]).strftime("%H:%M")
+            lead = "Venter du med resten:" if index == 0 else "Eller"
+            lines.append(f"{lead} {'om dagen' if window['kind'] == 'day' else 'om natten'} {self.when(window['start'])}–"
+                         f"{local_end}, ca. {self.money(planner, window['price'], True)}"
+                         f"{' (skøn)' if window['estimated'] else ''} – spar ca. {self.money(planner, window['saving'])}.")
+        lines.append("Uden svar lader den til målet.")
         return "\n".join(lines)
 
     def short_text(self, planner: ChargePlanner, now, reach: float, target: float) -> str:
@@ -313,9 +324,9 @@ class PhoneNotifier:
         """A warning under its own tag, so it does not replace the plan message. The price cap question
         has Approve / Stop above the cap; the others Charge now."""
         if kind == "price":
-            title = f"{self.entry.title}: vil du vente?"
-            actions = [{"action": f"{self.prefix}NOW", "title": "Lad alligevel"},
-                       {"action": f"{self.prefix}WAIT", "title": "Vent"}]
+            title = f"{self.entry.title}: over din prisgrænse – vil du vente?"
+            actions = [{"action": f"{self.prefix}WAIT", "title": "Vent med resten"},
+                       {"action": f"{self.prefix}FULL", "title": "Lad til målet"}]
         elif kind == "cap":
             title = f"{self.entry.title}: prisloftet rækker ikke"
             actions = [{"action": f"{self.prefix}CAP_OK", "title": "Godkend"},

@@ -131,6 +131,7 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
         if key == "next_charge_start":
             schedule = planner.schedule
             limit_on = planner.flags["smart_price_limit"]
+            view = planner.limit_view
             return {
                 "mode": planner.mode,
                 "charge_now": schedule.charge_now,
@@ -146,11 +147,17 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "trip_departure": planner.trip.departure,
                 "estimated_prices": schedule.estimated,
                 "shortfall_kwh": schedule.shortfall_kwh,
-                # Price limit on the cheapest plan: the limit, the energy left out above it and the level reached.
+                # Price limit on the cheapest plan: the limit, the energy above it (charged at the higher price, or
+                # left for later when the answer was to wait), the level reached below it, and the cheaper periods.
                 "price_limit": planner.settings["smart_max_price"] if limit_on else None,
                 "price_limit_floor": planner.settings["smart_floor_soc"] if limit_on else None,
-                "above_limit_kwh": schedule.limit_kwh,
-                "limit_soc": round(schedule.limit_soc, 1) if schedule.limit_soc is not None else None,
+                "above_limit_kwh": view["over_kwh"] if view else schedule.limit_kwh,
+                "limit_soc": view["below_soc"] if view else (
+                    round(schedule.limit_soc, 1) if schedule.limit_soc is not None else None),
+                "limit_wait": planner.limit_wait if view else None,
+                "above_limit_cost": view["over_cost"] if view else None,
+                "limit_cheaper": [{**window, "start": window["start"].isoformat(), "end": window["end"].isoformat()}
+                                  for window in view["windows"]] if view else [],
                 # The prices the plan chose from, for a chart of when the car would charge (also before it is
                 # plugged in): start, price (with the price factor) and whether it is estimated.
                 "slot_minutes": planner.slot_minutes,

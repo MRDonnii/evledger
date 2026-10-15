@@ -391,6 +391,9 @@
       "price_cap_override": {
         "name": "Exceed price cap"
       },
+      "price_limit_wait": {
+        "name": "Wait above the price limit"
+      },
       "notify_done": {
         "name": "Message when charging is done"
       },
