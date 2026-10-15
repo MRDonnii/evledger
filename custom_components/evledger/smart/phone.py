@@ -237,8 +237,9 @@ class PhoneNotifier:
                  f"ca. {self.money(planner, view['over_price'], True)} i nat."]
         driving = (f" – nok til jeres kørsel (ca. {kwh(view['daily_use_kwh'])} kWh om dagen) med "
                    f"{view['reserve_soc']:.0f} % tilbage" if view["daily_use_kwh"] else "")
-        lines.append(f"Venter du, lader den i nat til ca. {view['below_soc']:.0f} % for ca. "
-                     f"{self.money(planner, view['below_cost'])}{driving}.")
+        wait, full = self.wait_labels(planner, soc, view)
+        lines.append(f"{wait}: ca. {self.money(planner, view['below_cost'])} i nat{driving}."
+                     if view["below_soc"] > soc + 0.5 else f"{wait}: bilen har nok til den billigere periode{driving}.")
         for index, window in enumerate(view["windows"]):
             lead = "Resten" if index == 0 else "Eller"
             part = "om dagen" if window["kind"] == "day" else "om natten"
@@ -246,8 +247,15 @@ class PhoneNotifier:
             lines.append(f"{lead} {part} {when(window['start'])}–{end}, ca. "
                          f"{self.money(planner, window['price'], True)}{' (prognose)' if window['estimated'] else ''}"
                          f" – spar ca. {self.money(planner, window['saving'])}.")
-        lines.append("Uden svar lader den til målet.")
+        lines.append(f"Uden svar: {full[0].lower()}{full[1:]}.")
         return "\n".join(lines)
+
+    def wait_labels(self, planner: ChargePlanner, soc: float, view: dict) -> tuple[str, str]:
+        """The two answers named by what they charge to tonight, so it is easy to see whether waiting is enough
+        (user, 2026-10-15: "Vent med resten" should say what it charges to)."""
+        target = planner.schedule.target_soc or planner.target
+        below = view["below_soc"]
+        return (f"Lad kun til {below:.0f} %" if below > soc + 0.5 else "Lad ikke i nat", f"Lad til {target:.0f} %")
 
     def short_text(self, planner: ChargePlanner, now, reach: float, target: float) -> str:
         """The plan cannot reach its target in time (plugged in late, fixed window too short)."""
@@ -324,13 +332,14 @@ class PhoneNotifier:
         for service in self.recipients():
             await self._call(service, data)
 
-    async def async_send_warning(self, kind: str, text: str) -> None:
+    async def async_send_warning(self, kind: str, text: str, labels: tuple[str, str] | None = None) -> None:
         """A warning under its own tag, so it does not replace the plan message. The price cap question
         has Approve / Stop above the cap; the others Charge now."""
         if kind == "price":
             title = f"{self.entry.title}: billigere at vente?"
-            actions = [{"action": f"{self.prefix}WAIT", "title": "Vent med resten"},
-                       {"action": f"{self.prefix}FULL", "title": "Lad til målet"}]
+            wait, full = labels or ("Vent med resten", "Lad til målet")
+            actions = [{"action": f"{self.prefix}WAIT", "title": wait},
+                       {"action": f"{self.prefix}FULL", "title": full}]
         elif kind == "cap":
             title = f"{self.entry.title}: prisloftet rækker ikke"
             actions = [{"action": f"{self.prefix}CAP_OK", "title": "Godkend"},

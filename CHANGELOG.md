@@ -4,6 +4,14 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.2] - 2026-10-16
+
+### Changed
+
+- The answers to *billigere at vente?* say what they charge to: *Lad kun til 66 %* (or *Lad ikke i nat* when the car
+  already has enough until the cheaper period) and *Lad til 80 %*, instead of *Vent med resten* / *Lad til målet*, so
+  it is easy to judge whether waiting is enough. The message uses the same words.
+
 ## [0.9.1] - 2026-10-15
 
 ### Fixed

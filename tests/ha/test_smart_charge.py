@@ -653,10 +653,11 @@ async def test_price_limit_asks_whether_to_wait(hass: HomeAssistant, request, fr
     assert len(asked) == 1, "cheaper later by more than 10 kr: the phones are asked"
     text = asked[0]["message"]
     assert text.startswith("Bilen er på 49 %. Til målet 80 % koster de sidste 9,7 kWh ca. 3,00 kr/kWh i nat.")
-    assert "Venter du, lader den i nat til ca. 66 % for ca. 5,50 kr." in text
+    assert "Lad kun til 66 %: ca. 5,50 kr i nat." in text
     assert "Resten om dagen i morgen kl. 12:00–12:52" in text and "Eller om natten" in text and "spar ca." in text
-    assert text.endswith("Uden svar lader den til målet.")
-    assert [action["title"] for action in asked[0]["data"]["actions"]] == ["Vent med resten", "Lad til målet"]
+    assert text.endswith("Uden svar: lad til 80 %.")
+    assert [action["title"] for action in asked[0]["data"]["actions"]] == ["Lad kun til 66 %", "Lad til 80 %"], \
+        "the answers say what they charge to tonight"
     attrs = hass.states.get("sensor.bil_next_charge_start").attributes
     assert attrs["limit_wait"] is False and attrs["limit_ask"] is True
     assert attrs["above_limit_kwh"] == pytest.approx(9.67, abs=0.01)
@@ -706,6 +707,8 @@ async def test_price_limit_daily_driving_sets_tonight_s_level(hass: HomeAssistan
     night = next(window for window in view["windows"] if window["kind"] == "night")
     days = (night["start"] - dt_util.now()).total_seconds() / 86400
     assert night["need_soc"] == pytest.approx(20 + 10 * days, abs=0.1), "the reserve plus the driving until then"
+    assert planner.notify.wait_labels(planner, 49.0, {**view, "below_soc": 49.0}) == ("Lad ikke i nat", "Lad til 80 %"), \
+        "nothing to charge tonight when waiting"
 
 
 async def test_price_limit_in_cheapest_waits_instead_of_done(hass: HomeAssistant, request, freezer):

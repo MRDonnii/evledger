@@ -1636,8 +1636,10 @@ class ChargePlanner:
             reach = max(target - schedule.shortfall_kwh * self.settings["efficiency"] / self.capacity * 100, soc)
             found["short"] = self.notify.short_text(self, now, reach, target)
         view = self.limit_view
+        labels: dict[str, tuple[str, str]] = {}
         if view and view["ask"] and not self.limit_wait:
             found["price"] = self.notify.price_text(self, now, soc, view)
+            labels["price"] = self.notify.wait_labels(self, soc, view)
         limit = self.car_limit()
         need = self.trip_target_soc if self.trip_active else None
         if limit is not None and need is not None and need > limit + 0.5:
@@ -1648,7 +1650,7 @@ class ChargePlanner:
                 continue
             self.warned.add(key)
             self.entry.async_create_background_task(
-                self.hass, self.notify.async_send_warning(key, text), f"ev_smart_charge_warn_{key}")
+                self.hass, self.notify.async_send_warning(key, text, labels.get(key)), f"ev_smart_charge_warn_{key}")
 
     def _status(self, state: ChargerState, desired: bool) -> str:
         if self.mode == MODE_MANUAL:
