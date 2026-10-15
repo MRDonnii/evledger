@@ -4,6 +4,14 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.8.2] - 2026-10-15
+
+### Changed
+
+- **Cheapest splits the charge for smaller savings.** A plan in several blocks is used when it saves at least 0.5 %
+  (was 2 %) compared with one block, also when charging to the target past the price limit, and a running charge
+  stops between the blocks when going on would cost more than that.
+
 ## [0.8.1] - 2026-10-15
 
 ### Fixed

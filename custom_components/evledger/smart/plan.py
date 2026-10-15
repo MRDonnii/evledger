@@ -183,8 +183,9 @@ RESOLUTIONS = (RESOLUTION_QUARTER, RESOLUTION_HOUR)
 # How many days back an unknown price may be borrowed from (same clock time).
 ESTIMATE_DAYS_BACK = 7
 # A plan split into several blocks must be at least this much cheaper than the best single block;
-# every extra block is another start/stop of the charger and another wake-up of the car (2 %, user 2026-10-15).
-SPLIT_MIN_SAVING = 0.02
+# every extra block is another start/stop of the charger and another wake-up of the car (0.5 %, user 2026-10-15:
+# "Lad til målet skal også dele ladning op" – a split saving 1.4 % was left out at 2 %).
+SPLIT_MIN_SAVING = 0.005
 # Charging windows whose cost differs by less than this share of the cheapest (and at least WINDOW_TIE_MIN in
 # money) are equally cheap: prices a fraction of a cent apart must not move or stop a planned charge.
 WINDOW_TIE = 0.005

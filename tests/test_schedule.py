@@ -173,13 +173,23 @@ def test_cheaper_quarter_prices_can_split_the_plan():
 
 
 def test_small_saving_does_not_split_the_plan():
-    # two separate quarters at 1.00, the rest 1.02 -> one block is nearly as cheap
+    # two separate quarters at 1.000, the rest 1.004 -> one block is nearly as cheap (0.2 %)
+    known = plan.parse_price_attributes({"prices": [
+        {"start": (NIGHT + timedelta(minutes=15 * i)).isoformat(),
+         "end": (NIGHT + timedelta(minutes=15 * (i + 1))).isoformat(), "price": 1.0 if i in (4, 30) else 1.004}
+        for i in range(40)]})
+    result = schedule(soc=74, known=known, constraints=[deadline(8)])
+    assert len(result.blocks) == 1
+
+
+def test_a_saving_of_one_percent_splits_the_plan():
+    # 6 kWh = two quarters; two separate quarters at 1.00, the rest 1.02: splitting saves 1 % (more than 0.5 %)
     known = plan.parse_price_attributes({"prices": [
         {"start": (NIGHT + timedelta(minutes=15 * i)).isoformat(),
          "end": (NIGHT + timedelta(minutes=15 * (i + 1))).isoformat(), "price": 1.0 if i in (4, 30) else 1.02}
         for i in range(40)]})
-    result = schedule(soc=74, known=known, constraints=[deadline(8)])
-    assert len(result.blocks) == 1
+    result = schedule(soc=70, known=known, constraints=[deadline(8)])
+    assert len(result.blocks) == 2
 
 
 def test_later_deadline_with_lower_target_is_ignored():
@@ -330,3 +340,18 @@ def test_cheaper_later_finds_the_best_day_and_night_period_below_the_limit():
 def test_cheaper_later_needs_an_unbroken_run_of_prices():
     timeline = plan.build_timeline(NIGHT, hourly(NIGHT, [3.0, 1.0]), NIGHT + timedelta(hours=2))
     assert plan.cheaper_later(timeline[:4] + timeline[5:], NIGHT, 20.0, 12.0, 1.0) == []
+
+
+def test_a_running_charge_pauses_when_splitting_saves():
+    # Charging since 22:00 (12 kWh = 4 quarters): 22:00-22:15 at 1.00, then 1.02 until 05:30-06:00 (the ready-by
+    # time) at 1.00 again. Going on without a pause costs 1 % more, so the charge stops after 22:15.
+    prices = [1.0 if i in (0, 30, 31, 32) else 1.02 for i in range(40)]
+    known = plan.parse_price_attributes({"prices": [
+        {"start": (NIGHT + timedelta(minutes=15 * i)).isoformat(),
+         "end": (NIGHT + timedelta(minutes=15 * (i + 1))).isoformat(), "price": p} for i, p in enumerate(prices)]})
+    data = plan.ScheduleInput(mode="smart", soc=60, target_soc=80, capacity_kwh=60, efficiency=1.0, power_kw=12,
+                              price_factor=1.0, timeline=plan.build_timeline(NIGHT, known, NIGHT + timedelta(hours=10)),
+                              constraints=(deadline(8),), keep_start=NIGHT)
+    result = plan.build_schedule(data, NIGHT)
+    assert [(b.start.strftime("%H:%M"), b.end.strftime("%H:%M")) for b in result.blocks] == [
+        ("22:00", "22:15"), ("05:15", "06:00")], "the charge stops between the cheap quarters"
