@@ -707,8 +707,8 @@ async def test_price_limit_daily_driving_sets_tonight_s_level(hass: HomeAssistan
     night = next(window for window in view["windows"] if window["kind"] == "night")
     days = (night["start"] - dt_util.now()).total_seconds() / 86400
     assert night["need_soc"] == pytest.approx(20 + 10 * days, abs=0.1), "the reserve plus the driving until then"
-    assert planner.notify.wait_labels(planner, 49.0, {**view, "below_soc": 49.0}) == ("Lad ikke i nat", "Lad til 80 %"), \
-        "nothing to charge tonight when waiting"
+    labels = planner.notify.wait_labels(planner, 49.0, {**view, "below_soc": 49.0})
+    assert labels == ("Lad ikke i nat", "Lad til 80 %"), "nothing to charge tonight when waiting"
 
 
 async def test_price_limit_in_cheapest_waits_instead_of_done(hass: HomeAssistant, request, freezer):
