@@ -130,6 +130,7 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
             }
         if key == "next_charge_start":
             schedule = planner.schedule
+            limit_on = planner.flags["smart_price_limit"]
             return {
                 "mode": planner.mode,
                 "charge_now": schedule.charge_now,
@@ -145,6 +146,11 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "trip_departure": planner.trip.departure,
                 "estimated_prices": schedule.estimated,
                 "shortfall_kwh": schedule.shortfall_kwh,
+                # Price limit on the cheapest plan: the limit, the energy left out above it and the level reached.
+                "price_limit": planner.settings["smart_max_price"] if limit_on else None,
+                "price_limit_floor": planner.settings["smart_floor_soc"] if limit_on else None,
+                "above_limit_kwh": schedule.limit_kwh,
+                "limit_soc": round(schedule.limit_soc, 1) if schedule.limit_soc is not None else None,
                 # The prices the plan chose from, for a chart of when the car would charge (also before it is
                 # plugged in): start, price (with the price factor) and whether it is estimated.
                 "slot_minutes": planner.slot_minutes,

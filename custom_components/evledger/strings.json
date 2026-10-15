@@ -298,6 +298,12 @@
       },
       "heat_hold_price": {
         "name": "Price limit while heating"
+      },
+      "smart_max_price": {
+        "name": "Cheapest max price"
+      },
+      "smart_floor_soc": {
+        "name": "Always charge to"
       }
     },
     "time": {
@@ -435,6 +441,9 @@
       },
       "tyre_reminder": {
         "name": "Tyre change reminder"
+      },
+      "smart_price_limit": {
+        "name": "Price limit in cheapest"
       }
     },
     "button": {

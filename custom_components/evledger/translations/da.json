@@ -298,6 +298,12 @@
       },
       "heat_hold_price": {
         "name": "Prisgrænse under opvarmning"
+      },
+      "smart_max_price": {
+        "name": "Maks. pris i Billigst"
+      },
+      "smart_floor_soc": {
+        "name": "Lad altid op til"
       }
     },
     "time": {
@@ -435,6 +441,9 @@
       },
       "tyre_reminder": {
         "name": "Påmindelse om hjulskift"
+      },
+      "smart_price_limit": {
+        "name": "Prisgrænse i Billigst"
       }
     },
     "button": {

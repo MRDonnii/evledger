@@ -30,6 +30,12 @@ NUMBERS: tuple[NumberEntityDescription, ...] = (
     NumberEntityDescription(key="price_cap", icon="mdi:cash-lock",
                             native_min_value=-5, native_max_value=20, native_step=0.01,
                             mode=NumberMode.BOX),
+    NumberEntityDescription(key="smart_max_price", icon="mdi:cash-lock",
+                            native_min_value=-5, native_max_value=20, native_step=0.05,
+                            mode=NumberMode.BOX),
+    NumberEntityDescription(key="smart_floor_soc", icon="mdi:battery-arrow-up-outline",
+                            native_min_value=0, native_max_value=100, native_step=5,
+                            native_unit_of_measurement=PERCENTAGE, mode=NumberMode.SLIDER),
     NumberEntityDescription(key="min_soc", icon="mdi:battery-alert-variant-outline",
                             native_min_value=0, native_max_value=100, native_step=1,
                             native_unit_of_measurement=PERCENTAGE, mode=NumberMode.SLIDER),
@@ -84,7 +90,7 @@ class PlanNumber(EvSmartChargeEntity, RestoreNumber):
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        if self.entity_description.key in ("price_cap", "low_price", "heat_hold_price"):
+        if self.entity_description.key in ("price_cap", "low_price", "heat_hold_price", "smart_max_price"):
             return f"{self.planner.price_unit or 'kr'}/kWh"
         return self.entity_description.native_unit_of_measurement
 

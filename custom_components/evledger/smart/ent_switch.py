@@ -32,7 +32,8 @@ FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-chec
               "learn_departure": "mdi:clock-start", "prefer_green": "mdi:leaf",
               "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check",
               "quiet_night": "mdi:bell-sleep", "week_plan": "mdi:calendar-week",
-              "heat_hold": "mdi:car-seat-heater", "tyre_reminder": "mdi:tire"}
+              "heat_hold": "mdi:car-seat-heater", "tyre_reminder": "mdi:tire",
+              "smart_price_limit": "mdi:cash-lock"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):

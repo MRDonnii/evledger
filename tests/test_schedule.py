@@ -24,7 +24,7 @@ def schedule(mode="smart", soc=50.0, target=80.0, now=NIGHT, known=None, horizon
         power_kw=kw.get("power", 12), price_factor=kw.get("factor", 1.0),
         timeline=plan.build_timeline(now, known, horizon), constraints=tuple(kw.get("constraints", ())),
         window=kw.get("window"), price_cap=kw.get("price_cap"), min_soc=kw.get("min_soc"),
-        cap_override=kw.get("cap_override", True))
+        cap_override=kw.get("cap_override", True), max_price=kw.get("max_price"), floor_soc=kw.get("floor_soc"))
     return plan.build_schedule(data, now)
 
 
@@ -268,3 +268,45 @@ def test_an_hour_slot_is_cut_at_the_ready_by_time():
     result = schedule_in(60, known, 0.5, [plan.Constraint(NIGHT + timedelta(hours=8, minutes=45), 60.0)])
     assert [(b.start, b.end) for b in result.blocks] == [
         (NIGHT + timedelta(hours=8), NIGHT + timedelta(hours=8, minutes=30))]
+
+
+# Price limit on the cheapest plan (user, 2026-10-15: "kun lade hvis prisen er under X kr, eller hvis den er under en %
+# grænse"). Prices from 22:00: 3, 2, 1, 0.5, 0.6, 2, 3, 3, 3, 3.
+EXPENSIVE = [3, 2.5, 2.2, 2.1, 2.4, 2.6, 3, 3, 3, 3]
+
+
+def test_price_limit_skips_a_night_above_the_limit():
+    result = schedule(soc=49, known=hourly(NIGHT, EXPENSIVE), constraints=[deadline(8)], max_price=2.0, floor_soc=20)
+    assert result.blocks == () and result.energy_kwh == 0
+    assert result.limit_kwh == round(31 * 0.6, 2), "the energy to the target that was too expensive"
+    assert result.shortfall_kwh == 0, "not a warning: left out on purpose"
+
+
+def test_price_limit_still_charges_to_the_floor_in_the_cheapest_slots():
+    result = schedule(soc=10, known=hourly(NIGHT, EXPENSIVE), constraints=[deadline(8)], max_price=2.0, floor_soc=20)
+    assert result.energy_kwh == 6.0, "10 % → 20 % whatever the price"
+    assert result.blocks[0].start.hour == 1 and result.blocks[-1].end <= datetime(2026, 10, 10, 2, 0, tzinfo=TZ), \
+        "in the cheapest hour (2.1)"
+    assert round(result.limit_soc) == 20
+
+
+def test_price_limit_charges_below_it_up_to_the_target():
+    # 0.5 and 0.6 are below 1.0: two hours = 24 kWh, enough for 49 → 80 % (18.6 kWh).
+    result = schedule(soc=49, constraints=[deadline(8)], max_price=1.0, floor_soc=20)
+    assert result.energy_kwh == 18.6 and result.limit_kwh == 0
+    assert all(slot.price <= 1.0 for slot in result.slots)
+    # Only one cheap hour below 0.55: as far as it reaches, the rest is too expensive.
+    partial = schedule(soc=49, constraints=[deadline(8)], max_price=0.55, floor_soc=20)
+    assert partial.energy_kwh == 12.0 and partial.limit_kwh == round(18.6 - 12.0, 2)
+    assert round(partial.limit_soc) == 69
+
+
+def test_price_limit_does_not_hold_back_a_trip():
+    trip = plan.Constraint(NIGHT + timedelta(hours=8), 80.0, firm=True)
+    result = schedule(soc=49, known=hourly(NIGHT, EXPENSIVE), constraints=[trip], max_price=2.0, floor_soc=20)
+    assert result.energy_kwh == 18.6 and result.limit_kwh == 0
+
+
+def test_price_limit_only_in_the_cheapest_plan():
+    result = schedule(mode="now", soc=49, known=hourly(NIGHT, EXPENSIVE), max_price=2.0, floor_soc=20)
+    assert result.charge_now and result.energy_kwh > 0
