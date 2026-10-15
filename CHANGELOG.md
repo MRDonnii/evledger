@@ -4,6 +4,17 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.7.4] - 2026-10-15
+
+### Added
+
+- **A price limit on Cheapest, with your own set points.** Switch *Price limit in cheapest* on, and Cheapest charges
+  above *Always charge to* (20 % by default) only in quarters at or below *Cheapest max price* (2.00 kr/kWh by
+  default). Below that level it still charges up to it in the cheapest quarters before the ready-by time, whatever
+  the price. A night where every quarter is dearer leaves the car waiting (status *waiting*, not *target reached*),
+  and the plan message says the price is above the limit; a temporary trip is always charged in full. The plan's
+  sensor shows `price_limit`, `price_limit_floor`, `above_limit_kwh` and `limit_soc`.
+
 ## [0.7.3] - 2026-10-15
 
 ### Fixed

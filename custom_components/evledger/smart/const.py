@@ -39,6 +39,9 @@ DEFAULT_READY_BY = "07:00"
 DEFAULT_FIXED_START = "22:00"
 DEFAULT_FIXED_END = "06:00"
 DEFAULT_PRICE_CAP = 1.5
+# Price limit on the cheapest plan: above the floor, charge only at or below the price (kr/kWh).
+DEFAULT_SMART_MAX_PRICE = 2.0
+DEFAULT_SMART_FLOOR_SOC = 20.0
 DEFAULT_MIN_SOC = 20.0
 DEFAULT_CONSUMPTION = 180.0
 DEFAULT_TRIP_MARGIN = 15.0

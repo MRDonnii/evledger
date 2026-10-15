@@ -52,6 +52,8 @@ from .const import (
     DEFAULT_READY_BY_WEEKEND,
     DEFAULT_REMINDER_SOC,
     DEFAULT_REMINDER_TIME,
+    DEFAULT_SMART_FLOOR_SOC,
+    DEFAULT_SMART_MAX_PRICE,
     DEFAULT_TARGET_SOC,
     DEFAULT_TRIP_MARGIN,
     DEFAULT_TRIP_RESERVE,
@@ -171,6 +173,8 @@ class ChargePlanner:
             "price_factor": DEFAULT_PRICE_FACTOR,
             "price_cap": DEFAULT_PRICE_CAP,
             "min_soc": DEFAULT_MIN_SOC,
+            "smart_max_price": DEFAULT_SMART_MAX_PRICE,
+            "smart_floor_soc": DEFAULT_SMART_FLOOR_SOC,
             "consumption": DEFAULT_CONSUMPTION,
             "trip_margin": DEFAULT_TRIP_MARGIN,
             "trip_reserve": DEFAULT_TRIP_RESERVE,
@@ -197,7 +201,7 @@ class ChargePlanner:
                                        "learn_departure": False, "prefer_green": False,
                                        "ask_public_price": False, "morning_check": False, "quiet_night": True,
                                        "week_plan": False, "heat_hold": False,
-                                       "tyre_reminder": False}
+                                       "tyre_reminder": False, "smart_price_limit": False}
         # Learned departure times ({"history_days", "times"}), the cheaper day waited for, the grid's CO2 forecast,
         # and the ready-by time that just passed with the level the plan aimed at (for the morning check).
         self.learned_departures: dict = {"history_days": 0, "times": None}
@@ -935,7 +939,7 @@ class ChargePlanner:
         if self.trip_active and self.trip.departure > now:
             trip_target = self.trip_target_soc
             limit = self.car_limit() or 100.0
-            result.append(Constraint(self.trip.departure, min(max(target, trip_target or 0.0), limit)))
+            result.append(Constraint(self.trip.departure, min(max(target, trip_target or 0.0), limit), firm=True))
         return tuple(result)
 
     @callback
@@ -1076,6 +1080,8 @@ class ChargePlanner:
                 cap_override=self.cap_override,
                 keep_start=keep if mode == self.mode and keep_plan else None,
                 green=self.flags["prefer_green"],
+                max_price=self.settings["smart_max_price"] if self.flags["smart_price_limit"] else None,
+                floor_soc=self.settings["smart_floor_soc"],
             ), now)
 
         self.waiting = None
@@ -1554,6 +1560,8 @@ class ChargePlanner:
             return STATUS_STARTING
         if self._battery_soc() is None and not self.soc_assumed:
             return STATUS_UNKNOWN  # not "target reached" just because the car has not reported yet
+        if self.schedule.energy_kwh <= 0 and self.schedule.limit_kwh >= 0.5 and not self.car_full:
+            return STATUS_WAITING  # the price is above the limit: waits for cheaper power
         if (self.schedule.energy_kwh <= 0 and self.mode != MODE_NOW) or self.car_full:
             return STATUS_DONE
         return STATUS_WAITING

@@ -132,9 +132,17 @@ class PhoneNotifier:
             return "Plan: Pause\nBilen lades ikke."
         lines = [f"Plan: {NAMES.get(planner.mode, planner.mode)}"]
         if not schedule.blocks:
-            lines.append(wait_text(planner.waiting, unit) if planner.waiting
-                         else "Batteriet er allerede ladet til målet.")
+            if planner.waiting:
+                lines.append(wait_text(planner.waiting, unit))
+            elif schedule.limit_kwh >= 0.5:
+                lines.append(f"Prisen er over din grænse på {money(planner.settings['smart_max_price'])}/kWh, "
+                             "så bilen lades ikke nu.")
+            else:
+                lines.append("Batteriet er allerede ladet til målet.")
             return "\n".join(lines)
+        if schedule.limit_kwh >= 0.5:
+            lines.append(f"Prisgrænse {money(planner.settings['smart_max_price'])}/kWh: lader til ca. "
+                         f"{schedule.limit_soc or 0:.0f} % (resten er for dyrt).")
         first, last = schedule.blocks[0].start, planner.block_end(schedule.blocks[-1], dt_util.now())
         start = "nu" if first <= dt_util.now() else when(first)
         same_day = dt_util.as_local(first).date() == dt_util.as_local(last).date()

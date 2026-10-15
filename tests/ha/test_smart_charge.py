@@ -613,3 +613,24 @@ async def test_other_car_alert_waits_for_the_car_to_report(hass: HomeAssistant, 
     await later(hass, freezer, 4)
     assert sum("ikke denne bil" in message["message"] for message in sent) == 1, "told once when it stays"
 
+
+
+async def test_price_limit_in_cheapest_waits_instead_of_done(hass: HomeAssistant, request, freezer):
+    entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=False, soc="49")
+    planner = entry.runtime_data
+    assert float(state(hass, "sensor.bil_planned_charge_energy")) > 0, "without the limit it plans a charge"
+    await hass.services.async_call("number", "set_value", {"entity_id": "number.bil_cheapest_max_price",
+                                                           "value": 0.4}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_price_limit_in_cheapest"},
+                                   blocking=True)
+    await later(hass, freezer, 1)
+    assert planner.schedule.energy_kwh == 0, "every quarter costs more than 0.40"
+    assert state(hass, "sensor.bil_charge_status") == "waiting", "not 'target reached'"
+    attrs = hass.states.get("sensor.bil_next_charge_start").attributes
+    assert attrs["price_limit"] == 0.4 and attrs["above_limit_kwh"] > 0
+    assert "over din grænse" in planner.notify.plan_text(planner)
+    assert not calls["switch.turn_on"] and not calls["button.press"]
+    hass.states.async_set("sensor.car_battery", "10")
+    await later(hass, freezer, 1)
+    assert planner.schedule.energy_kwh > 0, "below 20 %: charged to 20 % whatever the price"
+    assert round(planner.schedule.limit_soc) == 20

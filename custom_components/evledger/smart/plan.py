@@ -211,6 +211,8 @@ class Constraint:
 
     deadline: datetime
     target_soc: float
+    # A must (a temporary trip): reached whatever the price, also with a price limit on the cheapest plan.
+    firm: bool = False
 
 
 @dataclass(frozen=True)
@@ -234,6 +236,10 @@ class ScheduleInput:
     keep_start: datetime | None = None
     # Among (nearly) equally cheap windows, take the one with the least CO2 per kWh.
     green: bool = False
+    # A price limit on the cheapest plan: above floor_soc only slots at or below max_price are used; up to floor_soc
+    # the cheapest slots are used whatever the price. None: no limit.
+    max_price: float | None = None
+    floor_soc: float | None = None
 
 
 @dataclass(frozen=True)
@@ -272,6 +278,10 @@ class Schedule:
     cap_soc: float | None = None
     # The grid's CO2 per kWh for the planned energy (g/kWh), when known.
     co2: float | None = None
+    # Price limit on the cheapest plan: the energy left out because every slot in time costs more than the limit,
+    # and the battery level the plan reaches.
+    limit_kwh: float = 0.0
+    limit_soc: float | None = None
 
     def next_block(self, now: datetime) -> ChargeBlock | None:
         return next((block for block in self.blocks if block.end > now), None)
@@ -407,6 +417,13 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
     def under_cap(slot: TimelineSlot) -> bool:
         return not slot.estimated and slot.price * data.price_factor <= data.price_cap + 1e-9
 
+    limited = data.mode == MODE_SMART and data.max_price is not None
+    limit_short = 0.0
+
+    def under_limit(slot: TimelineSlot) -> bool:
+        # An estimated price (not published yet) is not known to be below the limit.
+        return not slot.estimated and slot.price * data.price_factor <= data.max_price + 1e-9
+
     if data.mode == MODE_NOW:
         need = wall(data.target_soc)
         take(usable, need, chronological)
@@ -454,14 +471,32 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             before = [slot for slot in usable if slot.end <= constraint.deadline]
             if capped and not data.cap_override:
                 before = [slot for slot in before if under_cap(slot)]
-            take(before, target_kwh, cheapest, constraint.deadline)
-            shortfall = max(shortfall, target_kwh - energy(constraint.deadline))
-            need = max(need, target_kwh)
+            if limited and not constraint.firm:
+                # Up to the floor in the cheapest slots whatever the price; above it only below the limit.
+                floor = min(constraint.target_soc, data.floor_soc) if data.floor_soc is not None else None
+                floor_kwh = wall(floor)
+                take(before, floor_kwh, cheapest, constraint.deadline)
+                take([slot for slot in before if under_limit(slot)], target_kwh, cheapest, constraint.deadline)
+                reached = energy(constraint.deadline)
+                shortfall = max(shortfall, floor_kwh - reached)  # only the floor is a must
+                # A slot above the limit is only there for the floor: no more than the floor is bought then (a whole
+                # quarter would otherwise charge a little past it at the high price).
+                dear = any(not under_limit(slot) for slot in chosen.values() if slot.end <= constraint.deadline)
+                planned_kwh = min(target_kwh, floor_kwh if dear else reached)
+                limit_short = max(limit_short, target_kwh - planned_kwh)
+                need = max(need, planned_kwh)
+            else:
+                take(before, target_kwh, cheapest, constraint.deadline)
+                shortfall = max(shortfall, target_kwh - energy(constraint.deadline))
+                need = max(need, target_kwh)
             top = max(top or 0.0, constraint.target_soc)
 
-    if data.mode in (MODE_SMART, MODE_MANUAL) and len(constraints) == 1 and chosen:
+    # With a price limit, a single window may only use slots below it (not tried while the floor needs dearer ones).
+    limit_pool = (lambda slots: [slot for slot in slots if under_limit(slot)]) if limited else (lambda slots: slots)
+    if (data.mode in (MODE_SMART, MODE_MANUAL) and len(constraints) == 1 and chosen
+            and (not limited or all(under_limit(slot) for slot in chosen.values()))):
         deadline = constraints[0].deadline
-        window = _cheapest_window([slot for slot in usable if slot.end <= deadline], need, kwh,
+        window = _cheapest_window(limit_pool([slot for slot in usable if slot.end <= deadline]), need, kwh,
                                   data.price_factor, data.keep_start, data.green)
         if window and data.green and _greener(window, list(chosen.values()), need, kwh, data.price_factor):
             chosen = {slot.start: slot for slot in window}
@@ -469,8 +504,8 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             split_cost = _allocation_cost(chosen.values(), need, kwh, data.price_factor)
             if split_cost > _allocation_cost(window, need, kwh, data.price_factor) * (1 - SPLIT_MIN_SAVING):
                 chosen = {slot.start: slot for slot in window}
-        kept = _keep_running(list(chosen.values()), [slot for slot in usable if slot.end <= deadline], need, kwh,
-                             data.price_factor, data.keep_start)
+        kept = _keep_running(list(chosen.values()), limit_pool([slot for slot in usable if slot.end <= deadline]), need,
+                             kwh, data.price_factor, data.keep_start)
         if kept:
             chosen = {slot.start: slot for slot in kept}
 
@@ -525,6 +560,8 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         cap_soc=(min(data.soc + (total - over_kwh) * data.efficiency / data.capacity_kwh * 100, 100.0)
                  if capped else None),
         co2=round(co2_grams / co2_kwh) if co2_kwh > 1e-9 and co2_kwh >= total * 0.5 else None,
+        limit_kwh=round(max(limit_short, 0.0), 2),
+        limit_soc=(min(data.soc + total * data.efficiency / data.capacity_kwh * 100, 100.0) if limited else None),
     )
 
 
