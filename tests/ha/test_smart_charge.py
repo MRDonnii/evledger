@@ -685,6 +685,22 @@ async def test_price_limit_asks_whether_to_wait(hass: HomeAssistant, request, fr
     assert len(asked_about_waiting(sent)) == 1, "answered: not asked again"
 
 
+async def test_a_failing_extra_never_stops_the_plan(hass: HomeAssistant, request, freezer, caplog):
+    """A fault in an extra (the price question, a message) is logged once; the plan still controls the charger."""
+    entry, _, _ = await limit_setup(hass, request, freezer)
+    planner = hass.data[DOMAIN][entry.entry_id].smart
+    with (patch.object(planner, "_limit_view", side_effect=RuntimeError("boom")),
+          patch.object(planner.routines, "check_started", side_effect=KeyError("x")),
+          patch.object(planner, "_control", wraps=planner._control) as control):
+        planner.async_recalculate()
+        planner.async_recalculate()
+    assert control.call_count == 2, "the charger is still controlled"
+    assert planner.schedule.energy_kwh == pytest.approx(31 * 60 / 100 / 0.9, abs=0.01), "the plan to the target"
+    assert planner.limit_view is None and planner._limit_params is None
+    assert caplog.text.count("price question failed;") == 1, "logged once, not every minute"
+    assert "started message failed" in caplog.text
+
+
 async def test_price_limit_asks_only_when_waiting_saves_enough(hass: HomeAssistant, request, freezer):
     _, _, sent = await limit_setup(hass, request, freezer, min_saving=30)
     assert not asked_about_waiting(sent), "waiting saves about 23 kr, less than 30"

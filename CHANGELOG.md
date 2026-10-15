@@ -4,6 +4,15 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.3] - 2026-10-16
+
+### Fixed
+
+- A fault in an extra can no longer stop smart charging. The extras are the price question, the phone messages,
+  learned departures, the CO2 forecast, waiting for a cheaper day, the plan comparison, the tyre reminder and the
+  entity updates. The plan still controls the charger, the ledger still records the charge, and the fault is logged
+  once with its traceback instead of every minute.
+
 ## [0.9.2] - 2026-10-16
 
 ### Changed

@@ -78,7 +78,9 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._process_charge(snapshot, now)
             if snapshot.odometer_km is not None and self._last_odometer_km is None:
                 self._last_odometer_km = snapshot.odometer_km
-        self._tyre_reminder(now)
+        if (smart := getattr(self, "smart", None)) is not None:
+            # A reminder is an extra: a fault in it must not make the ledger's entities unavailable.
+            smart._optional("tyre reminder", lambda: self._tyre_reminder(now))
 
         return {
             "snapshot": snapshot,
@@ -529,7 +531,8 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.vehicle_name,
             )
             if (smart := getattr(self, "smart", None)) is not None:
-                smart.routines.ask_public_price(open_public)
+                # A message is an extra: a fault in it must not stop the ledger (the charge is already saved).
+                smart._optional("public price question", lambda: smart.routines.ask_public_price(open_public))
 
     @staticmethod
     def _opened_just_before(charge: ChargeSession, now: datetime) -> bool:
@@ -631,7 +634,8 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_known_session_kwh = None
         self.hass.bus.async_fire(f"{DOMAIN}_charge_finished", {"vehicle": self.vehicle_name, **charge.to_dict()})
         if (smart := getattr(self, "smart", None)) is not None:
-            smart.routines.charge_finished(charge)  # the message when the whole charge is done
+            # The message when the whole charge is done; a fault in it must not stop the ledger.
+            smart._optional("charge finished", lambda: smart.routines.charge_finished(charge))
         _LOGGER.info(
             "%s: home charging ended, %.2f kWh, %s %.2f",
             self.vehicle_name,

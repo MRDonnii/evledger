@@ -281,6 +281,9 @@ class ChargePlanner:
         self.timeline: list = []
         self.horizon: datetime | None = None
         self.alternatives: dict[str, Schedule] = {}
+        # The extras (questions, messages, learned times, comparisons) whose fault was logged: an extra that fails
+        # must never stop the plan from controlling the charger (logged once, see _optional).
+        self._faults: set[str] = set()
         self.deadline: datetime | None = None
         self.price_unit: str | None = None
         self.slot_count = 0
@@ -967,6 +970,19 @@ class ChargePlanner:
             result.append(Constraint(self.trip.departure, min(max(target, trip_target or 0.0), limit), firm=True))
         return tuple(result)
 
+    def _optional(self, name: str, func, default=None):
+        """Run an extra so that a fault in it never stops the plan: the charger is still controlled by the plan and
+        the fault is logged once (with its traceback) instead of every minute."""
+        try:
+            return func()
+        except Exception:  # noqa: BLE001 – whatever an extra raises, the charging plan goes on
+            if name not in self._faults:
+                self._faults.add(name)
+                _LOGGER.exception("%s: %s failed; the charging plan goes on without it", self.entry.title, name)
+            else:
+                _LOGGER.debug("%s: %s failed again", self.entry.title, name, exc_info=True)
+            return default
+
     @callback
     def async_recalculate(self) -> None:
         now = dt_util.now()
@@ -1031,7 +1047,9 @@ class ChargePlanner:
         self.slot_count = len(ordered)
         previous, previous_target = self.deadline, self._deadline_target
         if self.flags["learn_departure"]:
-            self.learned_departures = learned_departures.learn(self.trips(), self._home(), now)
+            self.learned_departures = self._optional(
+                "learned departures", lambda: learned_departures.learn(self.trips(), self._home(), now),
+                self.learned_departures)
         if self.once is not None and self.once["at"] <= now:
             _LOGGER.debug("The one-time ready-by time %s has passed, back to the normal times", self.once["at"])
             self.once = None
@@ -1077,7 +1095,8 @@ class ChargePlanner:
         later = [moment for moment, _target, _source in later_with]
         self._later_targets = {moment: target for moment, target, _source in later_with}
         horizon = max([self.deadline, window[1], *later, *(c.deadline for c in self.constraints(now))])
-        timeline = self._with_co2(build_timeline(now, ordered, horizon, self.slot_minutes))
+        base = build_timeline(now, ordered, horizon, self.slot_minutes)
+        timeline = self._optional("CO2 forecast", lambda: self._with_co2(base), base)
         self.timeline, self.horizon = timeline, horizon
 
         # The charge running now, or the start already announced, stays while it is still among the cheapest.
@@ -1115,27 +1134,33 @@ class ChargePlanner:
         self.waiting = None
         # A charge already running is not stopped to wait for another day.
         if later and self.mode == MODE_SMART and soc is not None and self.charger_state != ChargerState.CHARGING:
-            self.waiting = self._cheaper_day(now, soc, later, plan_for)
+            self.waiting = self._optional("wait for a cheaper day",
+                                          lambda: self._cheaper_day(now, soc, later, plan_for))
         constraints = self.constraints(now)
         self._deadline_target = None if self.waiting else (
             self.target if self.mode in (MODE_SMART, MODE_PRICE_CAP) else None)
 
         # Asking before dear charging: the best later period sets what the plan does after "Vent med resten".
         self._limit_params = None
-        self.limit_view = self._limit_view(now, soc, plan_for, constraints, ordered)
+        self.limit_view = self._optional("price question",
+                                         lambda: self._limit_view(now, soc, plan_for, constraints, ordered))
+        if self.limit_view is None:
+            self._limit_params = None  # no view (or it failed): "Vent med resten" falls back to the plan to the target
         self.schedule = plan_for(self.mode, constraints)
         # What the other plans would cost right now, so they can be compared before choosing.
-        self.alternatives = {mode: self.schedule if mode == self.mode else plan_for(mode)
-                             for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)}
+        self.alternatives = self._optional(
+            "plan comparison", lambda: {mode: self.schedule if mode == self.mode else plan_for(mode)
+                                        for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)},
+            {self.mode: self.schedule})
 
-        self.routines.note_plan(now)
-        self.routines.plug_soon(now)
-        self.routines.low_price(now)
+        self._optional("plan note", lambda: self.routines.note_plan(now))
+        self._optional("plug-in reminder", lambda: self.routines.plug_soon(now))
+        self._optional("cheap power message", lambda: self.routines.low_price(now))
         self._control(now)
-        self._warn(now)
-        self.routines.check_offline(now)
-        self.routines.check_started(now)
-        self.routines.check_done(now)
+        self._optional("warnings", lambda: self._warn(now))
+        self._optional("charger offline check", lambda: self.routines.check_offline(now))
+        self._optional("started message", lambda: self.routines.check_started(now))
+        self._optional("done message", lambda: self.routines.check_done(now))
         if self._info_pending and not self._notify_pending:
             self._info_pending = False
             self.entry.async_create_background_task(
@@ -1146,7 +1171,7 @@ class ChargePlanner:
             self.entry.async_create_background_task(
                 self.hass, self.notify.async_send_plan(self), "ev_smart_charge_notify")
         for update in list(self._listeners):
-            update()
+            self._optional("entity update", update)
 
     def _inputs_waited(self, now: datetime) -> bool:
         return self._started_at is None or (dt_util.utcnow() - self._started_at).total_seconds() >= INPUT_WAIT_SECONDS
@@ -1229,7 +1254,7 @@ class ChargePlanner:
     @callback
     def notify_listeners(self) -> None:
         for update in list(self._listeners):
-            update()
+            self._optional("entity update", update)
 
     def _restored_ahead(self, now: datetime) -> bool:
         """The plan from before a restart still has a charging period that has not ended."""
