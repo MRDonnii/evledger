@@ -26,6 +26,7 @@ from .car_refresh import CarRefresh
 from .charger import ChargerBackend, create_backend
 from .const import (
     ASSUMED_SOC,
+    CAR_REPORT_GRACE_SECONDS,
     CONF_BATTERY_ENTITY,
     CONF_CAPACITY,
     CONF_CAR_PLUGGED_ENTITY,
@@ -278,6 +279,8 @@ class ChargePlanner:
         self._disconnected_since: datetime | None = None
         self._alerted: set[str] = set()
         self._new_plug = False  # a car was plugged in while running (not just found plugged in at start-up)
+        self._plug_told = False  # the plugged-in message (plan or confirmation) has been queued for this plug-in
+        self._other_car_since: datetime | None = None
         # The last battery level seen (restored with the charge mode), used while the car is not reporting.
         self.last_soc: float | None = None
         self.soc_assumed = False
@@ -770,15 +773,14 @@ class ChargePlanner:
         return False, max(changed for _, changed in known)
 
     def _car_present(self) -> bool:
-        """False only when the car's own plug sensor says it is not plugged in (another car is). With several cars
-        on the charger: only the car that is on it."""
+        """False only when the car's own plug sensors all say it is not plugged in (another car is). One of them
+        saying plugged in is enough: the car's integrations do not update at the same time, and a sleeping car leaves
+        one of them on "disconnected" for hours. With several cars on the charger: only the car that is on it."""
         if self.shared:
             return self.share.owner() is self
-        if not self.plugged_entity or (state := self.hass.states.get(self.plugged_entity)) is None:
+        if not self.plugged_entity:
             return True
-        if state.state == STATE_OFF or state.state in ("false", "unplugged", "disconnected"):
-            return False
-        return state.state.lower() in PLUGGED_STATES or state.state in ("unknown", "unavailable")
+        return self.car_plug_state()[0] is not False
 
     def _limit_entity(self) -> str | None:
         """The car's charge limit entity on the battery sensor's device, found once (again after a plug-in)."""
@@ -950,6 +952,9 @@ class ChargePlanner:
             was_present, self.car_present = self.car_present, self._car_present()
             event = self.controller.observe(self.charger_state, now)
             self._handle_event(event, now)
+            if (not self.shared and self.car_present and not was_present and self._new_plug and not self._plug_told
+                    and self.charger_state in CONNECTED and self.mode != MODE_MANUAL and event is None):
+                self._queue_plug_message()  # the car reported its plug after the charger did
             if self.shared:
                 if self.charger_state == ChargerState.DISCONNECTED:
                     self.share.unplugged()
@@ -1127,16 +1132,13 @@ class ChargePlanner:
             self._limit_id = None
             self._full_ids = None
             self._new_plug = True
+            self._plug_told = False
             self.routines.new_plug()
             self._refresh_car()
         if not new_plug and event == ChargerEvent.PLUGGED:
             return
         if event == ChargerEvent.PLUGGED and self.car_present and self.mode != MODE_MANUAL:
-            if self.confirm_enabled and self.notify.targets:
-                self.awaiting_since = dt_util.now()
-                self._notify_pending = True
-            elif self.info_enabled and self.notify.targets:
-                self._info_pending = True
+            self._queue_plug_message()
         elif (event == ChargerEvent.MANUAL_START and self.car_present and not self.charge_desired
               and self.mode not in (MODE_NOW, MODE_MANUAL)):
             # Started from the charger's app or the car while the plan did not want to charge:
@@ -1144,6 +1146,15 @@ class ChargePlanner:
             self.mode_before_now, self.mode = self.mode, MODE_NOW
             self.now_seen_connected = True
             self.controller.last_desired = True
+
+    def _queue_plug_message(self) -> None:
+        """The plan to the phones (or the question about it) when this car has been plugged in."""
+        self._plug_told = True
+        if self.confirm_enabled and self.notify.targets:
+            self.awaiting_since = dt_util.now()
+            self._notify_pending = True
+        elif self.info_enabled and self.notify.targets:
+            self._info_pending = True
 
     def _took_charger(self) -> None:
         _LOGGER.debug("%s is the car on the shared charger", self.entry.title)
@@ -1174,12 +1185,7 @@ class ChargePlanner:
         """Whether this car is plugged in: the charger and the car's own plug sensor, None when not known."""
         if self.backend is not None and self.charger_state != ChargerState.UNKNOWN:
             return self.charger_state in CONNECTED and self.car_present
-        if self.plugged_entity and (state := self.hass.states.get(self.plugged_entity)) is not None:
-            if state.state.lower() in PLUGGED_STATES:
-                return True
-            if state.state not in ("unknown", "unavailable"):
-                return False
-        return None
+        return self.car_plug_state()[0]
 
     @callback
     def notify_listeners(self) -> None:
@@ -1293,7 +1299,8 @@ class ChargePlanner:
     @callback
     def _refresh_car(self) -> None:
         """Ask the car's integration for fresh data when the cable goes in (plug and battery level)."""
-        entities = [entity for entity in (self.plugged_entity, self.battery_entity) if entity]
+        entities = list(dict.fromkeys(
+            entity for entity in (self.plugged_entity, *self._plug_entities(), self.battery_entity) if entity))
         if entities and self.hass.services.has_service("homeassistant", "update_entity"):
             self.entry.async_create_background_task(
                 self.hass,
@@ -1303,6 +1310,8 @@ class ChargePlanner:
     @callback
     def _alert(self, now: datetime) -> None:
         """Tell the phones once when charging cannot follow the plan."""
+        if self.status != STATUS_OTHER_CAR:
+            self._other_car_since = None
         if self.status in (STATUS_CHARGING, STATUS_DISCONNECTED, STATUS_DONE):
             self._alerted.clear()
             return
@@ -1323,8 +1332,12 @@ class ChargePlanner:
             alerts[STATUS_OTHER_CAR] = ("Laderen er tilsluttet, men ingen af bilerne melder sig endnu. "
                                         f"Er det {self.entry.title}, så tryk Lad nu.")
         if (text := alerts.get(self.status)) and self.status not in self._alerted:
-            if self.status == STATUS_OTHER_CAR and not self._new_plug:
-                return  # only when a car is plugged in, not at every restart while it stands there
+            if self.status == STATUS_OTHER_CAR:
+                if not self._new_plug:
+                    return  # only when a car is plugged in, not at every restart while it stands there
+                self._other_car_since = self._other_car_since or now
+                if now - self._other_car_since < timedelta(seconds=CAR_REPORT_GRACE_SECONDS):
+                    return  # the car may not have reported its plug yet
             self._alerted.add(self.status)
             self.entry.async_create_background_task(
                 self.hass, self.notify.async_send_alert(text), "ev_smart_charge_notify_alert")

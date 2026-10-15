@@ -541,9 +541,75 @@ async def test_other_car_alert_and_charge_now_charges_it(hass: HomeAssistant, re
     await later(hass, freezer, 1)
     assert state(hass, "sensor.bil_charge_status") == "other_car"
     assert not calls["button.press"]
+    assert not any("ikke denne bil" in message["message"] for message in sent), "the car may still be reporting"
+    await later(hass, freezer, 5)
     assert any("ikke denne bil" in message["message"] for message in sent)
     actions = {a["title"]: a["action"] for a in sent[-1]["data"]["actions"]}
     hass.bus.async_fire("mobile_app_notification_action", {"action": actions["Lad nu"]})
     await hass.async_block_till_done(wait_background_tasks=True)
     await later(hass, freezer, 1)
     assert calls["button.press"], "Lad nu charges the other car too"
+
+
+async def two_integrations_car(hass: HomeAssistant, request, freezer, charger_state="disconnected", cheap_now=True):
+    """The car "Bil" from two integrations on same-named devices: Tesla Custom (battery, stale plug sensor "charger")
+    and Tesla Fleet (the cable), as at home."""
+    sent = []
+
+    async def fake_notify(call):
+        sent.append(call.data)
+
+    hass.services.async_register("notify", "mobile_app_a", fake_notify)
+    registry = er.async_get(hass)
+    devices = dr.async_get(hass)
+    custom = MockConfigEntry(domain="tesla_custom")
+    custom.add_to_hass(hass)
+    custom_device = devices.async_get_or_create(config_entry_id=custom.entry_id, identifiers={("tesla_custom", "1")},
+                                                name="Bil")
+    registry.async_get_or_create("sensor", "tesla_custom", "vin_battery", device_id=custom_device.id,
+                                 config_entry=custom, suggested_object_id="car_battery")
+    registry.async_get_or_create("binary_sensor", "tesla_custom", "vin_charger", device_id=custom_device.id,
+                                 config_entry=custom, suggested_object_id="car_plug", original_device_class="plug")
+    fleet = MockConfigEntry(domain="tesla_fleet")
+    fleet.add_to_hass(hass)
+    fleet_device = devices.async_get_or_create(config_entry_id=fleet.entry_id, identifiers={("tesla_fleet", "1")},
+                                               name="Bil")
+    registry.async_get_or_create("binary_sensor", "tesla_fleet", "vin-charge_state_conn_charge_cable",
+                                 device_id=fleet_device.id, config_entry=fleet, suggested_object_id="car_cable")
+    hass.states.async_set("binary_sensor.car_plug", "off")  # "Disconnected" since the last time the car was awake
+    hass.states.async_set("binary_sensor.car_cable", "off")
+    entry, calls = await setup(hass, request, charger_state=charger_state, cheap_now=cheap_now)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "smart_charge": {
+        **entry.data["smart_charge"], "notify_services": ["mobile_app_a"]}})
+    await hass.async_block_till_done()
+    await later(hass, freezer, 3)
+    return entry, calls, sent
+
+
+async def test_one_plug_sensor_saying_plugged_in_is_enough(hass: HomeAssistant, request, freezer):
+    entry, calls, sent = await two_integrations_car(hass, request, freezer)
+    hass.states.async_set(MODE, "connected_requesting")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 1)
+    assert state(hass, "sensor.bil_charge_status") == "other_car", "no sensor of the car says plugged in yet"
+    hass.states.async_set("binary_sensor.car_cable", "on")  # Tesla Fleet reports; Tesla Custom stays "Disconnected"
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 1)
+    assert state(hass, "sensor.bil_charge_status") != "other_car"
+    assert state(hass, "binary_sensor.car_plug") == "off"
+    assert not any("ikke denne bil" in message["message"] for message in sent)
+    assert any(message["title"] == "Bil: ladeplan aktiv" for message in sent), "the plan is told when the car reports"
+    await later(hass, freezer, 10)
+    assert not any("ikke denne bil" in message["message"] for message in sent)
+
+
+async def test_other_car_alert_waits_for_the_car_to_report(hass: HomeAssistant, request, freezer):
+    entry, calls, sent = await two_integrations_car(hass, request, freezer)
+    hass.states.async_set(MODE, "connected_requesting")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 2)
+    assert state(hass, "sensor.bil_charge_status") == "other_car"
+    assert not any("ikke denne bil" in message["message"] for message in sent), "not before the car has had time"
+    await later(hass, freezer, 4)
+    assert sum("ikke denne bil" in message["message"] for message in sent) == 1, "told once when it stays"
+

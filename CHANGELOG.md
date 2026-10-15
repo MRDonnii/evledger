@@ -4,6 +4,18 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.7.3] - 2026-10-15
+
+### Fixed
+
+- **"The charger is connected, but it is not this car" no longer comes when it is this car.** A car from two
+  integrations (Tesla Custom and Tesla Fleet) has more than one plug sensor, and a sleeping car leaves one of them on
+  "disconnected" for hours. The car now counts as plugged in when any of its own plug sensors says so, and all of them
+  are asked for fresh data when the cable goes in.
+- **The message waits for the car to report.** "Another car is plugged in" is sent to the phones only when no sensor of
+  the car has said plugged in within four minutes; a car that wakes up a little after the charger is not mistaken for
+  another car. The plan on the phone (or the question about it) is sent when the car reports its plug after the charger.
+
 ## [0.7.2] - 2026-10-14
 
 ### Fixed

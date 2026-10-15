@@ -49,6 +49,9 @@ STARTUP_GRACE_SECONDS = 60
 # A charger that reboots or loses its connection reports "disconnected" for a short while; only a
 # disconnect longer than this counts as the car being unplugged.
 UNPLUG_GRACE_SECONDS = 120
+# A sleeping car reports its plug a little after the charger does (up to a few minutes); "another car is plugged in"
+# is only told to the phones when no sensor of the car has said plugged in for this long.
+CAR_REPORT_GRACE_SECONDS = 240
 # How long to wait for the car's battery level and the prices after a start before planning without
 # them (with the last known battery level, or an assumed low one, and estimated prices).
 INPUT_WAIT_SECONDS = 600
