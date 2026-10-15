@@ -103,3 +103,12 @@ async def test_price_sensors_chosen_by_hand_the_first_counts(hass: HomeAssistant
     planner = await ledger(hass, price_entities=[CURRENT, "sensor.stromligning_spotprice_vat", TOMORROW])
     assert planner.price_now(dt_util.now()) == 2.5, "the spot price alone only fills gaps"
     assert tomorrow_prices(planner) == {(2.2, False)}
+
+
+async def test_a_hand_picked_price_sensor_brings_its_tomorrow_sensor(hass: HomeAssistant):
+    # Only today's price sensor chosen by hand: without its tomorrow sensor the night was planned on yesterday's prices.
+    stromligning(hass)
+    publish(hass)
+    planner = await ledger(hass, price_entities=[CURRENT])
+    assert planner.options["price_entities"] == [CURRENT, TOMORROW]
+    assert tomorrow_prices(planner) == {(2.2, False)}

@@ -83,7 +83,14 @@ def planner_options_from(hass: HomeAssistant, data, smart: dict) -> dict:
         options[CONF_CAR_TRACKER] = data[CONF_DEVICE_TRACKER_ENTITY]
     if data.get(CONF_BATTERY_CAPACITY_KWH):
         options[CONF_CAPACITY] = data[CONF_BATTERY_CAPACITY_KWH]
-    if not options.get(CONF_PRICE_ENTITIES) and data.get(CONF_SPOT_PRICE_ENTITY):
+    if options.get(CONF_PRICE_ENTITIES):
+        # A Strømligning price sensor picked by hand brings its "tomorrow" sensor along: tomorrow's prices are only
+        # there, and without them the night is planned on yesterday's prices (2026-10-15, the brother's ledger).
+        picked: list[str] = []
+        for entity_id in options[CONF_PRICE_ENTITIES]:
+            picked += [found for found in price_entities(hass, entity_id) if found not in picked]
+        options[CONF_PRICE_ENTITIES] = picked
+    elif data.get(CONF_SPOT_PRICE_ENTITY):
         options[CONF_PRICE_ENTITIES] = price_entities(hass, data[CONF_SPOT_PRICE_ENTITY])
     zaptec_mode = sibling(hass, data.get(CONF_ZAPTEC_POWER_ENTITY), "sensor", suffix=ZAPTEC_MODE_SUFFIX)
     if not options.get(CONF_CHARGER_TYPE):

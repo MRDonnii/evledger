@@ -4,6 +4,14 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.8.1] - 2026-10-15
+
+### Fixed
+
+- **Tomorrow's prices with a hand-picked Strømligning sensor.** When the smart charging step lists Strømligning's
+  price sensor without its *tomorrow* binary sensor, the plan now reads that one too. Before, the night was planned on
+  yesterday's prices (marked estimated), and with the price limit every estimated quarter counted as above it.
+
 ## [0.8.0] - 2026-10-15
 
 ### Changed
