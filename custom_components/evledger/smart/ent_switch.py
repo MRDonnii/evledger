@@ -277,8 +277,10 @@ class WaitBelowLimit(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             "over_limit_kwh": view.get("over_kwh"),
             "over_limit_cost": view.get("over_cost"),
             "below_limit_soc": view.get("below_soc"),
-            "cheaper": [{**window, "start": window["start"].isoformat(), "end": window["end"].isoformat()}
-                        for window in view.get("windows", [])],
+            "saving": view.get("saving"),
+            "daily_use_kwh": view.get("daily_use_kwh"),
+            "cheaper": [{key: (value.isoformat() if key in ("start", "end") else value)
+                         for key, value in window.items()} for window in view.get("windows", [])],
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:

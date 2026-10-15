@@ -26,6 +26,8 @@ class PriceSlot:
     start: datetime
     end: datetime
     price: float
+    # A forecast (e.g. Strømligning's prices for the days after tomorrow): used, but not known for certain.
+    estimated: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,9 +70,9 @@ def _first(item: dict, keys: tuple[str, ...]):
     return None
 
 
-def parse_price_attributes(attributes: dict) -> list[PriceSlot]:
+def parse_price_attributes(attributes: dict, estimated: bool = False) -> list[PriceSlot]:
     """Read price intervals from a price entity's attributes (Strømligning, Nord Pool,
-    Energi Data Service and similar) and split them into 15-minute slots."""
+    Energi Data Service and similar) and split them into 15-minute slots. estimated: the list is a forecast."""
     raw: list[tuple[datetime, datetime | None, float]] = []
     for key in PRICE_LIST_KEYS:
         items = attributes.get(key)
@@ -104,7 +106,7 @@ def parse_price_attributes(attributes: dict) -> list[PriceSlot]:
                 end = start + timedelta(hours=1)
         cursor = start
         while cursor + SLOT <= end:
-            slots.setdefault(cursor, PriceSlot(cursor, cursor + SLOT, price))
+            slots.setdefault(cursor, PriceSlot(cursor, cursor + SLOT, price, estimated))
             cursor += SLOT
     return sorted(slots.values(), key=lambda slot: slot.start)
 
@@ -301,11 +303,12 @@ def floor_slot(value: datetime, minutes: int = SLOT_MINUTES) -> datetime:
 
 
 def build_timeline(now: datetime, known: list[PriceSlot], horizon: datetime,
-                   minutes: int = SLOT_MINUTES) -> list[TimelineSlot]:
+                   minutes: int = SLOT_MINUTES, borrow: bool = True) -> list[TimelineSlot]:
     """Slots of a quarter (or a whole hour, with the mean of its quarters) from the current one until horizon.
     A quarter without a published price borrows the price at the same clock time on an earlier day, or the
-    mean of the known prices."""
+    mean of the known prices. borrow=False leaves such slots out (a gap) instead."""
     by_start = {slot.start: slot.price for slot in known}
+    forecast = {slot.start for slot in known if slot.estimated}
     mean = sum(by_start.values()) / len(by_start) if by_start else 0.0
     end = max(horizon, max((slot.end for slot in known), default=horizon))
     step = timedelta(minutes=minutes)
@@ -319,13 +322,18 @@ def build_timeline(now: datetime, known: list[PriceSlot], horizon: datetime,
         while quarter < cursor + step:
             if quarter in by_start:
                 prices.append(by_start[quarter])
+                estimated = estimated or quarter in forecast
+            elif not borrow:
+                prices = []
+                break
             else:
                 prices.append(next((by_start[earlier] for days in range(1, ESTIMATE_DAYS_BACK + 1)
                                     if (earlier := quarter - timedelta(days=days)) in by_start), mean))
                 estimated = True
             quarter += SLOT
-        timeline.append(TimelineSlot(cursor.astimezone(zone), (cursor + step).astimezone(zone),
-                                     sum(prices) / len(prices), estimated))
+        if prices:
+            timeline.append(TimelineSlot(cursor.astimezone(zone), (cursor + step).astimezone(zone),
+                                         sum(prices) / len(prices), estimated))
         cursor += step
     return timeline
 
@@ -578,14 +586,17 @@ class LaterWindow:
 
 
 def cheaper_later(timeline: list[TimelineSlot], after: datetime, need_kwh: float, power_kw: float, factor: float,
-                  max_price: float | None = None) -> list[LaterWindow]:
-    """The cheapest unbroken run of slots after `after` that holds need_kwh, one starting in the day (06–18 local
-    time) and one in the night, each only when its mean price (with the price factor) is at or below max_price."""
+                  max_price: float | None = None, until: datetime | None = None) -> list[LaterWindow]:
+    """The cheapest unbroken run of slots after `after` (starting before `until`) that holds need_kwh, one starting in
+    the day (06–18 local time) and one in the night, each only when its mean price (with the price factor) is at or
+    below max_price."""
     if need_kwh <= 0 or power_kw <= 0:
         return []
     slots = [slot for slot in timeline if slot.start >= after]
     best: dict[str, LaterWindow] = {}
     for index, first in enumerate(slots):
+        if until is not None and first.start >= until:
+            break
         have = cost = 0.0
         estimated = False
         end = first.start

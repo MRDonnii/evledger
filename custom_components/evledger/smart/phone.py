@@ -137,14 +137,13 @@ class PhoneNotifier:
             if planner.waiting:
                 lines.append(wait_text(planner.waiting, unit))
             elif schedule.limit_kwh >= 0.5:
-                lines.append(f"Du valgte at vente: prisen er over din grænse på "
-                             f"{money(planner.settings['smart_max_price'])}/kWh, så bilen lades ikke nu.")
+                lines.append("Du valgte at vente: bilen lades ikke i nat, resten tages i en billigere periode.")
             else:
                 lines.append("Batteriet er allerede ladet til målet.")
             return "\n".join(lines)
         if schedule.limit_kwh >= 0.5:
-            lines.append(f"Du valgte at vente: lader til ca. {schedule.limit_soc or 0:.0f} % under "
-                         f"{money(planner.settings['smart_max_price'])}/kWh, resten i en billigere periode.")
+            lines.append(f"Du valgte at vente: lader til ca. {schedule.limit_soc or 0:.0f} % i nat, "
+                         "resten i en billigere periode.")
         first, last = schedule.blocks[0].start, planner.block_end(schedule.blocks[-1], dt_util.now())
         start = "nu" if first <= dt_util.now() else when(first)
         same_day = dt_util.as_local(first).date() == dt_util.as_local(last).date()
@@ -221,29 +220,32 @@ class PhoneNotifier:
         return "\n".join(lines)
 
     def price_text(self, planner: ChargePlanner, now, soc: float, view: dict) -> str:
-        """Part of the plan to the target costs more than the price limit and a later period is cheaper: what charging
-        only below the limit reaches, and what waiting with the rest saves (day and night)."""
-        limit = self.money(planner, planner.settings["smart_max_price"], True)
+        """Charging all the way tonight costs more than waiting: how far tonight gets (what the daily driving needs
+        until the cheaper period), what the rest costs tonight, and the cheaper periods with the saving."""
         target = planner.schedule.target_soc or planner.target
 
         def kwh(value: float) -> str:
             return f"{value:.1f}".replace(".", ",")
 
+        def when(value) -> str:
+            local = dt_util.as_local(value)
+            days = (local.date() - dt_util.as_local(now).date()).days
+            day = {0: "i dag", 1: "i morgen"}.get(days, DAYS[local.weekday()])
+            return f"{day} kl. {local.strftime('%H:%M')}"
+
         lines = [f"Bilen er på {soc:.0f} %. Til målet {target:.0f} % koster de sidste {kwh(view['over_kwh'])} kWh "
-                 f"over din grænse på {limit} (ca. {self.money(planner, view['over_price'], True)})."]
-        if view["below_kwh"] >= 0.5:
-            lines.append(f"Under grænsen når den ca. {view['below_soc']:.0f} % for ca. "
-                         f"{self.money(planner, view['below_cost'])}.")
-        else:
-            lines.append("Under grænsen lader den ikke før næste billige periode.")
+                 f"ca. {self.money(planner, view['over_price'], True)} i nat."]
+        driving = (f" – nok til jeres kørsel (ca. {kwh(view['daily_use_kwh'])} kWh om dagen) med "
+                   f"{view['reserve_soc']:.0f} % tilbage" if view["daily_use_kwh"] else "")
+        lines.append(f"Venter du, lader den i nat til ca. {view['below_soc']:.0f} % for ca. "
+                     f"{self.money(planner, view['below_cost'])}{driving}.")
         for index, window in enumerate(view["windows"]):
-            local_end = dt_util.as_local(window["end"]).strftime("%H:%M")
-            lead = "Venter du med resten:" if index == 0 else "Eller"
+            lead = "Resten" if index == 0 else "Eller"
             part = "om dagen" if window["kind"] == "day" else "om natten"
-            lines.append(f"{lead} {part} {self.when(window['start'])}–"
-                         f"{local_end}, ca. {self.money(planner, window['price'], True)}"
-                         f"{' (skøn)' if window['estimated'] else ''} – "
-                         f"spar ca. {self.money(planner, window['saving'])}.")
+            end = dt_util.as_local(window["end"]).strftime("%H:%M")
+            lines.append(f"{lead} {part} {when(window['start'])}–{end}, ca. "
+                         f"{self.money(planner, window['price'], True)}{' (prognose)' if window['estimated'] else ''}"
+                         f" – spar ca. {self.money(planner, window['saving'])}.")
         lines.append("Uden svar lader den til målet.")
         return "\n".join(lines)
 
@@ -326,7 +328,7 @@ class PhoneNotifier:
         """A warning under its own tag, so it does not replace the plan message. The price cap question
         has Approve / Stop above the cap; the others Charge now."""
         if kind == "price":
-            title = f"{self.entry.title}: over din prisgrænse – vil du vente?"
+            title = f"{self.entry.title}: billigere at vente?"
             actions = [{"action": f"{self.prefix}WAIT", "title": "Vent med resten"},
                        {"action": f"{self.prefix}FULL", "title": "Lad til målet"}]
         elif kind == "cap":

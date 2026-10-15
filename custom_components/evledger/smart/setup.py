@@ -104,6 +104,16 @@ def planner_options_from(hass: HomeAssistant, data, smart: dict) -> dict:
     return options
 
 
+# Strømligning's price forecast for the days after tomorrow (hourly), per kind of price.
+STROMLIGNING_FORECAST = {"current_price_vat": "forecasts_vat", "current_price_ex_vat": "forecasts_ex_vat"}
+
+
+def is_forecast(hass: HomeAssistant, entity_id: str) -> bool:
+    """A price list that is a forecast (Strømligning's forecasts sensor): its prices count as estimated."""
+    entry = er.async_get(hass).async_get(entity_id)
+    return bool(entry and entry.platform == STROMLIGNING and entry.unique_id.startswith("forecasts_"))
+
+
 def price_entities(hass: HomeAssistant, spot_price: str) -> list[str]:
     """The ledger's spot price sensor, and with Strømligning its own "tomorrow" sensor, so the plan sees tomorrow's
     prices as soon as they are out. Only that one: the other price lists on Strømligning's device are parts of the
@@ -117,9 +127,14 @@ def price_entities(hass: HomeAssistant, spot_price: str) -> list[str]:
     key = next((key for key in STROMLIGNING_TOMORROW if entry.unique_id.startswith(f"{key}_")), None)
     if key is None:
         return found
-    tomorrow = STROMLIGNING_TOMORROW[key] + entry.unique_id.removeprefix(key)
-    found += [other.entity_id for other in er.async_entries_for_device(registry, entry.device_id)
-              if other.unique_id == tomorrow and other.platform == STROMLIGNING and not other.disabled_by]
+    rest = entry.unique_id.removeprefix(key)
+    # Tomorrow's prices, then the forecast for the days after (estimated), so a plan can look a few days ahead.
+    wanted = [STROMLIGNING_TOMORROW[key] + rest]
+    if key in STROMLIGNING_FORECAST:
+        wanted.append(STROMLIGNING_FORECAST[key] + rest)
+    for unique in wanted:
+        found += [other.entity_id for other in er.async_entries_for_device(registry, entry.device_id)
+                  if other.unique_id == unique and other.platform == STROMLIGNING and not other.disabled_by]
     return found
 
 

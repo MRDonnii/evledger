@@ -300,10 +300,13 @@
         "name": "Price limit while heating"
       },
       "smart_max_price": {
-        "name": "Cheapest max price"
+        "name": "Fixed price limit"
+      },
+      "ask_min_saving": {
+        "name": "Ask when waiting saves at least"
       },
       "smart_floor_soc": {
-        "name": "Always charge to"
+        "name": "Always keep at least"
       }
     },
     "time": {
@@ -446,7 +449,7 @@
         "name": "Tyre change reminder"
       },
       "smart_price_limit": {
-        "name": "Price limit in cheapest"
+        "name": "Ask before dear charging"
       }
     },
     "button": {

@@ -34,6 +34,7 @@ from .const import (
     CONF_PRICE_ENTITIES,
     CONF_VEHICLE_MODEL,
     CONFIRM_TIMEOUT_MINUTES,
+    DEFAULT_ASK_MIN_SAVING,
     DEFAULT_CAPACITY,
     DEFAULT_CONSUMPTION,
     DEFAULT_EFFICIENCY,
@@ -60,7 +61,6 @@ from .const import (
     HEAT_HOLD_MARGIN,
     INPUT_WAIT_SECONDS,
     LIMIT_LOOK_HOURS,
-    LIMIT_MIN_SAVING,
     MIN_USE_HISTORY_DAYS,
     NOW_DONE_MINUTES,
     START_DELAY_SECONDS,
@@ -117,6 +117,7 @@ from .plan import (
     parse_price_attributes,
 )
 from .routines import Routines
+from .setup import is_forecast
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ class ChargePlanner:
             "min_soc": DEFAULT_MIN_SOC,
             "smart_max_price": DEFAULT_SMART_MAX_PRICE,
             "smart_floor_soc": DEFAULT_SMART_FLOOR_SOC,
+            "ask_min_saving": DEFAULT_ASK_MIN_SAVING,
             "consumption": DEFAULT_CONSUMPTION,
             "trip_margin": DEFAULT_TRIP_MARGIN,
             "trip_reserve": DEFAULT_TRIP_RESERVE,
@@ -261,6 +263,7 @@ class ChargePlanner:
         # whether to wait with that part. True = only below the limit for this plug-in (answered "Vent").
         self.limit_wait = False
         self.limit_view: dict | None = None
+        self._limit_params: tuple[float, float] | None = None
         # Warnings already sent for this plug-in and these settings (target out of reach, price cap).
         self.warned: set[str] = set()
         self._limit_id: str | None = None
@@ -1010,7 +1013,7 @@ class ChargePlanner:
             if state is None or (state.domain == "binary_sensor" and state.state == STATE_OFF):
                 # Off: tomorrow's prices are not out yet (Strømligning's list is then a forecast, if any).
                 continue
-            slots.extend(parse_price_attributes(dict(state.attributes)))
+            slots.extend(parse_price_attributes(dict(state.attributes), estimated=is_forecast(self.hass, entity_id)))
             unit = state.attributes.get("unit_of_measurement")
             if unit and not self.price_unit:
                 self.price_unit = str(unit).split("/")[0].strip() or None
@@ -1079,7 +1082,10 @@ class ChargePlanner:
             keep = max(announced.start, now)
 
         def plan_for(mode: str, constraints_for: tuple[Constraint, ...] | None = None,
-                     keep_plan: bool = True, limit: bool | None = None) -> Schedule:
+                     keep_plan: bool = True, limit: tuple[float, float] | bool | None = None) -> Schedule:
+            # limit: (keep at least %, max price) for waiting with the dear rest; False: to the target; None: the
+            # answer given (Vent med resten) with the best later period found.
+            wait = (self._limit_params if self.limit_wait else None) if limit is None else (limit or None)
             return build_schedule(ScheduleInput(
                 mode=mode,
                 soc=soc,
@@ -1096,9 +1102,8 @@ class ChargePlanner:
                 cap_override=self.cap_override,
                 keep_start=keep if mode == self.mode and keep_plan else None,
                 green=self.flags["prefer_green"],
-                max_price=(self.settings["smart_max_price"] if self.flags["smart_price_limit"]
-                           and (self.limit_wait if limit is None else limit) else None),
-                floor_soc=self.settings["smart_floor_soc"],
+                max_price=wait[1] if wait else None,
+                floor_soc=wait[0] if wait else None,
             ), now)
 
         self.waiting = None
@@ -1109,11 +1114,13 @@ class ChargePlanner:
         self._deadline_target = None if self.waiting else (
             self.target if self.mode in (MODE_SMART, MODE_PRICE_CAP) else None)
 
+        # Asking before dear charging: the best later period sets what the plan does after "Vent med resten".
+        self._limit_params = None
+        self.limit_view = self._limit_view(now, soc, plan_for, constraints, ordered)
         self.schedule = plan_for(self.mode, constraints)
         # What the other plans would cost right now, so they can be compared before choosing.
         self.alternatives = {mode: self.schedule if mode == self.mode else plan_for(mode)
                              for mode in (MODE_NOW, MODE_SMART, MODE_FIXED, MODE_PRICE_CAP)}
-        self.limit_view = self._limit_view(now, soc, plan_for, constraints, ordered)
 
         self.routines.note_plan(now)
         self.routines.plug_soon(now)
@@ -1454,33 +1461,78 @@ class ChargePlanner:
         return km / days * self.settings["consumption"] / 1000
 
     def _limit_view(self, now: datetime, soc: float | None, plan_for, constraints, ordered) -> dict | None:
-        """The price limit on the cheapest plan: the energy (and money) the plan to the target spends above the limit,
-        what charging only below it reaches, and the cheapest later periods (day and night) for the rest."""
-        if self.mode != MODE_SMART or not self.flags["smart_price_limit"] or soc is None or self.deadline is None:
+        """Ask before dear charging (user, 2026-10-15): the plan to the target, and for the cheapest later periods (day
+        and night, each of the next days, from the price forecast) what waiting with the rest saves. Tonight the car
+        still charges what the daily driving needs until that period, so the battery keeps the reserve; above that only
+        quarters no dearer than the later period (or the fixed price limit, when set)."""
+        if (self.mode != MODE_SMART or not self.flags["smart_price_limit"] or soc is None or self.deadline is None
+                or self.waiting or self.capacity <= 0):
             return None
-        full = plan_for(MODE_SMART, constraints, keep_plan=False, limit=False) if self.limit_wait else self.schedule
-        below = self.schedule if self.limit_wait else plan_for(MODE_SMART, constraints, keep_plan=False, limit=True)
-        over_kwh = max(full.energy_kwh - below.energy_kwh, 0.0)
-        view = {"over_kwh": round(over_kwh, 2), "over_cost": 0.0, "over_price": None,
-                "below_kwh": below.energy_kwh, "below_cost": below.cost or 0.0,
-                "below_soc": round(self._soc_after(below.energy_kwh, soc), 1), "full_cost": full.cost or 0.0,
-                "windows": []}
-        if over_kwh < 0.5:
+        full = plan_for(MODE_SMART, constraints, limit=False)
+        use = self.daily_use_kwh(now)
+        reserve = self.settings["smart_floor_soc"]
+        fixed = self.settings["smart_max_price"] if self.settings["smart_max_price"] > 0 else None
+        factor, power = self.settings["price_factor"], self.settings["charge_power_kw"]
+        eff = self.settings["efficiency"]
+        target = full.target_soc or self.target
+        view = {"daily_use_kwh": round(use, 1) if use is not None else None, "reserve_soc": reserve,
+                "over_kwh": 0.0, "over_cost": 0.0, "over_price": None, "below_kwh": full.energy_kwh,
+                "below_cost": full.cost or 0.0, "below_soc": round(self._soc_after(full.energy_kwh, soc), 1),
+                "need_soc": None, "price_limit": None, "saving": 0.0, "ask": False, "windows": []}
+
+        def wall(low: float, high: float) -> float:
+            return max(high - low, 0.0) * self.capacity / 100 / eff
+
+        def need_at(moment: datetime) -> float:
+            """The level to charge to tonight so the driving until `moment` leaves the reserve."""
+            days = max((moment - now).total_seconds() / 86400, 0.0)
+            return reserve + (use * days / self.capacity * 100 if use else 0.0)
+
+        if not full.slots or wall(max(soc, reserve), target) < 0.5:
             return view
-        over_cost = max((full.cost or 0.0) - (below.cost or 0.0), 0.0)
-        view["over_cost"] = round(over_cost, 2)
-        view["over_price"] = round(over_cost / over_kwh, 4)
         after = max([self.deadline, *(slot.end for slot in full.slots)])
-        timeline = build_timeline(now, ordered, after + timedelta(hours=LIMIT_LOOK_HOURS), self.slot_minutes)
-        for window in cheaper_later(timeline, after, over_kwh, self.settings["charge_power_kw"],
-                                    self.settings["price_factor"], self.settings["smart_max_price"]):
-            if window.start >= after + timedelta(hours=LIMIT_LOOK_HOURS):
-                continue
-            saving = over_cost - over_kwh * window.price
-            if saving >= LIMIT_MIN_SAVING:
-                view["windows"].append({"kind": window.kind, "start": window.start, "end": window.end,
-                                        "price": window.price, "saving": round(saving, 2),
-                                        "estimated": window.estimated})
+        # Only published prices and the forecast count as cheaper later, not a price borrowed from an earlier day.
+        timeline = build_timeline(now, ordered, after + timedelta(hours=LIMIT_LOOK_HOURS), self.slot_minutes,
+                                  borrow=False)
+        best_by_kind: dict[str, dict] = {}
+        best: dict | None = None
+        for day in range(LIMIT_LOOK_HOURS // 24):
+            begin, until = after + timedelta(days=day), after + timedelta(days=day + 1)
+            for first in cheaper_later(timeline, begin, wall(max(soc, reserve), target), power, factor, until=until):
+                need = min(need_at(first.start), target)
+                if wall(max(soc, need), target) < 0.5:
+                    continue  # the driving until then needs the whole target tonight
+                cap = first.price if fixed is None else max(first.price, fixed)
+                below = plan_for(MODE_SMART, constraints, keep_plan=False, limit=(need, cap))
+                over_kwh = full.energy_kwh - below.energy_kwh
+                if over_kwh < 0.5:
+                    continue
+                over_cost = (full.cost or 0.0) - (below.cost or 0.0)
+                window = next((w for w in cheaper_later(timeline, begin, over_kwh, power, factor, until=until)
+                               if w.kind == first.kind), None)
+                if window is None:
+                    continue
+                saving = over_cost - over_kwh * window.price
+                if saving < 0.5:
+                    continue
+                found = {"kind": window.kind, "start": window.start, "end": window.end, "price": window.price,
+                         "saving": round(saving, 2), "estimated": window.estimated, "need_soc": round(need, 1),
+                         "over_kwh": round(over_kwh, 2), "over_cost": round(over_cost, 2), "cap": round(cap, 4),
+                         "below_kwh": below.energy_kwh, "below_cost": below.cost or 0.0,
+                         "below_soc": round(self._soc_after(below.energy_kwh, soc), 1)}
+                if window.kind not in best_by_kind or saving > best_by_kind[window.kind]["saving"]:
+                    best_by_kind[window.kind] = found
+                if best is None or saving > best["saving"]:
+                    best = found
+        if best is None:
+            return view
+        view["windows"] = sorted(best_by_kind.values(), key=lambda item: item["start"])
+        view.update(over_kwh=best["over_kwh"], over_cost=best["over_cost"],
+                    over_price=round(best["over_cost"] / best["over_kwh"], 4), below_kwh=best["below_kwh"],
+                    below_cost=best["below_cost"], below_soc=best["below_soc"], need_soc=best["need_soc"],
+                    price_limit=best["cap"], saving=best["saving"],
+                    ask=best["saving"] >= self.settings["ask_min_saving"])
+        self._limit_params = (best["need_soc"], best["cap"])
         return view
 
     def _cheaper_day(self, now: datetime, soc: float, later: list[datetime], plan_for) -> dict | None:
@@ -1578,7 +1630,7 @@ class ChargePlanner:
             reach = max(target - schedule.shortfall_kwh * self.settings["efficiency"] / self.capacity * 100, soc)
             found["short"] = self.notify.short_text(self, now, reach, target)
         view = self.limit_view
-        if view and view["windows"] and not self.limit_wait and soc > self.settings["smart_floor_soc"]:
+        if view and view["ask"] and not self.limit_wait:
             found["price"] = self.notify.price_text(self, now, soc, view)
         limit = self.car_limit()
         need = self.trip_target_soc if self.trip_active else None

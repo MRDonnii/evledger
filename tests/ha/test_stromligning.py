@@ -112,3 +112,20 @@ async def test_a_hand_picked_price_sensor_brings_its_tomorrow_sensor(hass: HomeA
     planner = await ledger(hass, price_entities=[CURRENT])
     assert planner.options["price_entities"] == [CURRENT, TOMORROW]
     assert tomorrow_prices(planner) == {(2.2, False)}
+
+
+async def test_the_forecast_counts_as_estimated_prices_for_the_days_after(hass: HomeAssistant):
+    stromligning(hass)
+    device = er.async_get(hass).async_get(CURRENT).device_id
+    prices = hass.config_entries.async_entries("stromligning")[0]
+    er.async_get(hass).async_get_or_create("sensor", "stromligning", "forecasts_vat_01jstrom", device_id=device,
+                                           config_entry=prices, suggested_object_id="stromligning_forecasts_vat")
+    publish(hass)
+    hass.states.async_set("sensor.stromligning_forecasts_vat", "2026-10-15T18:00:00+00:00",
+                          {"prices": [{**slot, "price": 1.1} for slot in day(2, 1.1)[::4]]})
+    planner = await ledger(hass)
+    assert planner.options["price_entities"] == [CURRENT, TOMORROW, "sensor.stromligning_forecasts_vat"]
+    day_after = (dt_util.now() + timedelta(days=2)).date()
+    forecast = {(slot.price, slot.estimated) for slot in planner.timeline
+                if dt_util.as_local(slot.start).date() == day_after}
+    assert (1.1, True) in forecast, "the forecast is used, marked estimated"

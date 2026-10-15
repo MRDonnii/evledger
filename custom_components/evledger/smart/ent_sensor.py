@@ -149,15 +149,20 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "shortfall_kwh": schedule.shortfall_kwh,
                 # Price limit on the cheapest plan: the limit, the energy above it (charged at the higher price, or
                 # left for later when the answer was to wait), the level reached below it, and the cheaper periods.
-                "price_limit": planner.settings["smart_max_price"] if limit_on else None,
+                # (EV Ledger 0.9: "price_limit" is the price above which the best later period is cheaper, or the
+                # fixed limit when that is higher; the floor is the reserve the daily driving must leave.)
+                "price_limit": view["price_limit"] if view else None,
                 "price_limit_floor": planner.settings["smart_floor_soc"] if limit_on else None,
                 "above_limit_kwh": view["over_kwh"] if view else schedule.limit_kwh,
-                "limit_soc": view["below_soc"] if view else (
+                "limit_soc": view["below_soc"] if view and view["over_kwh"] else (
                     round(schedule.limit_soc, 1) if schedule.limit_soc is not None else None),
                 "limit_wait": planner.limit_wait if view else None,
                 "above_limit_cost": view["over_cost"] if view else None,
-                "limit_cheaper": [{**window, "start": window["start"].isoformat(), "end": window["end"].isoformat()}
-                                  for window in view["windows"]] if view else [],
+                "limit_saving": view["saving"] if view else None,
+                "limit_ask": view["ask"] if view else None,
+                "daily_use_kwh": view["daily_use_kwh"] if view else None,
+                "limit_cheaper": [{key: (value.isoformat() if key in ("start", "end") else value)
+                                   for key, value in window.items()} for window in view["windows"]] if view else [],
                 # The prices the plan chose from, for a chart of when the car would charge (also before it is
                 # plugged in): start, price (with the price factor) and whether it is estimated.
                 "slot_minutes": planner.slot_minutes,

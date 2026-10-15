@@ -300,10 +300,13 @@
         "name": "Prisgrænse under opvarmning"
       },
       "smart_max_price": {
-        "name": "Maks. pris i Billigst"
+        "name": "Fast prisgrænse"
+      },
+      "ask_min_saving": {
+        "name": "Spørg når det sparer mindst"
       },
       "smart_floor_soc": {
-        "name": "Lad altid op til"
+        "name": "Behold altid mindst"
       }
     },
     "time": {
@@ -446,7 +449,7 @@
         "name": "Påmindelse om hjulskift"
       },
       "smart_price_limit": {
-        "name": "Prisgrænse i Billigst"
+        "name": "Spørg før dyr ladning"
       }
     },
     "button": {

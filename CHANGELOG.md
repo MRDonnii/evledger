@@ -4,6 +4,31 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.0] - 2026-10-15
+
+### Changed
+
+- **Ask before dear charging, from what waiting saves and how much you drive.** With *Ask before dear charging* on
+  (the old *Price limit in cheapest*), Cheapest still plans to the target. It now looks for the cheapest later period
+  in the day and at night for each of the next three days after the ready-by time, using published prices and
+  Strømligning's forecast. For each one it works out how far the battery must be charged tonight so that the daily
+  driving (from the ledger's trips) still leaves *Always keep at least* (the old *Always charge to*) until then, and
+  what charging only that much tonight and the rest later saves. The phones are asked once per plug-in when the best
+  one saves at least *Ask when waiting saves at least* (new, 10 kr by default), with the level tonight, what the
+  rest costs tonight, and the cheaper periods with their saving. *Wait with the rest* charges tonight up to that
+  level and only in quarters no dearer than the later period; *Charge to the target* keeps the plan; no answer keeps
+  the plan.
+- *Fixed price limit* (the old *Cheapest max price*) is optional: 0 (the new default) means only the saving counts;
+  above 0, quarters up to it are always charged tonight.
+- The plan's sensor shows `price_limit` (the price above which waiting is cheaper), `limit_saving`, `limit_ask`,
+  `daily_use_kwh` and each cheaper period's `need_soc`, `over_kwh` and `saving`.
+
+### Added
+
+- **Strømligning's forecast.** Its forecasts sensor is read next to today's and tomorrow's prices, so plans can look
+  past tomorrow; those prices count as estimated. A cheaper later period is only taken from published prices or the
+  forecast, never from a price borrowed from an earlier day.
+
 ## [0.8.2] - 2026-10-15
 
 ### Changed

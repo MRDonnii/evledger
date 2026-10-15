@@ -615,92 +615,107 @@ async def test_other_car_alert_waits_for_the_car_to_report(hass: HomeAssistant, 
 
 
 
-def limit_prices() -> list[dict]:
-    """From noon: 17-18 today 0.50, tomorrow 12-15 0.80 (day), the night after 01-04 0.60, the rest 3.00."""
+def limit_prices(tonight: float = 0.5) -> list[dict]:
+    """From noon: 17-18 today `tonight`, tomorrow 12-15 0.80 (day), the night after 01-04 0.60, the rest 3.00."""
     start = dt_util.now().replace(minute=0, second=0, microsecond=0)
-    cheap = {5: 0.5, 24: 0.8, 25: 0.8, 26: 0.8, 37: 0.6, 38: 0.6, 39: 0.6}
+    cheap = {5: tonight, 24: 0.8, 25: 0.8, 26: 0.8, 37: 0.6, 38: 0.6, 39: 0.6}
     return [{"start": (start + timedelta(hours=hour)).isoformat(),
              "end": (start + timedelta(hours=hour + 1)).isoformat(), "price": cheap.get(hour, 3.0)}
             for hour in range(-1, 49)]
 
 
-async def limit_setup(hass, request, freezer, soc="49", limit=1.0):
+async def limit_setup(hass, request, freezer, soc="49", price_list=None, min_saving=None):
     sent = phones(hass)
     entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=False, soc=soc)
-    hass.states.async_set("sensor.price", "3.0", {"prices": limit_prices(), "unit_of_measurement": "kr/kWh"})
+    hass.states.async_set("sensor.price", "3.0", {"prices": limit_prices() if price_list is None else price_list,
+                                                  "unit_of_measurement": "kr/kWh"})
     await with_phone(hass, entry)
-    await hass.services.async_call("number", "set_value", {"entity_id": "number.bil_cheapest_max_price",
-                                                           "value": limit}, blocking=True)
-    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_price_limit_in_cheapest"},
+    if min_saving is not None:
+        await hass.services.async_call("number", "set_value", {
+            "entity_id": "number.bil_ask_when_waiting_saves_at_least", "value": min_saving}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_ask_before_dear_charging"},
                                    blocking=True)
     await hass.async_block_till_done(wait_background_tasks=True)
     await later(hass, freezer, 1)
     return entry, calls, sent
 
 
+def asked_about_waiting(sent) -> list:
+    return [data for _, data in sent if "billigere at vente" in data.get("title", "")]
+
+
 async def test_price_limit_asks_whether_to_wait(hass: HomeAssistant, request, freezer):
-    """The plan charges to the target; the part above the limit is asked about, with what waiting saves."""
+    """The plan charges to the target; when waiting with the dear rest saves enough, the phones are asked."""
     entry, calls, sent = await limit_setup(hass, request, freezer)
     planner = hass.data[DOMAIN][entry.entry_id].smart  # the entry was reloaded with the phone
     assert planner.schedule.energy_kwh == pytest.approx(31 * 60 / 100 / 0.9, abs=0.01), "to the target 80 %"
-    asked = [data for _, data in sent if "vil du vente" in data.get("title", "")]
-    assert len(asked) == 1, "above the floor, over the limit and cheaper later: the phones are asked"
+    asked = asked_about_waiting(sent)
+    assert len(asked) == 1, "cheaper later by more than 10 kr: the phones are asked"
     text = asked[0]["message"]
-    assert "Bilen er på 49 %. Til målet 80 % koster de sidste 9,7 kWh over din grænse på 1,00 kr/kWh" in text
-    assert "Under grænsen når den ca." in text
-    assert "om dagen i morgen kl. 12:00" in text and "om natten" in text and "spar ca." in text
+    assert text.startswith("Bilen er på 49 %. Til målet 80 % koster de sidste 9,7 kWh ca. 3,00 kr/kWh i nat.")
+    assert "Venter du, lader den i nat til ca. 66 % for ca. 5,50 kr." in text
+    assert "Resten om dagen i morgen kl. 12:00–12:52" in text and "Eller om natten" in text and "spar ca." in text
     assert text.endswith("Uden svar lader den til målet.")
     assert [action["title"] for action in asked[0]["data"]["actions"]] == ["Vent med resten", "Lad til målet"]
     attrs = hass.states.get("sensor.bil_next_charge_start").attributes
-    assert attrs["price_limit"] == 1.0 and attrs["limit_wait"] is False
+    assert attrs["limit_wait"] is False and attrs["limit_ask"] is True
     assert attrs["above_limit_kwh"] == pytest.approx(9.67, abs=0.01)
+    assert attrs["price_limit"] == 0.6, "dearer than the best later period (the night at 0.60)"
     assert [window["kind"] for window in attrs["limit_cheaper"]] == ["day", "night"]
     assert state(hass, "switch.bil_wait_above_the_price_limit") == "off"
     await later(hass, freezer, 5)
-    assert len([1 for _, data in sent if "vil du vente" in data.get("title", "")]) == 1, "asked once"
+    assert len(asked_about_waiting(sent)) == 1, "asked once"
     hass.bus.async_fire("mobile_app_notification_action", {"action": asked[0]["data"]["actions"][0]["action"]})
     await hass.async_block_till_done(wait_background_tasks=True)
     assert state(hass, "switch.bil_wait_above_the_price_limit") == "on"
-    assert planner.schedule.energy_kwh == pytest.approx(11.0, abs=0.01), "Vent med resten: only below the limit"
+    assert planner.schedule.energy_kwh == pytest.approx(11.0, abs=0.01), "Vent med resten: tonight's cheap hour only"
     assert state(hass, "select.bil_charge_mode") == "smart"
     hass.bus.async_fire("mobile_app_notification_action", {"action": asked[0]["data"]["actions"][1]["action"]})
     await hass.async_block_till_done(wait_background_tasks=True)
     assert state(hass, "switch.bil_wait_above_the_price_limit") == "off"
     assert planner.schedule.energy_kwh == pytest.approx(20.67, abs=0.01), "Lad til målet"
     await later(hass, freezer, 5)
-    assert len([1 for _, data in sent if "vil du vente" in data.get("title", "")]) == 1, "answered: not asked again"
+    assert len(asked_about_waiting(sent)) == 1, "answered: not asked again"
 
 
-async def test_price_limit_does_not_ask_below_the_floor(hass: HomeAssistant, request, freezer):
-    _, _, sent = await limit_setup(hass, request, freezer, soc="12")
-    assert not [1 for _, data in sent if "vil du vente" in data.get("title", "")], "below the floor it just charges"
+async def test_price_limit_asks_only_when_waiting_saves_enough(hass: HomeAssistant, request, freezer):
+    _, _, sent = await limit_setup(hass, request, freezer, min_saving=30)
+    assert not asked_about_waiting(sent), "waiting saves about 23 kr, less than 30"
 
 
 async def test_price_limit_does_not_ask_when_later_is_not_cheaper(hass: HomeAssistant, request, freezer):
-    _, _, sent = await limit_setup(hass, request, freezer, limit=0.55)
-    assert not [1 for _, data in sent if "vil du vente" in data.get("title", "")], "no later period below 0.55"
+    # Known prices only until tomorrow afternoon, all 3.00 after the ready-by time: a price borrowed from today's
+    # cheap hour is no cheaper period.
+    _, _, sent = await limit_setup(hass, request, freezer, price_list=prices(cheap_now=False))
+    assert not asked_about_waiting(sent)
+
+
+async def test_price_limit_daily_driving_sets_tonight_s_level(hass: HomeAssistant, request, freezer):
+    entry, _, _ = await limit_setup(hass, request, freezer, price_list=limit_prices(tonight=3.0))
+    planner = hass.data[DOMAIN][entry.entry_id].smart
+    with patch.object(planner, "daily_use_kwh", return_value=6.0):  # 10 % of the battery a day
+        planner.async_recalculate()
+        await hass.async_block_till_done()
+        view = planner.limit_view
+    night = next(window for window in view["windows"] if window["kind"] == "night")
+    days = (night["start"] - dt_util.now()).total_seconds() / 86400
+    assert night["need_soc"] == pytest.approx(20 + 10 * days, abs=0.1), "the reserve plus the driving until then"
 
 
 async def test_price_limit_in_cheapest_waits_instead_of_done(hass: HomeAssistant, request, freezer):
-    entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=False, soc="49")
-    planner = entry.runtime_data
-    assert float(state(hass, "sensor.bil_planned_charge_energy")) > 0, "without the limit it plans a charge"
-    await hass.services.async_call("number", "set_value", {"entity_id": "number.bil_cheapest_max_price",
-                                                           "value": 0.4}, blocking=True)
-    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_price_limit_in_cheapest"},
-                                   blocking=True)
-    await later(hass, freezer, 1)
+    entry, calls, _ = await limit_setup(hass, request, freezer, price_list=limit_prices(tonight=3.0))
+    planner = hass.data[DOMAIN][entry.entry_id].smart
     assert planner.schedule.energy_kwh > 0, "without an answer the plan charges to the target"
     await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_wait_above_the_price_limit"},
                                    blocking=True)
     await later(hass, freezer, 1)
-    assert planner.schedule.energy_kwh == 0, "waiting: every quarter costs more than 0.40"
+    assert planner.schedule.energy_kwh == 0, "waiting: every quarter tonight is dearer than later"
     assert state(hass, "sensor.bil_charge_status") == "waiting", "not 'target reached'"
     attrs = hass.states.get("sensor.bil_next_charge_start").attributes
-    assert attrs["price_limit"] == 0.4 and attrs["above_limit_kwh"] > 0
+    assert attrs["limit_wait"] is True and attrs["above_limit_kwh"] > 0
     assert "Du valgte at vente" in planner.notify.plan_text(planner)
     assert not calls["switch.turn_on"] and not calls["button.press"]
     hass.states.async_set("sensor.car_battery", "10")
     await later(hass, freezer, 1)
-    assert planner.schedule.energy_kwh > 0, "below 20 %: charged to 20 % whatever the price"
+    assert planner.schedule.energy_kwh > 0, "below the 20 % reserve: charged to it whatever the price"
     assert round(planner.schedule.limit_soc) == 20
