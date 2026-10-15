@@ -218,6 +218,22 @@ class PhoneNotifier:
         ]
         return "\n".join(lines)
 
+    def price_text(self, planner: ChargePlanner, now, soc: float) -> str:
+        """The price limit holds the car back above the floor: say what it does, and what charging anyway costs."""
+        schedule = planner.schedule
+        limit = self.money(planner, planner.settings["smart_max_price"], True)
+        lines = [f"Bilen er på {soc:.0f} %, og prisen er over din grænse på {limit}."]
+        if schedule.blocks and schedule.limit_soc is not None:
+            lines.append(f"Den lader kun til ca. {schedule.limit_soc:.0f} % og venter med resten.")
+        else:
+            lines.append("Den venter på billigere kvarterer.")
+        everything = planner.alternatives.get(MODE_NOW)
+        if everything and everything.cost:
+            kwh = f"{everything.energy_kwh:.1f}".replace(".", ",")
+            lines.append(f"Lad alligevel: ca. {kwh} kWh for ca. {self.money(planner, everything.cost)}.")
+        lines.append("Uden svar venter den.")
+        return "\n".join(lines)
+
     def short_text(self, planner: ChargePlanner, now, reach: float, target: float) -> str:
         """The plan cannot reach its target in time (plugged in late, fixed window too short)."""
         if planner.mode == MODE_FIXED:
@@ -296,7 +312,11 @@ class PhoneNotifier:
     async def async_send_warning(self, kind: str, text: str) -> None:
         """A warning under its own tag, so it does not replace the plan message. The price cap question
         has Approve / Stop above the cap; the others Charge now."""
-        if kind == "cap":
+        if kind == "price":
+            title = f"{self.entry.title}: vil du vente?"
+            actions = [{"action": f"{self.prefix}NOW", "title": "Lad alligevel"},
+                       {"action": f"{self.prefix}WAIT", "title": "Vent"}]
+        elif kind == "cap":
             title = f"{self.entry.title}: prisloftet rækker ikke"
             actions = [{"action": f"{self.prefix}CAP_OK", "title": "Godkend"},
                        {"action": f"{self.prefix}CAP_STOP", "title": "Stop over loftet"}]

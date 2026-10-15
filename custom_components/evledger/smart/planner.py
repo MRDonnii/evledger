@@ -1508,7 +1508,8 @@ class ChargePlanner:
     @callback
     def _warn(self, now: datetime) -> None:
         """Tell the phones once (per plug-in and settings) when the plan cannot reach its target in time,
-        and ask before the price cap is exceeded to reach it. Without an answer the plan goes on."""
+        and ask before the price cap is exceeded to reach it. Without an answer the plan goes on. Above the price
+        limit's floor the phones are asked whether to wait or charge anyway; without an answer the car waits."""
         if not (self.backend and self.charger_state in CONNECTED and self.car_present
                 and self.info_enabled and self.notify.targets) or self.awaiting_since:
             return
@@ -1525,6 +1526,9 @@ class ChargePlanner:
         elif self.mode in (MODE_SMART, MODE_FIXED) and schedule.shortfall_kwh >= 0.5:
             reach = max(target - schedule.shortfall_kwh * self.settings["efficiency"] / self.capacity * 100, soc)
             found["short"] = self.notify.short_text(self, now, reach, target)
+        if (self.mode == MODE_SMART and self.flags["smart_price_limit"] and schedule.limit_kwh >= 0.5
+                and soc > self.settings["smart_floor_soc"]):
+            found["price"] = self.notify.price_text(self, now, soc)
         limit = self.car_limit()
         need = self.trip_target_soc if self.trip_active else None
         if limit is not None and need is not None and need > limit + 0.5:

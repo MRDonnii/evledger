@@ -4,6 +4,16 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.7.5] - 2026-10-15
+
+### Added
+
+- **The price limit asks instead of just waiting.** When *Price limit in cheapest* is on, the car is above *Always
+  charge to* and part of the charge is dearer than *Cheapest max price*, the phones get one question per plug-in
+  (and again when the limit settings change): the battery level, how far the car charges under the limit, and what
+  charging everything anyway would cost, with the buttons *Charge anyway* (Charge now, which hands back to Cheapest
+  at the target) and *Wait*. Without an answer the car waits.
+
 ## [0.7.4] - 2026-10-15
 
 ### Added

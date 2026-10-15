@@ -615,6 +615,46 @@ async def test_other_car_alert_waits_for_the_car_to_report(hass: HomeAssistant, 
 
 
 
+async def test_price_limit_asks_whether_to_wait(hass: HomeAssistant, request, freezer):
+    sent = phones(hass)
+    entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=False, soc="49")
+    await with_phone(hass, entry)
+    await hass.services.async_call("number", "set_value", {"entity_id": "number.bil_cheapest_max_price",
+                                                           "value": 0.4}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_price_limit_in_cheapest"},
+                                   blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 1)
+    asked = [data for _, data in sent if "vil du vente" in data.get("title", "")]
+    assert len(asked) == 1, "above the floor and over the limit: the phones are asked"
+    text = asked[0]["message"]
+    assert "49 %" in text and "over din grænse på 0,40 kr/kWh" in text and "Lad alligevel: ca." in text
+    assert text.endswith("Uden svar venter den.")
+    assert [action["title"] for action in asked[0]["data"]["actions"]] == ["Lad alligevel", "Vent"]
+    assert not calls["switch.turn_on"], "without an answer the car waits"
+    await later(hass, freezer, 5)
+    assert len([1 for _, data in sent if "vil du vente" in data.get("title", "")]) == 1, "asked once"
+    hass.bus.async_fire("mobile_app_notification_action", {"action": asked[0]["data"]["actions"][1]["action"]})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert state(hass, "select.bil_charge_mode") == "smart", "Vent keeps waiting"
+    hass.bus.async_fire("mobile_app_notification_action", {"action": asked[0]["data"]["actions"][0]["action"]})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert state(hass, "select.bil_charge_mode") == "now", "Lad alligevel charges now"
+
+
+async def test_price_limit_does_not_ask_below_the_floor(hass: HomeAssistant, request, freezer):
+    sent = phones(hass)
+    entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=False, soc="12")
+    await with_phone(hass, entry)
+    await hass.services.async_call("number", "set_value", {"entity_id": "number.bil_cheapest_max_price",
+                                                           "value": 0.4}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.bil_price_limit_in_cheapest"},
+                                   blocking=True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 1)
+    assert not [1 for _, data in sent if "vil du vente" in data.get("title", "")], "below the floor it just charges"
+
+
 async def test_price_limit_in_cheapest_waits_instead_of_done(hass: HomeAssistant, request, freezer):
     entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=False, soc="49")
     planner = entry.runtime_data
