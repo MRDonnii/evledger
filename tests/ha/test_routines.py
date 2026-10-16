@@ -436,3 +436,46 @@ async def test_the_plug_in_reminder_is_not_repeated_after_a_restart(hass: HomeAs
     await hass.async_block_till_done(wait_background_tasks=True)
     await later(hass, freezer, 3)
     assert len([m for m in sent if m["title"] == "Bil: sæt bilen til"]) == 1, "not again after the restart"
+
+
+async def test_charger_offline_before_the_plan_starts_is_told_once(hass: HomeAssistant, request, freezer):
+    """The charger's integration lost its login in the evening while the car is plugged in: the phones are told before
+    the night's period, once."""
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, charger_state="connected_finished", cheap_now=False)
+    await with_options(hass, entry, car_plugged_entity="binary_sensor.bil_plugged")
+    hass.states.async_set("binary_sensor.bil_plugged", "on", {"device_class": "plug"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    hass.states.async_set(MODE, "unavailable")
+    await later(hass, freezer, 5)
+    assert not [m for m in sent if "offline" in m["message"]], "not for a short blip"
+    await later(hass, freezer, 7)
+    offline = [m for m in sent if "Laderen er offline" in m["message"]]
+    assert len(offline) == 1
+    assert "Bilen er sat til" in offline[0]["message"] and "næste periode" in offline[0]["message"]
+    await later(hass, freezer, 30)
+    assert len([m for m in sent if "Laderen er offline" in m["message"]]) == 1, "once"
+    hass.states.async_set(MODE, "connected_finished")
+    await later(hass, freezer, 2)
+    hass.states.async_set(MODE, "unavailable")
+    await later(hass, freezer, 12)
+    assert len([m for m in sent if "Laderen er offline" in m["message"]]) == 2, "again after it was back"
+
+
+async def test_a_stop_that_does_not_take_is_told(hass: HomeAssistant, request, freezer):
+    """The plan stops the charger, but it keeps charging (the stop is refused): repeated, and after 10 minutes the
+    phones are told – the car would otherwise charge through the pause at the dear price."""
+    sent = phones(hass)
+    entry, calls = await setup(hass, request, charger_state="connected_charging", cheap_now=False)
+    await with_options(hass, entry)
+    await later(hass, freezer, 1)
+    assert calls["switch.turn_off"], "stopped"
+    await later(hass, freezer, 5)
+    assert not [m for m in sent if "ikke stoppe" in m["message"]]
+    await later(hass, freezer, 6)
+    stuck = [m for m in sent if "Laderen lader sig ikke stoppe" in m["message"]]
+    assert len(stuck) == 1, [m["message"] for m in sent]
+    assert len(calls["switch.turn_off"]) >= 3, "the stop is repeated meanwhile (at every check)"
+    await later(hass, freezer, 20)
+    assert len([m for m in sent if "ikke stoppe" in m["message"]]) == 1, "once"
+    assert state(hass, "select.bil_charge_mode") == "smart", "not taken for a start from the app"

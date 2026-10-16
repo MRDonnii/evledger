@@ -4,6 +4,44 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.10.0] - 2026-10-16
+
+### Added
+
+- **The car's wake-up time is measured and planned for.** EV Ledger measures how long the car takes from the first
+  start to drawing power (the last 10 starts, kept across restarts). The plan counts that time as lost at the start of
+  every period that is not already charging: 5 minutes until three starts are measured, then the third quartile of
+  the measurements (0.5–20 minutes). Periods are made long enough to reach the target anyway. A plan in several
+  periods is compared with the single period with the wake-ups counted, so it only splits when that still pays. A few
+  missing minutes make a period longer rather than opening a new one: a new period must give at least 15 minutes.
+  The charge mode select shows `start_delays` and `wake_minutes`. (14 Oct 2026: the car took ten minutes.)
+- **Ready ahead of time** (`number.<car>_ready_ahead_of_time`, 15 minutes by default): the plan is done this long
+  before each ready-by time when the slots before that can hold the target. When the time is too short, it charges
+  up to the ready-by time as before.
+- **Home Assistant away in the night.** The time Home Assistant was last alive is saved with its restore data (every
+  15 minutes and when it stops; no extra recorder rows). When a planned period should have started while it was away
+  for more than 20 minutes, the plan is made again at once with the time left and catches up. The phones are told
+  what the new plan reaches by the ready-by time, without sound at night.
+- **A charger that is offline** for 10 minutes is now also reported before the plan's next period while the car says
+  it is plugged in, not only once the period has started.
+- **A stop that does not take:** when the charger still charges 10 minutes after the plan stopped it (repeated every
+  45 s meanwhile), the phones are told.
+
+### Changed
+
+- Forecast prices for a later period count as 10 % dearer when working out whether waiting with the dear rest pays,
+  and up to which price tonight's quarters are charged. Forecasts miss, and waiting must still pay when they do.
+
+### Tests
+
+- New unit tests cover the wake-up model, the margin, the forecast margin, the offline and stop alerts, and an outage
+  with catch-up. Each new feature's test fails without the feature.
+- The random nights now also give every car its own wake-up time (half the nights with earlier measurements), take
+  Home Assistant away for 30–150 minutes on a quarter of them, and require the target by 06:40, inside the margin.
+  The rules hold through every night: never Charge now, no charging the plan does not want, with *Lad kun til* never
+  on to the target, and dear charging only for what the cheap hours cannot hold. While Home Assistant is away, the
+  charger's own doing is not counted.
+
 ## [0.9.7] - 2026-10-16
 
 ### Fixed

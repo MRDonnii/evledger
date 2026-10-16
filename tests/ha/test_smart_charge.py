@@ -344,7 +344,8 @@ async def test_full_car_is_done_not_stopped_from_outside(hass: HomeAssistant, re
     assert not [data for _, data in sent if "stoppet" in data.get("message", "")]
 
 
-async def test_price_cap_asks_before_exceeding_it(hass: HomeAssistant, request, freezer):
+async def test_price_cap_asks_before_exceeding_it(hass: HomeAssistant, request, freezer, monkeypatch):
+    monkeypatch.setattr(planner_module, "DEFAULT_WAKE_MINUTES", 0.0)  # the message's exact figures, without waking
     sent = phones(hass)
     entry, calls = await setup(hass, request, cheap_now=False)
     await with_phone(hass, entry)
@@ -648,8 +649,9 @@ def asked_about_waiting(sent) -> list:
     return [data for _, data in sent if "billigere at vente" in data.get("title", "")]
 
 
-async def test_price_limit_asks_whether_to_wait(hass: HomeAssistant, request, freezer):
+async def test_price_limit_asks_whether_to_wait(hass: HomeAssistant, request, freezer, monkeypatch):
     """The plan charges to the target; when waiting with the dear rest saves enough, the phones are asked."""
+    monkeypatch.setattr(planner_module, "DEFAULT_WAKE_MINUTES", 0.0)  # the message's exact figures, without waking
     entry, calls, sent = await limit_setup(hass, request, freezer)
     planner = hass.data[DOMAIN][entry.entry_id].smart  # the entry was reloaded with the phone
     assert planner.schedule.energy_kwh == pytest.approx(31 * 60 / 100 / 0.9, abs=0.01), "to the target 80 %"
@@ -748,3 +750,23 @@ async def test_price_limit_in_cheapest_waits_instead_of_done(hass: HomeAssistant
     await later(hass, freezer, 1)
     assert planner.schedule.energy_kwh > 0, "below the 20 % reserve: charged to it whatever the price"
     assert round(planner.schedule.limit_soc) == 20
+
+
+async def test_forecast_prices_get_a_safety_margin_before_asking(hass: HomeAssistant, request, freezer):
+    """A later period priced from the forecast counts 10 % dearer when working out what waiting saves: forecasts
+    miss, and waiting must still pay when they do."""
+    entry, _, _ = await limit_setup(hass, request, freezer)
+    planner = hass.data[DOMAIN][entry.entry_id].smart
+    known = planner.limit_view["windows"]
+    assert known and not any(window["estimated"] for window in known)
+    with patch.object(planner_module, "is_forecast", lambda _hass, _entity: True):
+        planner.async_recalculate()
+        view = planner.limit_view
+        with patch.object(planner_module, "FORECAST_MARGIN", 0.0):
+            planner.async_recalculate()
+            plain = planner.limit_view
+    assert view and plain, "still worked out with forecast prices"
+    best, best_plain = max(view["windows"], key=lambda w: w["saving"]), max(plain["windows"], key=lambda w: w["saving"])
+    assert best["estimated"]
+    assert best["saving"] < best_plain["saving"], "the margin makes waiting look less good"
+    assert best["saving"] == pytest.approx(best_plain["saving"] - best["over_kwh"] * best["price"] * 0.1, abs=0.6)

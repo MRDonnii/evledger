@@ -43,6 +43,10 @@ class Sim:
     def __init__(self, rng: random.Random, now, soc: float, cheap) -> None:
         self.rng = rng
         self.cheap = cheap
+        # This car's time from a start to drawing power (0.5–12 minutes), a little different each time.
+        self.wake_base = rng.uniform(0.5, 12)
+        self.away_charging = 0.0  # seconds charging while Home Assistant was away (nothing can stop it then)
+        self.away_minutes = 0.0
         self.needs_authorize = False  # Zaptec waits for authorisation (connected_requesting)
         self.reboot_at = now + timedelta(minutes=rng.uniform(40, 400)) if rng.random() < 0.3 else None
         self.offline_until = None
@@ -62,17 +66,20 @@ class Sim:
         old = self.reported  # the cloud's last answer
         if service == "button.press" and self.needs_authorize:
             self.needs_authorize = False
-            self.wake_at = now + timedelta(seconds=self.rng.uniform(0, 12 * 60))
+            self.wake_at = now + self.wake()
         elif service == "switch.turn_on" and not self.needs_authorize:
             if not self.charging and self.wake_at is None:
                 if self.rng.random() < 0.3:
                     self.needs_authorize = True  # resumed, but now it asks for authorisation (as on 14 Oct)
                 else:
-                    self.wake_at = now + timedelta(seconds=self.rng.uniform(0, 12 * 60))
+                    self.wake_at = now + self.wake()
         elif service == "switch.turn_off":
             self.charging, self.wake_at = False, None
         if self.rng.random() < 0.5:  # the cloud answers with the old state for a while
             self.stale_state, self.stale_until = old, now + timedelta(seconds=self.rng.uniform(2, 150))
+
+    def wake(self) -> timedelta:
+        return timedelta(minutes=min(15.0, self.wake_base * self.rng.uniform(0.7, 1.3)))
 
     def step(self, now, t0) -> str:
         if self.wake_at is not None and now >= self.wake_at and self.soc < 99.5:
@@ -125,6 +132,16 @@ async def play_night(hass: HomeAssistant, request, freezer, seed: int, lad_kun_t
     async def record(self, domain, service, entity_id):
         sim.command(f"{domain}.{service}", dt_util.now())
 
+    planner = hass.data[DOMAIN][entry.entry_id].smart
+    if rng.random() < 0.5:  # measured on earlier nights: the plan counts with this car's own wake-up time
+        planner.controller.start_delays = [round(sim.wake_base * rng.uniform(0.8, 1.2), 1) for _ in range(5)]
+        sim.log.append(f"wake {sim.wake_base:.1f} min, learned {planner.controller.start_delays}")
+    else:
+        sim.log.append(f"wake {sim.wake_base:.1f} min, not learned yet")
+    # Home Assistant away for half an hour to two and a half hours some nights (back by 04:00).
+    away_at = t0 + timedelta(minutes=rng.uniform(60, 270)) if rng.random() < 0.25 else None
+    away_until = min(away_at + timedelta(minutes=rng.uniform(30, 150)), t0 + timedelta(hours=6)) if away_at else None
+    away = False
     with patch.object(charger_module.ChargerBackend, "_call", record):
         if lad_kun_til:
             start = t0 + timedelta(minutes=90)
@@ -153,6 +170,19 @@ async def play_night(hass: HomeAssistant, request, freezer, seed: int, lad_kun_t
             if reported != hass.states.get(MODE).state:
                 hass.states.async_set(MODE, reported)
                 hass.states.async_set(SWITCH, "on" if reported == "connected_charging" else "off")
+            if away_at is not None and not away and now >= away_at:
+                away = True
+                sim.log.append(f"{now:%H:%M:%S} Home Assistant away until {away_until:%H:%M}")
+                assert await hass.config_entries.async_unload(entry.entry_id)
+            if away:
+                if now < away_until:
+                    sim.away_minutes += STEP / 60
+                    if sim.charging:
+                        sim.away_charging += STEP
+                    continue  # nothing controls the charger meanwhile (it goes on doing what it did)
+                away, away_at = False, None
+                assert await hass.config_entries.async_setup(entry.entry_id)
+                await hass.async_block_till_done(wait_background_tasks=True)
             async_fire_time_changed(hass)
             await hass.async_block_till_done(wait_background_tasks=True)
             if restart_at is not None and now >= restart_at:
@@ -168,13 +198,15 @@ async def play_night(hass: HomeAssistant, request, freezer, seed: int, lad_kun_t
     detail = f"seed {seed}: " + "\n".join(sim.log)
     assert sim.unwanted <= 90, f"{sim.unwanted / 60:.1f} min charging the plan did not want – {detail}"
     if lad_kun_til:
-        # Five quarters at or below 2.00 kr: about 67 % at most (60 kWh test battery) – never on to the target.
-        assert sim.soc <= 69, f"charged to {sim.soc:.1f} % although waiting with the rest was chosen – {detail}"
+        # Five quarters at or below 2.00 kr: about 67 % at most (60 kWh test battery) – never on to the target. What the
+        # charger did on its own while Home Assistant was away cannot be helped.
+        own = sim.away_charging / 3600 * 11 * 0.9 / 60 * 100
+        assert sim.soc <= 69 + own, f"charged to {sim.soc:.1f} % although waiting with the rest was chosen – {detail}"
         assert planner.limit_wait, "the answer stays for the night (also across restarts)"
         return
     # Dear charging only for what the cheap hours cannot hold, plus the make-up for a car that woke late.
     need_min = (80 - soc0) / 100 * 60 / 0.9 / 11 * 60
-    allowed = max(0.0, need_min - 60 * len(cheap)) + 25
+    allowed = max(0.0, need_min - 60 * len(cheap)) + 25 + sim.away_minutes  # an outage: its time, at most
     assert sim.dear_charging <= allowed * 60, (
         f"{sim.dear_charging / 60:.1f} min charging at the dear price (allowed {allowed:.0f}) – {detail}")
     assert sim.soc >= 79, f"only {sim.soc:.1f} % by the morning – {detail}"

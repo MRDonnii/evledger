@@ -170,7 +170,8 @@ async def test_the_waiting_answer_survives_a_restart_before_the_car_reports(hass
     the plan went back to the target (six periods to 100 %) although "Lad kun til 68 %" had been chosen."""
     entry, _, sent = await limit_setup(hass, request, freezer)
     planner = hass.data[DOMAIN][entry.entry_id].smart
-    waiting_kwh = 11.0  # tonight's cheap hour only (the 80 % target would be 20.67 kWh)
+    # Tonight's cheap hour only, less the 5 minutes the car takes to wake up (the 80 % target would be 20.67 kWh).
+    waiting_kwh = 11.0 - 11 * 5 / 60
     hass.bus.async_fire("mobile_app_notification_action",
                         {"action": asked_about_waiting(sent)[0]["data"]["actions"][0]["action"]})
     await hass.async_block_till_done(wait_background_tasks=True)
@@ -329,3 +330,43 @@ async def test_a_charger_command_that_fails_with_any_error_is_only_logged(hass: 
     backend = charger_module.ChargerBackend(hass)
     await backend._call("switch", "turn_off", "switch.charger_charging")
     assert "switch.turn_off on switch.charger_charging failed" in caplog.text
+
+
+async def test_home_assistant_away_in_the_night_catches_up_and_tells(hass: HomeAssistant, request, freezer):
+    """Home Assistant is away 00:10–01:40, past the start of the second period: back again, the plan catches up at once
+    (it still reaches the target before the ready-by time) and the phones are told."""
+    from .test_routines import phones, with_options
+
+    entry, calls, planner, t0 = await night(hass, request, freezer)
+    sent = phones(hass)
+    await with_options(hass, entry)
+    end = await first_period(hass, freezer, calls, t0)
+    await charger(hass, "connected_finished")
+    await at(hass, freezer, end + timedelta(minutes=10))
+    assert await hass.config_entries.async_unload(entry.entry_id)  # Home Assistant goes away …
+    freezer.move_to(t0 + timedelta(hours=3, minutes=40))  # … and is back at 01:40
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await at(hass, freezer, t0 + timedelta(hours=3, minutes=41))
+    told = [m for m in sent if "Home Assistant var nede" in m.get("title", "")]
+    assert len(told) == 1, [m.get("title") for m in sent]
+    assert "Planen er lagt om" in told[0]["message"] and "bilen når stadig 80 %" in told[0]["message"]
+    starts = len(calls["switch.turn_on"])
+    assert starts >= 2, "the charge starts again at once"
+    await at(hass, freezer, t0 + timedelta(hours=4))
+    assert len([m for m in sent if "Home Assistant var nede" in m.get("title", "")]) == 1, "once"
+
+
+async def test_a_normal_restart_is_not_an_outage(hass: HomeAssistant, request, freezer):
+    from .test_routines import phones, with_options
+
+    entry, calls, _, t0 = await night(hass, request, freezer)
+    sent = phones(hass)
+    await with_options(hass, entry)
+    await at(hass, freezer, t0 + timedelta(minutes=58))
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    freezer.move_to(t0 + timedelta(hours=1, minutes=2))  # two minutes, across the start of a period
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await at(hass, freezer, t0 + timedelta(hours=1, minutes=5))
+    assert not [m for m in sent if "Home Assistant var nede" in m.get("title", "")]

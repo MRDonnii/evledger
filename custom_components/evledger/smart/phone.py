@@ -34,7 +34,7 @@ ACTION_EVENT = "mobile_app_notification_action"
 # questions and warnings keep their sound.
 QUIET_FROM = time(22, 0)
 QUIET_UNTIL = time(7, 0)
-QUIET_KINDS = ("start", "done", "plug_soon")
+QUIET_KINDS = ("start", "done", "plug_soon", "outage")
 # Android: a notification channel without sound for the silent messages (iOS uses the "passive" interruption level).
 QUIET_CHANNEL = "EV Ledger lydløs"
 ANSWERS = {"NOW": MODE_NOW, "OFF": MODE_OFF}

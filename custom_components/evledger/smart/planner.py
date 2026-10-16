@@ -51,6 +51,7 @@ from .const import (
     DEFAULT_QUIET_UNTIL,
     DEFAULT_READY_BY,
     DEFAULT_READY_BY_WEEKEND,
+    DEFAULT_READY_MARGIN,
     DEFAULT_REMINDER_SOC,
     DEFAULT_REMINDER_TIME,
     DEFAULT_SMART_FLOOR_SOC,
@@ -58,11 +59,14 @@ from .const import (
     DEFAULT_TARGET_SOC,
     DEFAULT_TRIP_MARGIN,
     DEFAULT_TRIP_RESERVE,
+    DEFAULT_WAKE_MINUTES,
+    FORECAST_MARGIN,
     HEAT_HOLD_MARGIN,
     INPUT_WAIT_SECONDS,
     LIMIT_LOOK_HOURS,
     MIN_USE_HISTORY_DAYS,
     NOW_DONE_MINUTES,
+    OUTAGE_MIN_MINUTES,
     START_DELAY_SECONDS,
     STARTUP_GRACE_SECONDS,
     STATUS_AWAITING_CONFIRMATION,
@@ -183,6 +187,7 @@ class ChargePlanner:
             "smart_max_price": DEFAULT_SMART_MAX_PRICE,
             "smart_floor_soc": DEFAULT_SMART_FLOOR_SOC,
             "ask_min_saving": DEFAULT_ASK_MIN_SAVING,
+            "ready_margin": DEFAULT_READY_MARGIN,
             "consumption": DEFAULT_CONSUMPTION,
             "trip_margin": DEFAULT_TRIP_MARGIN,
             "trip_reserve": DEFAULT_TRIP_RESERVE,
@@ -290,6 +295,8 @@ class ChargePlanner:
         # The extras (questions, messages, learned times, comparisons) whose fault was logged: an extra that fails
         # must never stop the plan from controlling the charger (logged once, see _optional).
         self._faults: set[str] = set()
+        # Home Assistant was away (from, until) while a planned period should have started: told once (routines).
+        self.outage: tuple[datetime, datetime] | None = None
         self.deadline: datetime | None = None
         self.price_unit: str | None = None
         self.slot_count = 0
@@ -978,6 +985,15 @@ class ChargePlanner:
             result.append(Constraint(self.trip.departure, min(max(target, trip_target or 0.0), limit), firm=True))
         return tuple(result)
 
+    def note_outage(self, alive_at: datetime | None) -> None:
+        """At start-up: Home Assistant was last alive at alive_at. A planned period that should have started while it
+        was away is an outage to tell about (a normal restart takes a minute or two)."""
+        now = dt_util.utcnow()
+        if alive_at is None or now - alive_at < timedelta(minutes=OUTAGE_MIN_MINUTES):
+            return
+        if any(start < now and end > alive_at for start, end in self.restored_blocks):
+            self.outage = (alive_at, now)
+
     def charging_now(self, now: datetime | None = None) -> bool:
         """The charger is charging this car – not an old "charging" from the charger's cloud just after our own stop
         (16 Oct 2026: Zaptec said "charging" for a minute after the stop at the end of a period)."""
@@ -1144,6 +1160,9 @@ class ChargePlanner:
                 green=self.flags["prefer_green"],
                 max_price=wait[1] if wait else None,
                 floor_soc=wait[0] if wait else None,
+                wake_h=self.controller.wake_delay(DEFAULT_WAKE_MINUTES) / 60,
+                margin_h=self.settings["ready_margin"] / 60,
+                charging=self.charging_now(now),
             ), now)
 
         self.waiting = None
@@ -1177,6 +1196,8 @@ class ChargePlanner:
         self._control(now)
         self._optional("warnings", lambda: self._warn(now))
         self._optional("charger offline check", lambda: self.routines.check_offline(now))
+        self._optional("charger stop check", lambda: self.routines.check_stop(now))
+        self._optional("outage message", lambda: self.routines.check_outage(now))
         self._optional("started message", lambda: self.routines.check_started(now))
         self._optional("done message", lambda: self.routines.check_done(now))
         if self._info_pending and not self._notify_pending:
@@ -1554,7 +1575,10 @@ class ChargePlanner:
                 need = min(need_at(first.start), target)
                 if wall(max(soc, need), target) < 0.5:
                     continue  # the driving until then needs the whole target tonight
-                cap = first.price if fixed is None else max(first.price, fixed)
+                # A forecast price with the safety margin: tonight charges a little more, and waiting must save
+                # even if the forecast was too low.
+                later_price = first.price * (1 + FORECAST_MARGIN) if first.estimated else first.price
+                cap = later_price if fixed is None else max(later_price, fixed)
                 below = plan_for(MODE_SMART, constraints, keep_plan=False, limit=(need, cap))
                 over_kwh = full.energy_kwh - below.energy_kwh
                 if over_kwh < 0.5:
@@ -1565,7 +1589,8 @@ class ChargePlanner:
                                if w.kind == first.kind), None)
                 if window is None:
                     continue
-                saving = over_cost - over_kwh * window.price
+                saving = over_cost - over_kwh * (window.price * (1 + FORECAST_MARGIN) if window.estimated
+                                                 else window.price)
                 if saving < 0.5:
                     continue
                 found = {"kind": window.kind, "start": window.start, "end": window.end, "price": window.price,

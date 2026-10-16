@@ -391,7 +391,7 @@ New entities on the car's device:
 | `switch.<car>_monthly_summary_on_the_phone`, `button.<car>_send_monthly_summary` | On the 1st of the month from 09:00: last month's home charges (count, kWh, price, price per kWh), what the plans saved and the public charges, once. The button sends this month so far. |
 | `binary_sensor.<car>_charge_now` | On while the plan wants to charge; usable without charger control. |
 | `switch.<car>_message_when_charging_is_done` | When the plan is done (or the cable comes out), one message with the whole charge: kWh, price and price per kWh, the battery before and after, when it charged – summed over all periods of a split plan, from the ledger's sessions – and what the plan saved against charging right away when the car was plugged in ("Charge now"). On by default. |
-| `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. Also half an hour before the plan's cheapest start, under the same conditions: "Billigste ladning starter kl. …" (once per start, quiet at night). |
+| `switch.<car>_reminder_to_plug_in`, `time.<car>_evening_check_at`, `number.<car>_remind_below` | The evening check (21:00 by default), once a day: when the car is home without the cable and its battery is below the level (50 %, or below what a planned trip needs), a reminder to plug in. In the same check, a warning when the charger is offline while a plan waits. Also half an hour before the plan's cheapest start, under the same conditions: "Billigste ladning starter kl. …" (once per start, kept across restarts; never inside the silent window, 22:00–07:00 by default – a night start is covered by the evening check). |
 | `switch.<car>_message_when_power_is_cheap`, `number.<car>_cheap_power_message_below` | When the price drops below the level (0.50 by default) between 08:00 and 21:00 and the car is home without the cable and not near its target: a message with **Charge now** (at most every 3 hours). Off by default. |
 | `switch.<car>_wait_for_a_cheaper_day` | **Cheapest** only: when a night within the next three departures is clearly cheaper (at least 15 % per kWh and 2.00 in all, from the price forecast) and the battery lasts until then with 10 % above the minimum level (judged from the ledger's driving of the last 14 days), nothing is charged tonight and the plan aims at that day. The plan message says why (`waiting_for` on the next charge start sensor). A charge already running is not stopped. Off by default. |
 | `switch.<car>_learn_departure_times` | Learns when the car usually leaves home on each weekday (the first trip of the morning from home, the last 8 weeks, at least 3 per weekday, ready a quarter before an early one) and uses that as the ready-by time; a weekday without regular departures has none, and the plan aims at the next day the car leaves (the usual ready-by time still keeps the minimum level). Needs 3 weeks of trips; the learned times are on the switch (`departures`). Off by default. |
@@ -400,6 +400,7 @@ New entities on the car's device:
 | `switch.<car>_message_if_the_target_is_not_reached` | Half an hour after the ready-by time: a message (with **Charge now**) when the car is home on the charger more than 3 % below the level the plan aimed for, e.g. after Home Assistant or the charger was down in the night. Off by default. |
 | `switch.<car>_another_time_at_the_weekend`, `time.<car>_ready_by_at_the_weekend` | Another ready-by time on Saturdays and Sundays (09:00 by default), e.g. later than on workdays. |
 | `switch.<car>_week_plan` | **Week plan**: a ready-by time for each weekday, each with the normal target or its own (e.g. 90 % on Fridays), and free days without a time (the plan then aims at the next day with one). While on, it is used instead of the ready-by time, the weekend time and the learned departure times; the minimum level is still kept by the week's earliest time every day. Switched on the first time, it starts from the ready-by times used so far. The days are on the switch (`days`), with the next ready-by time, its target and what set it (`next_ready_by`, `next_target`, `next_source`: `once`, `week`, `learned` or `time`). Set it with `evledger.set_week_plan`. Off by default. |
+| `number.<car>_ready_ahead_of_time` | **Ready ahead of time** (15 minutes by default): the plan is done this long before the ready-by time when the slots before that can hold the target, so a short outage, a car that wakes late or a slow last percent do not make the car late. When the time is too short, it charges up to the ready-by time as before. |
 | `datetime.<car>_ready_by_once` | **One-time ready-by time** (at most 14 days ahead, with the normal target or its own in the `target` attribute): the plan aims at it instead of the normal ready-by time. A normal ready-by time before it keeps the minimum level, and "wait for a cheaper day" does not wait past it. Once it has passed it is cleared and the normal times apply again. Set it with `evledger.set_ready_by_once`, clear it with `evledger.clear_ready_by_once`. |
 
 **Keep the battery at the target while heating** (`switch.<car>_keep_the_battery_at_the_target_while_heating`, `number.<car>_price_limit_while_heating`): while the car's climate runs (heating or cooling) and the car is on the charger, the charger starts when the battery is 1 % below the target and charges back to it, so the climate runs on power from the grid instead of the battery. Only while the price now is at most the limit (3 kr/kWh by default), never while the plan is paused or manual. The switch shows whether it holds now and why not (`active`, `reason`: `climate_off`, `not_plugged_in`, `too_expensive`, `at_target`, `paused`, …), the price now and the limit. Off by default.
@@ -444,6 +445,49 @@ cross midnight). iOS gets the "passive" interruption level (into the notificatio
 the screen), Android the low-importance channel "EV Ledger lydløs". Questions and warnings keep their sound. The
 [`th-tesla-dashboard-card`](https://github.com/MRDonnii/ha-smart-home-cards/tree/main/src/cards/th-tesla-dashboard-card)
 shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
+
+### Reliability: when the charger, the car or Home Assistant does not do what it should
+
+- **A charger's cloud that lags behind the commands** (Zaptec reported "charging" for a minute right after a stop):
+  - Up to 5 minutes after its own stop, EV Ledger treats a "charging" as old. It does not take it for a start from
+    the app, does not keep the plan charging through the pause, and sends the stop again. The same applies the other
+    way after its own start.
+  - A charge that EV Ledger did not start counts as a start from the app or the car (→ Charge now) only when it lasts
+    5 minutes. It is not stopped meanwhile.
+  - Up to 60 minutes after its own start, charging is always its own, also across a restart. The last command is kept
+    with the plan.
+  - When the plan turns (charge → pause, pause → charge), the command is sent once whatever the charger reports. It is
+    not sent while a Zaptec waits for authorisation, because its charging switch cannot be used then.
+- **A car that is slow to wake up:** EV Ledger measures how long the car takes from a start to drawing power (the last
+  10 starts, on the charge mode select: `start_delays`, `wake_minutes`). The plan counts that time as lost at the
+  start of every period that is not charging already (5 minutes until three are measured, then a cautious one of the
+  measured ones). Periods are made long enough to reach the target anyway, and a plan is only split into several
+  periods when that still pays with the wake-ups counted. A few minutes are added to a period rather than opening a
+  new one (a new period must give at least 15 minutes of charging).
+- **Home Assistant away in the night:**
+  - Nothing can control the charger while Home Assistant is down. The charger goes on doing what it did, so a car that
+    charged goes on charging and a pause stays a pause.
+  - The *ready ahead of time* margin keeps short outages from making the car late.
+  - Back again, the plan is made at once with the time that is left and catches up.
+  - When a planned period should have started while Home Assistant was away (more than 20 minutes, from the restore
+    data that Home Assistant saves every 15 minutes and when it stops), the phones are told what the new plan
+    reaches by the ready-by time (no sound at night).
+  - Restarts keep the plan: the periods, the chosen answers and the last charger command all survive.
+- **A charger that is offline** (its integration lost its login, the charger or its network is down) for 10 minutes is
+  reported on the phones while the plan wants to charge. It is also reported before the plan's next period while the
+  car says it is plugged in, so there is time to fix it before the night. The charge starts as soon as it answers
+  again.
+- **A stop that does not take:** the stop is repeated every 45 seconds. When the charger still charges 10 minutes
+  after the plan stopped it, the phones are told (the car would otherwise charge through the pause at the dear price).
+- **A charger command that fails** (a timeout or error of any kind) is logged, and the controller sends it again.
+- **A car that does not start charging** after three quick attempts is reported. It is tried again every 15 minutes,
+  and is never given up.
+- **Forecast prices** (a later period priced from Strømligning's forecast) count as 10 % dearer when working out
+  whether waiting pays, because forecasts miss.
+- **The nights the clocks change:** the plan's quarters are kept in UTC, so the hour that comes twice in October and
+  the missing hour in March are planned like any other.
+- **An extra that fails** (a phone message, the price question, learned times) never stops the charging plan; the fault
+  is logged once.
 
 ### Several cars on one charger
 

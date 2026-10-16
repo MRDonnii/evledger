@@ -76,6 +76,8 @@ DEFAULT_REMINDER_SOC = 50.0
 REMINDER_WINDOW_HOURS = 3
 # A charger offline this long while the plan wants to charge is reported at once.
 CHARGER_OFFLINE_ALERT_MINUTES = 10
+# The charger still charges this long after the plan stopped it (the stop is repeated every 45 s): the phones are told.
+STOP_FAILED_ALERT_MINUTES = 10
 # A charge saved before a restart counts in the done message only if its last period ended this recently.
 CHARGE_RUN_KEEP_HOURS = 24
 # Preconditioning: the car's climate is turned on this long before the ready-by time (or a trip's departure),
@@ -156,6 +158,18 @@ USE_DAYS = 14
 # Asking before dear charging: later (cheaper) periods are looked for up to this many hours after the ready-by time
 # (Strømligning's forecast covers about six days), as long as the daily driving leaves the reserve in the battery.
 LIMIT_LOOK_HOURS = 72
+# A later period priced from the forecast counts as this much dearer when deciding whether waiting pays (and up to which
+# price tonight's quarters are charged): forecasts miss, and waiting must still pay when they do (10 %).
+FORECAST_MARGIN = 0.10
+# The car's time from a start to drawing power until three starts are measured (minutes): cautious, so a plan with
+# several periods keeps enough time (14 Oct 2026 the car took ten minutes).
+DEFAULT_WAKE_MINUTES = 5.0
+# The plan is done this long before the ready-by time when the cheap slots allow it (minutes): a short outage of Home
+# Assistant, a car that wakes late or a slow last percent do not make the car late.
+DEFAULT_READY_MARGIN = 15.0
+# Home Assistant was away longer than this while a planned period should have started: the plan is made again at once,
+# and the phones are told (minutes; Home Assistant saves the restore data every 15 minutes and when it stops).
+OUTAGE_MIN_MINUTES = 20
 MIN_USE_HISTORY_DAYS = 7
 # "Message if the target is not reached": checked this long after the ready-by time; a shortfall of more than
 # MORNING_SHORT % counts.

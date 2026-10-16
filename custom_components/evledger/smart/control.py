@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
+
+# The start delay measurements: how many are kept, how many before they are used, and their limits (minutes).
+START_DELAY_SAMPLES = 10
+START_DELAY_MIN_SAMPLES = 3
+START_DELAY_MAX_MINUTES = 45  # longer is not the car waking up (the charger was off, the car away)
+START_DELAY_FLOOR_MINUTES = 0.5
+START_DELAY_MAX_PLANNED_MINUTES = 20
 
 
 class ChargerState(StrEnum):
@@ -73,6 +81,10 @@ class Controller:
     desired_since: datetime | None = None
     manual_since: datetime | None = None  # charging we did not start, waiting to see that it lasts
     last_start_at: datetime | None = None  # our last start command (kept across restarts with the last command)
+    # How long the car takes from our first start to drawing power (minutes, the last START_DELAY_SAMPLES): the plan
+    # counts that time as lost at the start of every period (14 Oct 2026: ten minutes).
+    start_seq_at: datetime | None = None
+    start_delays: list[float] = field(default_factory=list)
 
     def _own(self, action: Action, now: datetime) -> bool:
         return (self.last_command == action and self.last_command_at is not None
@@ -116,6 +128,7 @@ class Controller:
             self.blocked = False
             if self.last_command == Action.START or (
                     self.last_start_at is not None and now - self.last_start_at <= self.start_memory):
+                self._measure_start(now)
                 return None  # ours – also a car that took long to wake up (10 min on 14 Oct 2026)
             if self.settling(now):
                 return None  # still catching up with our stop; decide() sends it again
@@ -147,6 +160,8 @@ class Controller:
         if desired != self.last_desired:
             self.last_desired = desired
             self.desired_since = now if desired else None
+            if not desired:
+                self.start_seq_at = None  # the period ended before the car drew power: not a measurement
             self.reset()
         state = self.state
         if state not in CONNECTED:
@@ -193,4 +208,25 @@ class Controller:
         self.last_command, self.last_command_at = action, now
         if action == Action.START:
             self.last_start_at = now
+            self.start_seq_at = self.start_seq_at or now  # the first of a row of attempts
+        else:
+            self.start_seq_at = None
         return action
+
+    def _measure_start(self, now: datetime) -> None:
+        """The car draws power after our start: how long that took from the first attempt."""
+        if self.start_seq_at is None:
+            return
+        minutes = (now - self.start_seq_at).total_seconds() / 60
+        self.start_seq_at = None
+        if 0 <= minutes <= START_DELAY_MAX_MINUTES:
+            self.start_delays = [*self.start_delays, round(minutes, 1)][-START_DELAY_SAMPLES:]
+
+    def wake_delay(self, default: float) -> float:
+        """The start delay the plan counts with (minutes): a cautious one of the measured ones (the third quartile),
+        or the default until three are measured."""
+        if len(self.start_delays) < START_DELAY_MIN_SAMPLES:
+            return default
+        ordered = sorted(self.start_delays)
+        value = ordered[min(len(ordered) - 1, math.ceil(0.75 * (len(ordered) - 1)))]
+        return min(max(value, START_DELAY_FLOOR_MINUTES), START_DELAY_MAX_PLANNED_MINUTES)

@@ -302,6 +302,9 @@
       "smart_max_price": {
         "name": "Fixed price limit"
       },
+      "ready_margin": {
+        "name": "Ready ahead of time"
+      },
       "ask_min_saving": {
         "name": "Ask when waiting saves at least"
       },

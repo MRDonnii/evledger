@@ -302,6 +302,9 @@
       "smart_max_price": {
         "name": "Fast prisgrænse"
       },
+      "ready_margin": {
+        "name": "Klar før tid"
+      },
       "ask_min_saving": {
         "name": "Spørg når det sparer mindst"
       },

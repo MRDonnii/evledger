@@ -24,7 +24,8 @@ def schedule(mode="smart", soc=50.0, target=80.0, now=NIGHT, known=None, horizon
         power_kw=kw.get("power", 12), price_factor=kw.get("factor", 1.0),
         timeline=plan.build_timeline(now, known, horizon), constraints=tuple(kw.get("constraints", ())),
         window=kw.get("window"), price_cap=kw.get("price_cap"), min_soc=kw.get("min_soc"),
-        cap_override=kw.get("cap_override", True), max_price=kw.get("max_price"), floor_soc=kw.get("floor_soc"))
+        cap_override=kw.get("cap_override", True), max_price=kw.get("max_price"), floor_soc=kw.get("floor_soc"),
+        wake_h=kw.get("wake_min", 0) / 60, charging=kw.get("charging", False))
     return plan.build_schedule(data, now)
 
 
@@ -356,3 +357,94 @@ def test_a_running_charge_pauses_when_splitting_saves():
     result = plan.build_schedule(data, NIGHT)
     local = [(b.start.astimezone(TZ).strftime("%H:%M"), b.end.astimezone(TZ).strftime("%H:%M")) for b in result.blocks]
     assert local == [("22:00", "22:15"), ("05:15", "06:00")], "the charge stops between the cheap quarters"
+
+
+# -- the time the car takes to wake up (measured; 14 Oct 2026: ten minutes) ------------------------------------------
+
+
+def local(blocks):
+    return [(b.start.astimezone(TZ).strftime("%H:%M"), b.end.astimezone(TZ).strftime("%H:%M")) for b in blocks]
+
+
+def test_waking_adds_time_to_a_period_so_the_target_is_still_reached():
+    # 18 kWh = 1.5 h at 12 kW; with 10 minutes to wake the car the period is 10 minutes longer, and the energy the same
+    plain = schedule(constraints=[deadline(8)])
+    woken = schedule(constraints=[deadline(8)], wake_min=10)
+    assert local(plain.blocks) == [("01:00", "02:30")]
+    assert local(woken.blocks) == [("01:00", "02:40")], "one more quarter, the car draws power from 01:10"
+    assert woken.energy_kwh == plain.energy_kwh == 18.0
+    assert woken.cost > plain.cost, "the extra quarter costs (the waking itself costs nothing)"
+
+
+def test_a_period_that_is_already_charging_loses_no_time():
+    now = datetime(2026, 10, 10, 1, 0, tzinfo=TZ)
+    running = schedule(now=now, constraints=[deadline(8)], wake_min=10, charging=True)
+    asleep = schedule(now=now, constraints=[deadline(8)], wake_min=10)
+    assert local(running.blocks)[0][0] == "01:00"
+    assert running.blocks[-1].end < asleep.blocks[-1].end, "no waking time while it is charging already"
+
+
+def test_short_periods_are_dropped_when_waking_eats_them():
+    # Two single cheap quarters apart vs one hour slightly dearer: with a car that starts at once the split is cheapest,
+    # with ten minutes of waking each quarter gives only five minutes – the single period is better.
+    known = quarterly(NIGHT, [3] * 8 + [0.5] + [3] * 3 + [0.5] + [3] * 3 + [0.8] * 4 + [3] * 20)
+    need = 0.5  # hours
+    fast = schedule_wake(known, need, 0)
+    slow = schedule_wake(known, need, 10)
+    assert len(fast.blocks) == 2, local(fast.blocks)
+    # (the later of equally cheap windows: the battery sits full for as short a time as possible)
+    assert len(slow.blocks) == 1 and local(slow.blocks) == [("02:15", "02:55")], local(slow.blocks)
+
+
+def test_a_little_missing_energy_makes_a_period_longer_instead_of_opening_a_new_one():
+    # The cheap half hour then dear; a cheaper quarter far later. Five minutes of waking leave 1 kWh missing: the period
+    # is made longer (a dear quarter next to it) rather than opening another period for those minutes.
+    known = quarterly(NIGHT, [3] * 8 + [0.2, 0.2, 2.0, 2.0] + [3] * 4 + [0.9] + [3] * 30)
+    result = schedule_wake(known, 0.5, 5)
+    assert len(result.blocks) == 1 and local(result.blocks) == [("00:00", "00:35")], local(result.blocks)
+
+
+def test_a_quarter_spent_waking_still_switches_the_charger_on():
+    known = quarterly(NIGHT, [3] * 8 + [0.2] * 6 + [3] * 30)
+    result = schedule_wake(known, 0.5, 20)
+    first = result.slots[0]
+    assert result.blocks[0].start == first.start, "the charger is on from the period's start"
+    assert first.kwh == 0 and first.end == first.start + timedelta(minutes=15), "the whole quarter goes to waking"
+    assert len(result.blocks) == 1 and result.blocks[0].end - result.blocks[0].start == timedelta(minutes=50)
+    assert result.energy_kwh == 6.0
+
+
+def schedule_wake(known, need_hours: float, wake_min: float):
+    target = 50.0 + need_hours * 12 / 60 * 100
+    data = plan.ScheduleInput(
+        mode="smart", soc=50.0, target_soc=target, capacity_kwh=60, efficiency=1.0,
+        power_kw=12, price_factor=1.0, timeline=plan.build_timeline(NIGHT, known, NIGHT + timedelta(hours=10)),
+        constraints=(deadline(8, target),), wake_h=wake_min / 60)
+    return plan.build_schedule(data, NIGHT)
+
+
+def test_the_plan_is_done_a_margin_before_the_ready_by_time_when_it_can_be():
+    # The cheapest quarters are the last ones before 06:00; with a margin of 15 minutes the plan avoids the last quarter
+    # when the slots before can hold the target.
+    known = quarterly(NIGHT, [3] * 28 + [1.0, 1.0, 0.5, 0.5] + [3] * 12)  # 05:00–06:00 cheap, the last half cheapest
+    data = dict(mode="smart", soc=50.0, target_soc=60.0, capacity_kwh=60, efficiency=1.0, power_kw=12,
+                price_factor=1.0, timeline=plan.build_timeline(NIGHT, known, NIGHT + timedelta(hours=10)),
+                constraints=(deadline(8, 60.0),))
+    plain = plan.build_schedule(plan.ScheduleInput(**data), NIGHT)
+    early = plan.build_schedule(plan.ScheduleInput(**data, margin_h=0.25), NIGHT)
+    assert local(plain.blocks)[-1][1] == "06:00"
+    assert early.blocks[-1].end <= datetime(2026, 10, 10, 5, 45, tzinfo=TZ), local(early.blocks)
+    assert early.energy_kwh == plain.energy_kwh
+
+
+def test_the_margin_gives_way_when_the_time_is_short():
+    # Only half an hour left before 06:00 and half an hour of charging needed: the margin is not kept, the car is
+    # charged up to the ready-by time.
+    now = datetime(2026, 10, 10, 5, 30, tzinfo=TZ)
+    known = quarterly(NIGHT, [1.0] * 40)
+    data = plan.ScheduleInput(mode="smart", soc=50.0, target_soc=60.0, capacity_kwh=60, efficiency=1.0, power_kw=12,
+                              price_factor=1.0, timeline=plan.build_timeline(now, known, now + timedelta(hours=3)),
+                              constraints=(deadline(8, 60.0),), margin_h=0.25)
+    result = plan.build_schedule(data, now)
+    assert result.shortfall_kwh == 0 and result.energy_kwh == 6.0
+    assert result.blocks[-1].end == datetime(2026, 10, 10, 6, 0, tzinfo=TZ)

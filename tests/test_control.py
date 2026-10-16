@@ -188,3 +188,32 @@ def test_a_stop_is_sent_when_the_plan_turns_even_if_the_charger_says_stopped():
     assert c.observe(S.PAUSED, minutes(20)) == E.EXTERNAL_STOP  # an old "stopped" mid-period
     assert c.decide(False, minutes(30)) == A.STOP, "sent although the charger says stopped"
     assert c.decide(False, minutes(31)) == A.NONE, "once"
+
+
+def test_the_car_s_wake_up_time_is_measured_from_the_first_start():
+    c = started(S.READY)
+    assert c.decide(True, T0) == A.START
+    assert c.decide(True, minutes(3)) == A.START, "a second attempt does not restart the measurement"
+    assert c.observe(S.CHARGING, minutes(7)) is None
+    assert c.start_delays == [7.0]
+
+
+def test_a_period_that_ends_before_the_car_draws_power_is_not_a_measurement():
+    c = started(S.READY)
+    assert c.decide(True, T0) == A.START
+    c.decide(False, minutes(10))
+    assert c.observe(S.CHARGING, minutes(40)) is None
+    assert c.start_delays == []
+
+
+def test_the_plan_counts_with_a_cautious_measured_wake_up_time():
+    c = control.Controller()
+    assert c.wake_delay(5.0) == 5.0, "the default until three are measured"
+    c.start_delays = [1.0, 2.0]
+    assert c.wake_delay(5.0) == 5.0
+    c.start_delays = [1.0, 2.0, 8.0, 3.0]
+    assert c.wake_delay(5.0) == 8.0, "the third quartile, not the mean"
+    c.start_delays = [0.0, 0.1, 0.0]
+    assert c.wake_delay(5.0) == 0.5, "never below half a minute"
+    c.start_delays = [30.0, 40.0, 44.0]
+    assert c.wake_delay(5.0) == 20.0, "never above 20 minutes"

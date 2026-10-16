@@ -35,14 +35,14 @@ async def test_whole_hours_change_the_plan(hass: HomeAssistant, request):
     planner.async_set_setting("efficiency", 1.0)
     planner.async_set_ready_by((hour + timedelta(hours=10)).time())
     await hass.async_block_till_done()
-    # 10 % of 60 kWh = 6 kWh = half an hour.
+    # 10 % of 60 kWh = 6 kWh = half an hour, and 5 minutes for the car to wake up (the default until measured).
     blocks = [(b.start, b.end) for b in planner.schedule.blocks]
-    assert blocks == [(hour + timedelta(hours=2), hour + timedelta(hours=2, minutes=30))]
+    assert blocks == [(hour + timedelta(hours=2), hour + timedelta(hours=2, minutes=35))]
 
     await hass.services.async_call("select", "select_option", {"entity_id": "select.bil_price_resolution",
                                                                "option": "hour"}, blocking=True)
     blocks = [(b.start, b.end) for b in planner.schedule.blocks]
-    assert blocks == [(hour + timedelta(hours=3), hour + timedelta(hours=3, minutes=30))]
+    assert blocks == [(hour + timedelta(hours=3), hour + timedelta(hours=3, minutes=35))]
     assert hass.states.get("select.bil_charge_mode").attributes["price_resolution"] == "hour"
 
 

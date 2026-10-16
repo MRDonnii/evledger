@@ -48,8 +48,9 @@ from .const import (
     SAVING_SHOWN,
     STARTED_NOTE_QUIET_MINUTES,
     STATUS_DONE,
+    STOP_FAILED_ALERT_MINUTES,
 )
-from .control import CONNECTED, ChargerState
+from .control import CONNECTED, Action, ChargerState
 from .plan import MODE_MANUAL, MODE_NOW, MODE_OFF
 
 if TYPE_CHECKING:
@@ -176,6 +177,9 @@ class Routines:
         self._was_charging: bool | None = None
         self._started_note: datetime | None = None
         self._offline_alerted = False
+        # The charger keeps charging although the plan stopped it: since when, and whether the phones were told.
+        self._stuck_since: datetime | None = None
+        self._stuck_alerted = False
         # The ready-by (or departure) time the phones were asked to precondition for, and whether they said yes
         # (then the climate was turned on by us, and is turned off again if nobody left).
         self.precondition_goal: datetime | None = None
@@ -465,9 +469,13 @@ class Routines:
     # -- charger offline ------------------------------------------------------------------------
 
     def check_offline(self, now: datetime) -> None:
-        """Tell the phones at once when the charger is offline while the plan wants to charge."""
+        """Tell the phones when the charger has been offline for a while (its integration lost its login, the charger or
+        its network is down) while the plan wants to charge – or, before the plan's next period, while the car says it
+        is plugged in, so there is time to do something about it before the night."""
         p = self.planner
-        if p.backend is None or p.charger_state != ChargerState.UNKNOWN or not p.charge_desired:
+        ahead = next((block for block in p.schedule.blocks if block.end > now), None)
+        waiting = p.car_plugged() is True and ahead is not None and p.mode not in (MODE_OFF, MODE_MANUAL)
+        if p.backend is None or p.charger_state != ChargerState.UNKNOWN or not (p.charge_desired or waiting):
             self._offline_since = None
             if p.charger_state != ChargerState.UNKNOWN:
                 self._offline_alerted = False
@@ -477,10 +485,63 @@ class Routines:
                 or not (p.info_enabled and p.notify.targets)):
             return
         self._offline_alerted = True
+        text = ("Laderen er offline, og opladningen skulle være i gang. Den startes, så snart laderen svarer igen."
+                if p.charge_desired else
+                f"Laderen er offline. Bilen er sat til, men kan ikke lade efter planen (næste periode "
+                f"{p.notify.when(ahead.start)}), før laderen svarer igen. Tjek laderen og dens netværk.")
+        p.entry.async_create_background_task(self.hass, p.notify.async_send_alert(text),
+                                             "ev_smart_charge_notify_offline")
+
+    def check_outage(self, now: datetime) -> None:
+        """After Home Assistant was away while a planned period should have started: once the charger and the prices are
+        back, tell the phones what the new plan reaches by the ready-by time (it catches up at once)."""
+        p = self.planner
+        if p.outage is None or p.backend is None or p.charger_state == ChargerState.UNKNOWN or not p.slot_count:
+            return
+        away_from, away_until = p.outage
+        p.outage = None
+        if p.car_plugged() is not True or not (p.notify.targets and p.info_enabled):
+            return
+        schedule = p.schedule
+        target = schedule.target_soc or p.target
+        when = f" {p.notify.when(p.deadline)}" if p.deadline else ""
+        if schedule.shortfall_kwh >= 0.5:
+            soc = p._battery_soc() or p.last_soc or 0.0
+            reach = max(target - schedule.shortfall_kwh * p.settings["efficiency"] / p.capacity * 100, soc)
+            result = f"bilen når ca. {reach:.0f} % af målet {target:.0f} %{when}"
+        else:
+            result = f"bilen når stadig {target:.0f} %{when}"
+        text = (f"Home Assistant var nede {p.notify.when(away_from)}–{dt_util.as_local(away_until).strftime('%H:%M')}, "
+                f"mens bilen skulle lade. Planen er lagt om med det samme: {result}.")
+        p.entry.async_create_background_task(
+            self.hass, p.notify.async_send_note("outage", "Home Assistant var nede", text, icon="mdi:server-off"),
+            "ev_smart_charge_notify_outage")
+
+    def check_stop(self, now: datetime) -> None:
+        """Tell the phones once when the charger keeps charging although the plan stopped it (the stop does not take:
+        the charger's cloud refuses it, the integration fails) – the car would otherwise charge through the pause at
+        the dear price without anyone knowing."""
+        p = self.planner
+        c = p.controller
+        # (Counted from the first stop: an old "charging" just after it lasts a minute, far below the alert time.)
+        stuck = (p.backend is not None and not p.charge_desired and p.charger_state == ChargerState.CHARGING
+                 and p.car_present
+                 and c.last_command == Action.STOP and c.manual_since is None and p.mode not in (MODE_MANUAL, MODE_NOW))
+        if not stuck:
+            self._stuck_since = None
+            if p.charger_state != ChargerState.CHARGING:
+                self._stuck_alerted = False
+            return
+        self._stuck_since = self._stuck_since or now
+        if (self._stuck_alerted or now - self._stuck_since < timedelta(minutes=STOP_FAILED_ALERT_MINUTES)
+                or not (p.info_enabled and p.notify.targets)):
+            return
+        self._stuck_alerted = True
         p.entry.async_create_background_task(
             self.hass, p.notify.async_send_alert(
-                "Laderen er offline, og opladningen skulle være i gang. Den startes, så snart laderen svarer igen."),
-            "ev_smart_charge_notify_offline")
+                "Laderen lader sig ikke stoppe: bilen lader stadig, selvom planen holder pause. Der prøves igen; "
+                "tjek laderen, hvis det fortsætter."),
+            "ev_smart_charge_notify_stop_failed")
 
     # -- the evening check ----------------------------------------------------------------------
 

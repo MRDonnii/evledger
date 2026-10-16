@@ -6,9 +6,10 @@ from datetime import timedelta
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
-from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.restore_state import RestoredExtraData, RestoreEntity
 from homeassistant.util import dt as dt_util
 
+from .const import DEFAULT_WAKE_MINUTES
 from .control import Action
 from .entity import EvSmartChargeListenerEntity
 from .plan import DEFAULT_MODES, MODES, RESOLUTIONS
@@ -40,6 +41,11 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
                 if start and end:
                     blocks.append((start, end))
             self.planner.restored_blocks = blocks
+            # When Home Assistant was last alive (saved with the restore data every 15 minutes and when it stops): a
+            # planned period inside the time it was away is told to the phones, and the new plan catches up.
+            extra = await self.async_get_last_extra_data()
+            alive = (extra.as_dict() if extra else {}).get("alive_at")
+            self.planner.note_outage(dt_util.parse_datetime(str(alive)) if alive else None)
             warned = last.attributes.get("warned")
             if isinstance(warned, list):
                 self.planner.warned = {str(item) for item in warned}
@@ -52,6 +58,10 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
             at = dt_util.parse_datetime(str(last.attributes.get("last_command_at") or ""))
             if command in (Action.START, Action.STOP) and at and dt_util.utcnow() - at < timedelta(hours=12):
                 self.planner.controller.last_command, self.planner.controller.last_command_at = Action(command), at
+            delays = last.attributes.get("start_delays")
+            if isinstance(delays, list):
+                self.planner.controller.start_delays = [float(item) for item in delays
+                                                        if isinstance(item, (int, float)) and 0 <= item <= 45][-10:]
             started = dt_util.parse_datetime(str(last.attributes.get("last_start_at") or ""))
             if started and dt_util.utcnow() - started < timedelta(hours=12):
                 self.planner.controller.last_start_at = started
@@ -60,6 +70,11 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
     @property
     def current_option(self) -> str:
         return self.planner.mode
+
+    @property
+    def extra_restore_state_data(self) -> RestoredExtraData:
+        """Saved by Home Assistant every 15 minutes and when it stops: the time it was last alive."""
+        return RestoredExtraData({"alive_at": dt_util.utcnow().isoformat()})
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -76,6 +91,9 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
                                     if self.planner.controller.last_command_at else None),
                 "last_start_at": (self.planner.controller.last_start_at.isoformat()
                                   if self.planner.controller.last_start_at else None),
+                # How long the car took from a start to drawing power (minutes), and what the plan counts with.
+                "start_delays": list(self.planner.controller.start_delays),
+                "wake_minutes": self.planner.controller.wake_delay(DEFAULT_WAKE_MINUTES),
                 # The plan's charging periods, followed after a restart until the prices are back.
                 "planned": self._planned()}
 
