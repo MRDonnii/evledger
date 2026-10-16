@@ -154,9 +154,10 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "price_limit": view["price_limit"] if view else None,
                 "price_limit_floor": planner.settings["smart_floor_soc"] if limit_on else None,
                 "above_limit_kwh": view["over_kwh"] if view else schedule.limit_kwh,
-                "limit_soc": view["below_soc"] if view and view["over_kwh"] else (
-                    round(schedule.limit_soc, 1) if schedule.limit_soc is not None else None),
-                "limit_wait": planner.limit_wait if view else None,
+                "limit_soc": planner.wait_soc if planner.wait_soc is not None else (
+                    view["below_soc"] if view and view["over_kwh"] else (
+                        round(schedule.limit_soc, 1) if schedule.limit_soc is not None else None)),
+                "limit_wait": planner.limit_wait if view or planner.wait_params else None,
                 "above_limit_cost": view["over_cost"] if view else None,
                 "limit_saving": view["saving"] if view else None,
                 "limit_ask": view["ask"] if view else None,

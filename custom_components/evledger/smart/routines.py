@@ -443,7 +443,7 @@ class Routines:
         stop and start (the car pausing, a charger reboot) does not send it again within half an hour, and the next
         period of a split plan not at all."""
         p = self.planner
-        charging = p.charger_state == ChargerState.CHARGING and p.car_present
+        charging = p.charging_now(now) and p.car_present
         was, self._was_charging = self._was_charging, charging
         if not charging or was is not False:
             return

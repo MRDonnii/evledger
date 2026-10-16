@@ -4,6 +4,28 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.5] - 2026-10-16
+
+### Fixed
+
+- **Pauses hold, also when the charger's cloud lags.**
+  - Up to 5 minutes after our own stop, a "charging" from the charger is treated as old. It no longer starts Charge
+    now, does not keep the plan charging through the pause, does not show as charging and does not send "Charging
+    started". The stop is sent again.
+  - On 16 Oct the stale "charging" also made the plan keep the charge going: continuing cost the same, so the plan
+    started charging in the pause.
+- **The answer "Lad kun til X %" is fixed for the plug-in.** It is kept as it was given and restored after a restart.
+  Before, a restart before the car and the price forecast were back made the plan charge to the target again.
+- New end-to-end tests play whole nights against a simulated Zaptec charger. They cover:
+  - a cloud that lags behind the stop for a minute and for four minutes
+  - flickers at every period end
+  - an old "stopped" just after a start
+  - restarts in the pause, also with an old "charging" at start-up
+  - the waiting answer across a restart
+  - a replay of the night of 16 Oct with its real quarter prices
+
+  Four of them fail without the fix.
+
 ## [0.9.4] - 2026-10-16
 
 ### Fixed

@@ -265,8 +265,14 @@ class ChargePlanner:
         # to the target; when part of it costs more than the limit and a later period is cheaper, the phones are asked
         # whether to wait with that part. True = only below the limit for this plug-in (answered "Vent").
         self.limit_wait = False
+        self.wait_params = None
         self.limit_view: dict | None = None
         self._limit_params: tuple[float, float] | None = None
+        # The answer "Lad kun til X %" fixed when it was given (keep at least %, max price): the plan keeps to that
+        # level for the plug-in, also when the question cannot be worked out again for a while (just restarted, the
+        # car's level not known yet – 16 Oct 2026 the plan then went back to the target). Restored after a restart.
+        self.wait_params: tuple[float, float] | None = None
+        self.wait_soc: float | None = None
         # Warnings already sent for this plug-in and these settings (target out of reach, price cap).
         self.warned: set[str] = set()
         self._limit_id: str | None = None
@@ -520,6 +526,7 @@ class ChargePlanner:
             self.awaiting_since = None  # choosing a plan answers a pending confirmation
             self.cap_override = True
             self.limit_wait = False
+            self.wait_params = None
             self.warned.clear()
             if self.info_enabled and self.notify.targets and self.charger_state in CONNECTED and self.car_present:
                 self._info_pending = True
@@ -574,6 +581,7 @@ class ChargePlanner:
     def async_set_limit_wait(self, value: bool) -> None:
         """Wait with the energy above the price limit (charge only below it) this plug-in, or charge to the target."""
         self.limit_wait = value
+        self.wait_params = (self._limit_params or self.wait_params) if value else None
         self.warned.add("price")  # answered: not asked again for this plug-in
         self.async_recalculate()
 
@@ -970,6 +978,12 @@ class ChargePlanner:
             result.append(Constraint(self.trip.departure, min(max(target, trip_target or 0.0), limit), firm=True))
         return tuple(result)
 
+    def charging_now(self, now: datetime | None = None) -> bool:
+        """The charger is charging this car – not an old "charging" from the charger's cloud just after our own stop
+        (16 Oct 2026: Zaptec said "charging" for a minute after the stop at the end of a period)."""
+        return (self.charger_state == ChargerState.CHARGING
+                and not self.controller.settling(now or dt_util.utcnow()))
+
     def _optional(self, name: str, func, default=None):
         """Run an extra so that a fault in it never stops the plan: the charger is still controlled by the plan and
         the fault is logged once (with its traceback) instead of every minute."""
@@ -1101,7 +1115,7 @@ class ChargePlanner:
 
         # The charge running now, or the start already announced, stays while it is still among the cheapest.
         keep: datetime | None = None
-        if self.charger_state == ChargerState.CHARGING and self.mode in HOLD_MODES:
+        if self.charging_now(now) and self.mode in HOLD_MODES:
             keep = now
         elif (announced := self.schedule.next_block(now)) is not None:
             keep = max(announced.start, now)
@@ -1110,7 +1124,8 @@ class ChargePlanner:
                      keep_plan: bool = True, limit: tuple[float, float] | bool | None = None) -> Schedule:
             # limit: (keep at least %, max price) for waiting with the dear rest; False: to the target; None: the
             # answer given (Vent med resten) with the best later period found.
-            wait = (self._limit_params if self.limit_wait else None) if limit is None else (limit or None)
+            answer = (self.wait_params or self._limit_params) if self.limit_wait else None
+            wait = answer if limit is None else (limit or None)
             return build_schedule(ScheduleInput(
                 mode=mode,
                 soc=soc,
@@ -1147,6 +1162,9 @@ class ChargePlanner:
         if self.limit_view is None:
             self._limit_params = None  # no view (or it failed): "Vent med resten" falls back to the plan to the target
         self.schedule = plan_for(self.mode, constraints)
+        # The level the plan reaches while it waits with the rest (the fixed answer, or the one worked out now).
+        self.wait_soc = (round(self._soc_after(self.schedule.energy_kwh, soc), 1)
+                         if self.limit_wait and (self.wait_params or self._limit_params) and soc is not None else None)
         # What the other plans would cost right now, so they can be compared before choosing.
         self.alternatives = self._optional(
             "plan comparison", lambda: {mode: self.schedule if mode == self.mode else plan_for(mode)
@@ -1192,6 +1210,7 @@ class ChargePlanner:
             self.warned.clear()
             self.cap_override = True
             self.limit_wait = False
+            self.wait_params = None
             self._limit_id = None
             self._full_ids = None
             self._new_plug = True
@@ -1225,6 +1244,7 @@ class ChargePlanner:
         self.warned.clear()
         self.cap_override = True
         self.limit_wait = False
+        self.wait_params = None
         self._limit_id = None
         self._new_plug = True
         self.controller.reset()
@@ -1688,7 +1708,7 @@ class ChargePlanner:
             return STATUS_UNKNOWN
         if not self.car_present and (self.mode != MODE_NOW or self.shared):
             return STATUS_OTHER_CAR
-        if state == ChargerState.CHARGING:
+        if state == ChargerState.CHARGING and not self.controller.settling(dt_util.utcnow()):
             return STATUS_CHARGING
         if desired and self.controller.blocked:
             return STATUS_STOPPED_EXTERNALLY

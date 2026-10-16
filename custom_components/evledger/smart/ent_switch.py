@@ -265,6 +265,9 @@ class WaitBelowLimit(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         last = await self.async_get_last_state()
         if last and last.state in ("on", "off"):
             self.planner.limit_wait = last.state == "on"
+            floor, cap = last.attributes.get("wait_floor_soc"), last.attributes.get("wait_price_limit")
+            if self.planner.limit_wait and isinstance(floor, (int, float)) and isinstance(cap, (int, float)):
+                self.planner.wait_params = (float(floor), float(cap))
 
     @property
     def is_on(self) -> bool:
@@ -273,7 +276,11 @@ class WaitBelowLimit(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         view = self.planner.limit_view or {}
+        params = self.planner.wait_params
         return {
+            # The answer "Lad kun til X %" as it was given (restored after a restart).
+            "wait_floor_soc": params[0] if params else None,
+            "wait_price_limit": params[1] if params else None,
             "over_limit_kwh": view.get("over_kwh"),
             "over_limit_cost": view.get("over_cost"),
             "below_limit_soc": view.get("below_soc"),
