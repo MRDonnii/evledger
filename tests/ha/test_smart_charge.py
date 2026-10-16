@@ -138,8 +138,12 @@ async def test_manual_start_switches_to_charge_now_until_unplugged(hass: HomeAss
     _, calls = await setup(hass, request, cheap_now=False)
     hass.states.async_set(MODE, "connected_charging")
     await hass.async_block_till_done()
+    assert state(hass, "select.bil_charge_mode") == "smart", "a start not from the plan is confirmed first (5 min)"
+    await later(hass, freezer, 3)
+    assert state(hass, "select.bil_charge_mode") == "smart"
+    await later(hass, freezer, 3)
     assert state(hass, "select.bil_charge_mode") == "now"
-    assert not calls["switch.turn_off"]
+    assert not calls["switch.turn_off"], "not stopped while it was being confirmed"
     hass.states.async_set(MODE, "disconnected")
     await hass.async_block_till_done()
     assert state(hass, "select.bil_charge_mode") == "now", "a short disconnect (charger reboot) keeps the plan"

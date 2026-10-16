@@ -141,6 +141,11 @@ async def test_a_real_start_from_the_app_later_in_the_pause_is_followed(hass: Ho
     await charger(hass, "connected_finished")
     await at(hass, freezer, end + timedelta(minutes=20))
     await charger(hass, "connected_charging")
+    assert state(hass, "select.bil_charge_mode") == "smart", "confirmed first: it must last 5 minutes"
+    await at(hass, freezer, end + timedelta(minutes=23))
+    assert state(hass, "select.bil_charge_mode") == "smart"
+    assert calls["switch.turn_off"] == [SWITCH], "and it is not stopped meanwhile"
+    await at(hass, freezer, end + timedelta(minutes=26))
     assert state(hass, "select.bil_charge_mode") == "now"
 
 
@@ -289,3 +294,24 @@ async def test_replay_of_the_night_of_16_october(hass: HomeAssistant, request, f
         assert len(calls["switch.turn_on"]) == 3, "nothing after the last period"
     assert state(hass, "select.bil_charge_mode") == "smart"
     assert 64 <= soc <= 68, f"ends at tonight's level, not the target: {soc:.1f} %"
+
+
+async def test_a_car_waking_after_a_restart_and_after_its_period_is_stopped(hass: HomeAssistant, request, freezer):
+    """The start was sent, Home Assistant restarted, and the car woke only after the period had ended: still the
+    plan's own start (kept across the restart), so it is stopped – not taken for a start from the app."""
+    entry, calls, _, t0 = await night(hass, request, freezer)
+    await at(hass, freezer, t0 + timedelta(hours=1, seconds=30))
+    assert calls["switch.turn_on"] == [SWITCH], "started, but the car sleeps"
+    await at(hass, freezer, t0 + timedelta(hours=1, minutes=10))
+    # Only the second cheap hour is needed now, so charging at the dear price after the period is clearly dearer.
+    hass.states.async_set("sensor.car_battery", "68", {"unit_of_measurement": "%"})
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await at(hass, freezer, t0 + timedelta(hours=2, minutes=1))  # the period is over
+    stops = len(calls["switch.turn_off"])
+    await at(hass, freezer, t0 + timedelta(hours=2, minutes=4))
+    await charger(hass, "connected_charging")  # the start carried out late (or the car waking) after the stop
+    for minute in (5, 7, 10):
+        await at(hass, freezer, t0 + timedelta(hours=2, minutes=minute))
+        assert state(hass, "select.bil_charge_mode") == "smart", f"not Charge now ({minute})"
+    assert len(calls["switch.turn_off"]) > stops, "stopped: the pause holds"

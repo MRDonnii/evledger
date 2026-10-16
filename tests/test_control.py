@@ -43,10 +43,46 @@ def test_stops_when_not_wanted():
     assert c.observe(S.PAUSED, minutes(0.6)) is None
 
 
-def test_manual_start_is_reported():
+def test_manual_start_is_reported_when_it_lasts():
     c = started()
     c.decide(False, T0)
-    assert c.observe(S.CHARGING, minutes(10)) == E.MANUAL_START
+    assert c.observe(S.CHARGING, minutes(10)) is None, "waits to see that it lasts"
+    assert c.decide(False, minutes(10.5)) == A.NONE, "not stopped while it is being confirmed"
+    assert c.observe(S.CHARGING, minutes(12)) is None
+    assert c.observe(S.CHARGING, minutes(15)) == E.MANUAL_START
+    assert c.observe(S.CHARGING, minutes(16)) is None, "reported once"
+
+
+def test_charging_that_goes_away_again_is_not_a_start():
+    """An old "charging" long after our stop (outside the settling time) that is gone a minute later."""
+    c = started()
+    c.decide(False, T0)
+    assert c.observe(S.CHARGING, minutes(30)) is None
+    assert c.observe(S.PAUSED, minutes(31)) is None, "gone again: not a start, not an outside stop"
+    assert c.observe(S.PAUSED, minutes(40)) is None
+    assert not c.blocked
+
+
+def test_a_car_that_wakes_long_after_our_start_is_still_ours():
+    """14 Oct 2026 the car started 10 minutes after the first authorisation; a car that wakes after the period has
+    ended must be stopped, not taken for a start from the app (which would charge to the target)."""
+    c = started(S.READY)
+    assert c.decide(True, T0) == A.START
+    assert c.decide(True, minutes(3)) == A.START
+    assert c.decide(True, minutes(6)) == A.START
+    assert c.decide(False, minutes(15)) == A.NONE, "the period ended before the car woke"
+    assert c.observe(S.CHARGING, minutes(40)) is None, "ours, 34 minutes after the last start"
+    assert c.decide(False, minutes(40)) == A.STOP
+
+
+def test_unplugging_drops_a_start_being_confirmed():
+    c = started()
+    c.decide(False, T0)
+    assert c.observe(S.CHARGING, minutes(10)) is None
+    assert c.observe(S.DISCONNECTED, minutes(11)) == E.UNPLUGGED
+    assert c.observe(S.PAUSED, minutes(12)) == E.PLUGGED
+    assert c.observe(S.CHARGING, minutes(13)) is None
+    assert c.observe(S.CHARGING, minutes(14)) is None, "confirmation starts again after the new plug-in"
 
 
 def test_external_stop_is_retried_once_then_respected():
@@ -116,8 +152,9 @@ def test_charging_reported_just_after_our_stop_is_not_a_manual_start():
     assert c.decide(False, minutes(0.2)) == A.NONE, "the stop was just sent"
     assert c.decide(False, minutes(1)) == A.STOP, "still charging: the stop is repeated"
     assert c.observe(S.PAUSED, minutes(1.1)) is None
-    # A real start from the app well after the stop is still followed.
-    assert c.observe(S.CHARGING, minutes(10)) == E.MANUAL_START
+    # A real start from the app well after the stop is still followed (once it has lasted).
+    assert c.observe(S.CHARGING, minutes(10)) is None
+    assert c.observe(S.CHARGING, minutes(15)) == E.MANUAL_START
 
 
 def test_stopped_reported_just_after_our_start_is_not_an_outside_stop():
@@ -130,3 +167,24 @@ def test_stopped_reported_just_after_our_start_is_not_an_outside_stop():
     assert not c.blocked
     assert c.decide(True, minutes(1)) == A.NONE, "the start was just sent"
     assert c.decide(True, minutes(3.1)) == A.START, "still not charging: started again"
+
+
+def test_charging_soon_after_our_start_is_ours_also_after_a_stop():
+    """A start that the charger's cloud carries out late, after the plan had already stopped again."""
+    c = started(S.PAUSED)
+    assert c.decide(True, T0) == A.START
+    assert c.decide(False, minutes(30)) == A.STOP, "the period ended before the car charged"
+    assert c.observe(S.CHARGING, minutes(50)) is None
+    assert c.observe(S.CHARGING, minutes(53)) is None, "ours (50 min after our start), not a start from the app"
+    assert c.decide(False, minutes(53)) == A.STOP
+
+
+def test_a_stop_is_sent_when_the_plan_turns_even_if_the_charger_says_stopped():
+    """The cloud says "stopped" while the car charges: when the plan turns to a pause after our start the stop is sent
+    anyway (a stop does no harm on a stopped charger)."""
+    c = started(S.PAUSED)
+    assert c.decide(True, T0) == A.START
+    assert c.observe(S.CHARGING, minutes(1)) is None
+    assert c.observe(S.PAUSED, minutes(20)) == E.EXTERNAL_STOP  # an old "stopped" mid-period
+    assert c.decide(False, minutes(30)) == A.STOP, "sent although the charger says stopped"
+    assert c.decide(False, minutes(31)) == A.NONE, "once"

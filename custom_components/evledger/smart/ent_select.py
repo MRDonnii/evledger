@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
+from .control import Action
 from .entity import EvSmartChargeListenerEntity
 from .plan import DEFAULT_MODES, MODES, RESOLUTIONS
 
@@ -43,6 +46,15 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
             last_soc = last.attributes.get("last_soc")
             if isinstance(last_soc, (int, float)):
                 self.planner.last_soc = float(last_soc)
+            # The charger command sent last (and when), so a car that starts late after a restart is still ours and
+            # an old "charging" just after our stop is still known as such.
+            command = last.attributes.get("last_command")
+            at = dt_util.parse_datetime(str(last.attributes.get("last_command_at") or ""))
+            if command in (Action.START, Action.STOP) and at and dt_util.utcnow() - at < timedelta(hours=12):
+                self.planner.controller.last_command, self.planner.controller.last_command_at = Action(command), at
+            started = dt_util.parse_datetime(str(last.attributes.get("last_start_at") or ""))
+            if started and dt_util.utcnow() - started < timedelta(hours=12):
+                self.planner.controller.last_start_at = started
             self.planner.async_set_mode(last.state, restore=True)
 
     @property
@@ -59,6 +71,11 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
                 # Quarters or whole hours: price cards can show the prices the same way.
                 "price_resolution": self.planner.resolution,
                 "warned": sorted(self.planner.warned),
+                "last_command": str(self.planner.controller.last_command),
+                "last_command_at": (self.planner.controller.last_command_at.isoformat()
+                                    if self.planner.controller.last_command_at else None),
+                "last_start_at": (self.planner.controller.last_start_at.isoformat()
+                                  if self.planner.controller.last_start_at else None),
                 # The plan's charging periods, followed after a restart until the prices are back.
                 "planned": self._planned()}
 

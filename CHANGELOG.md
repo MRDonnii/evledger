@@ -4,6 +4,39 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.6] - 2026-10-16
+
+### Fixed
+
+- **"Charge now" only for a start that is really yours.** A charge that EV Ledger did not start counts as a start from
+  the app or the car only when it lasts 5 minutes. An old "charging" from the charger's cloud goes away before that.
+  EV Ledger does not stop the charger while it confirms the start.
+- **A car that wakes late is still ours.** On 14 Oct the car took 10 minutes to start. Up to 60 minutes after our own
+  start, charging is ours, also after a stop in between and across a restart. The last command is kept with the plan.
+  Before, a car that woke after its period had ended could switch the plan to Charge now.
+- **The command is sent when the plan turns, whatever the charger says.**
+  - Charge → pause after our start: the stop is sent even when the cloud says "stopped" but the car still charges.
+  - Pause → charge within 5 minutes of our stop: the start is sent even when the cloud says "charging".
+  - Not while Zaptec waits for authorisation, when its charging switch cannot be used.
+- A "charging" we did not start that goes away again is no longer counted as a stop from outside. Two such stops
+  would have left the car uncharged until the next period.
+- After a charger reboot, a start is sent again at once instead of 3 minutes later.
+
+### Tests
+
+- Random whole nights against a simulated Zaptec charger and car:
+  - the cloud lags 2–150 s behind the commands and flickers for up to 4 minutes
+  - the car takes up to 12 minutes to wake
+  - Zaptec asks for authorisation, reboots, and Home Assistant restarts
+  - one to three cheap periods, and the real night of 16 Oct with "Lad kun til"
+- Rules that must hold through every night:
+  - never Charge now
+  - no charging the plan does not want beyond 90 seconds
+  - dear charging only for what the cheap hours cannot hold
+  - with "Lad kun til", never on to the target
+- Without the protections 80 of 80 nights fail; with them every night passes. 40 + 40 nights run with the tests, and
+  more with `EVLEDGER_FUZZ_NIGHTS`.
+
 ## [0.9.5] - 2026-10-16
 
 ### Fixed
