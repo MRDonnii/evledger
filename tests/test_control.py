@@ -103,3 +103,30 @@ def test_a_stop_that_did_not_take_is_repeated_soon():
     assert c.decide(False, T0) == A.STOP
     assert c.decide(False, minutes(0.5)) == A.NONE
     assert c.decide(False, minutes(1)) == A.STOP
+
+
+def test_charging_reported_just_after_our_stop_is_not_a_manual_start():
+    """16 Oct 2026: the plan stopped the charger at the end of a period (01:00:22 paused), Zaptec's cloud said
+    "charging" again two seconds later for a minute, and that was taken for a start from the app or the car: the plan
+    went to "Lad nu" and charged to 100 % instead of 68 %."""
+    c = started(S.CHARGING)
+    assert c.decide(False, T0) == A.STOP
+    assert c.observe(S.PAUSED, minutes(0.1)) is None, "our own stop"
+    assert c.observe(S.CHARGING, minutes(0.15)) is None, "the charger not caught up yet – not a manual start"
+    assert c.decide(False, minutes(0.2)) == A.NONE, "the stop was just sent"
+    assert c.decide(False, minutes(1)) == A.STOP, "still charging: the stop is repeated"
+    assert c.observe(S.PAUSED, minutes(1.1)) is None
+    # A real start from the app well after the stop is still followed.
+    assert c.observe(S.CHARGING, minutes(10)) == E.MANUAL_START
+
+
+def test_stopped_reported_just_after_our_start_is_not_an_outside_stop():
+    """The same lag the other way: an old "stopped" right after our start must not count as the car or the app
+    stopping it (two of those and the plan would leave the car uncharged)."""
+    c = started(S.PAUSED)
+    assert c.decide(True, T0) == A.START
+    assert c.observe(S.CHARGING, minutes(0.2)) is None, "our own start"
+    assert c.observe(S.PAUSED, minutes(0.25)) is None, "old state – not an outside stop"
+    assert not c.blocked
+    assert c.decide(True, minutes(1)) == A.NONE, "the start was just sent"
+    assert c.decide(True, minutes(3.1)) == A.START, "still not charging: started again"

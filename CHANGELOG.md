@@ -4,6 +4,17 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.4] - 2026-10-16
+
+### Fixed
+
+- **A charger that is slow to report our stop no longer starts "Charge now".** At the end of a charging period the
+  plan stopped the charger. Two seconds later Zaptec's cloud still reported "charging" for a minute, and the plan took
+  that for a start from the app or the car. It switched to Charge now and charged to 100 % instead of the 68 % chosen
+  with "Lad kun til". Up to 3 minutes after our own stop, a "charging" report is the charger catching up, and the stop
+  is sent again. The same lag the other way, an old "stopped" just after our own start, is no longer taken for a stop
+  from outside.
+
 ## [0.9.3] - 2026-10-16
 
 ### Fixed

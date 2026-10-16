@@ -47,6 +47,10 @@ class Controller:
     start_delay: timedelta = timedelta(seconds=15)
     # A car that takes long to wake up can start drawing power minutes after the start command.
     own_command_window: timedelta = timedelta(minutes=15)
+    # After our own stop the charger can still report charging for a poll or two: on 16 Oct 2026 Zaptec's cloud said
+    # "charging" (with the old power) two seconds after the stop at the end of a period, for a minute. That is the
+    # charger not having caught up, not someone starting it; the stop is repeated instead.
+    stop_settle: timedelta = timedelta(minutes=3)
     max_start_attempts: int = 3
     slow_retry_after: timedelta = timedelta(minutes=15)
     external_retry_after: timedelta = timedelta(minutes=10)
@@ -86,7 +90,15 @@ class Controller:
         if state == ChargerState.CHARGING:
             self.start_attempts = 0
             self.blocked = False
-            return None if self._own(Action.START, now) else Event.MANUAL_START
+            if self._own(Action.START, now):
+                return None
+            if (self.last_command == Action.STOP and self.last_command_at is not None
+                    and now - self.last_command_at <= self.stop_settle):
+                return None  # still catching up with our stop; decide() sends it again
+            return Event.MANUAL_START
+        if (previous == ChargerState.CHARGING and self.last_command == Action.START and self.last_command_at is not None
+                and now - self.last_command_at <= self.stop_settle):
+            return None  # the same lag the other way: an old "stopped" just after our start; decide() starts again
         if previous == ChargerState.CHARGING and not self._own(Action.STOP, now):
             self.blocked = True
             self.blocked_at = now
