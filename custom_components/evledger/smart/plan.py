@@ -314,7 +314,9 @@ def build_timeline(now: datetime, known: list[PriceSlot], horizon: datetime,
     step = timedelta(minutes=minutes)
     timeline: list[TimelineSlot] = []
     cursor = floor_slot(now, minutes)
-    zone = now.tzinfo
+    # The slots stay in UTC: on the night the clocks go back an hour comes twice, and local times in one zone compare
+    # and sort by the clock alone (02:15 the second time equals 02:15 the first): 25 Oct 2026 made a block of no
+    # length.
     while cursor < end:
         prices: list[float] = []
         estimated = False
@@ -332,15 +334,14 @@ def build_timeline(now: datetime, known: list[PriceSlot], horizon: datetime,
                 estimated = True
             quarter += SLOT
         if prices:
-            timeline.append(TimelineSlot(cursor.astimezone(zone), (cursor + step).astimezone(zone),
-                                         sum(prices) / len(prices), estimated))
+            timeline.append(TimelineSlot(cursor, cursor + step, sum(prices) / len(prices), estimated))
         cursor += step
     return timeline
 
 
 def _split(timeline: list[TimelineSlot], cuts) -> list[TimelineSlot]:
     """Hour slots split where a fixed window starts or ends or a deadline falls, so the part inside can be used."""
-    points = sorted({cut for cut in cuts if cut is not None})
+    points = sorted({cut.astimezone(UTC) for cut in cuts if cut is not None})  # UTC, like the slots
     result: list[TimelineSlot] = []
     for slot in timeline:
         start = slot.start
@@ -586,7 +587,7 @@ class LaterWindow:
 
 
 def cheaper_later(timeline: list[TimelineSlot], after: datetime, need_kwh: float, power_kw: float, factor: float,
-                  max_price: float | None = None, until: datetime | None = None) -> list[LaterWindow]:
+                  max_price: float | None = None, until: datetime | None = None, zone=None) -> list[LaterWindow]:
     """The cheapest unbroken run of slots after `after` (starting before `until`) that holds need_kwh, one starting in
     the day (06–18 local time) and one in the night, each only when its mean price (with the price factor) is at or
     below max_price."""
@@ -616,7 +617,7 @@ def cheaper_later(timeline: list[TimelineSlot], after: datetime, need_kwh: float
         price = cost / have
         if max_price is not None and price > max_price + 1e-9:
             continue
-        hour = first.start.hour  # the timeline is in the local time zone
+        hour = first.start.astimezone(zone or after.tzinfo).hour  # the local clock (the timeline is in UTC)
         kind = "day" if 6 <= hour < 18 else "night"
         if kind not in best or price < best[kind].price - 1e-9:
             best[kind] = LaterWindow(kind, first.start, end, round(price, 4), estimated)

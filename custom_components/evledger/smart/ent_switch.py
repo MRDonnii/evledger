@@ -65,6 +65,7 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
             checked = dt_util.parse_date(str(last.attributes.get("checked_on") or ""))
             if checked:
                 self.planner.routines.evening_checked = checked
+            self.planner.routines.soon_sent = dt_util.parse_datetime(str(last.attributes.get("soon_sent") or ""))
         routines = self.planner.routines
         if last and self._attr_translation_key == "notify_done":
             routines.restore_run(last.attributes.get("charge_run"))
@@ -88,7 +89,8 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         routines = self.planner.routines
         if self._attr_translation_key == "plug_reminder":
-            return {"checked_on": routines.evening_checked.isoformat() if routines.evening_checked else None}
+            return {"checked_on": routines.evening_checked.isoformat() if routines.evening_checked else None,
+                    "soon_sent": routines.soon_sent.isoformat() if routines.soon_sent else None}
         if self._attr_translation_key == "notify_done":
             # The periods of the charge so far, for the done message after a restart.
             return {"charge_run": routines.run.as_dict() if routines.run.active else None}

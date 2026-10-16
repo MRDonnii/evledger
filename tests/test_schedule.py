@@ -57,7 +57,7 @@ def test_unknown_prices_are_borrowed_from_the_day_before():
     known = hourly(NIGHT - timedelta(days=1), [3, 2, 1, 0.1, 0.6, 2, 3, 3, 3, 3])
     result = schedule(known=known, constraints=[deadline(8)])
     assert result.estimated
-    assert result.blocks[0].start.hour == 1  # 01:00 was 0.1 yesterday
+    assert result.blocks[0].start.astimezone(TZ).hour == 1  # 01:00 was 0.1 yesterday
 
 
 def test_fixed_window_charges_in_its_cheapest_quarters():
@@ -83,7 +83,7 @@ def test_fixed_window_wraps_and_contains_now():
 
 def test_price_cap_only_uses_known_cheap_slots():
     result = schedule(mode="price_cap", price_cap=0.55)
-    assert [(b.start.hour, b.end.hour) for b in result.blocks] == [(1, 2)]
+    assert [(b.start.astimezone(TZ).hour, b.end.astimezone(TZ).hour) for b in result.blocks] == [(1, 2)]
     assert result.energy_kwh == 12.0  # not enough cheap power for the whole target
 
 
@@ -141,7 +141,7 @@ def test_fixed_mode_still_meets_a_trip():
     window = plan.fixed_window(NIGHT, time(4, 0), time(5, 0))
     result = schedule(mode="fixed", window=window, constraints=[deadline(5, 90)])
     assert result.energy_kwh == 24.0
-    assert result.blocks[0].start.hour in (0, 1)  # cheap night slots are added before the trip
+    assert result.blocks[0].start.astimezone(TZ).hour in (0, 1)  # cheap night slots are added before the trip
 
 
 def test_partial_current_quarter():
@@ -295,7 +295,8 @@ def test_price_limit_skips_a_night_above_the_limit():
 def test_price_limit_still_charges_to_the_floor_in_the_cheapest_slots():
     result = schedule(soc=10, known=hourly(NIGHT, EXPENSIVE), constraints=[deadline(8)], max_price=2.0, floor_soc=20)
     assert result.energy_kwh == 6.0, "10 % → 20 % whatever the price"
-    assert result.blocks[0].start.hour == 1 and result.blocks[-1].end <= datetime(2026, 10, 10, 2, 0, tzinfo=TZ), \
+    first, last = result.blocks[0], result.blocks[-1]
+    assert first.start.astimezone(TZ).hour == 1 and last.end <= datetime(2026, 10, 10, 2, 0, tzinfo=TZ), \
         "in the cheapest hour (2.1)"
     assert round(result.limit_soc) == 20
 
@@ -331,7 +332,7 @@ def test_cheaper_later_finds_the_best_day_and_night_period_below_the_limit():
     timeline = plan.build_timeline(NIGHT, hourly(NIGHT, prices), NIGHT + timedelta(hours=36))
     after = NIGHT + timedelta(hours=8)  # 06:00
     found = plan.cheaper_later(timeline, after, 18.0, 12.0, 1.0, 2.0)  # 1.5 h of charging
-    assert [(w.kind, w.start.hour, w.end.strftime("%H:%M"), w.price) for w in found] == [
+    assert [(w.kind, w.start.astimezone(TZ).hour, w.end.astimezone(TZ).strftime("%H:%M"), w.price) for w in found] == [
         ("day", 10, "11:30", 1.5), ("night", 3, "04:30", 1.0)]
     assert plan.cheaper_later(timeline, after, 18.0, 12.0, 1.0, 1.1) == [found[1]], "only periods below the limit"
     assert plan.cheaper_later(timeline, after, 0.0, 12.0, 1.0, 2.0) == []
@@ -353,5 +354,5 @@ def test_a_running_charge_pauses_when_splitting_saves():
                               price_factor=1.0, timeline=plan.build_timeline(NIGHT, known, NIGHT + timedelta(hours=10)),
                               constraints=(deadline(8),), keep_start=NIGHT)
     result = plan.build_schedule(data, NIGHT)
-    assert [(b.start.strftime("%H:%M"), b.end.strftime("%H:%M")) for b in result.blocks] == [
-        ("22:00", "22:15"), ("05:15", "06:00")], "the charge stops between the cheap quarters"
+    local = [(b.start.astimezone(TZ).strftime("%H:%M"), b.end.astimezone(TZ).strftime("%H:%M")) for b in result.blocks]
+    assert local == [("22:00", "22:15"), ("05:15", "06:00")], "the charge stops between the cheap quarters"

@@ -257,7 +257,7 @@ async def test_replay_of_the_night_of_16_october(hass: HomeAssistant, request, f
     planner.limit_wait, planner.wait_params = True, (44.4, 2.0)  # the answer "Lad kun til" as given that night
     planner.async_recalculate()
     await hass.async_block_till_done(wait_background_tasks=True)
-    starts = [b.start.strftime("%H:%M") for b in planner.schedule.blocks]
+    starts = [dt_util.as_local(b.start).strftime("%H:%M") for b in planner.schedule.blocks]
     assert starts == [(t0 + timedelta(minutes=m)).strftime("%H:%M") for m in (60, 105, 330)], starts
     soc = 46.0
 
@@ -315,3 +315,17 @@ async def test_a_car_waking_after_a_restart_and_after_its_period_is_stopped(hass
         await at(hass, freezer, t0 + timedelta(hours=2, minutes=minute))
         assert state(hass, "select.bil_charge_mode") == "smart", f"not Charge now ({minute})"
     assert len(calls["switch.turn_off"]) > stops, "stopped: the pause holds"
+
+
+async def test_a_charger_command_that_fails_with_any_error_is_only_logged(hass: HomeAssistant, caplog):
+    """The charger's cloud times out (not a Home Assistant error): the command is logged as failed and nothing breaks;
+    the controller sends it again (a stop every 45 s while the charger says charging, a start after 3 minutes)."""
+    from custom_components.evledger.smart import charger as charger_module
+
+    async def timeout(call):
+        raise TimeoutError("Zaptec cloud timeout")
+
+    hass.services.async_register("switch", "turn_off", timeout)
+    backend = charger_module.ChargerBackend(hass)
+    await backend._call("switch", "turn_off", "switch.charger_charging")
+    assert "switch.turn_off on switch.charger_charging failed" in caplog.text

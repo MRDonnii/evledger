@@ -284,6 +284,15 @@ class PhoneNotifier:
         now = dt_util.now().time()
         return start <= now < end if start < end else now >= start or now < end
 
+    def in_night(self) -> bool:
+        """The night (the silent window's times, also when silent messages are switched off): no reminders then – the
+        family sleeps (2026-10-16: the brother was told to plug in at midnight and at 04:30)."""
+        _enabled, start, end = self.quiet_window()
+        if start == end:
+            start, end = time(22, 0), time(7, 0)
+        now = dt_util.now().time()
+        return start <= now < end if start < end else now >= start or now < end
+
     def quiet(self) -> dict:
         """Without sound in the silent window: iOS "passive" (into the notification centre without sound or lighting
         the screen), Android a low-importance channel."""

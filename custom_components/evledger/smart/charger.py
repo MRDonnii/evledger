@@ -44,6 +44,8 @@ class ChargerBackend:
             await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True)
         except HomeAssistantError as err:
             _LOGGER.warning("%s.%s on %s failed: %s", domain, service, entity_id, err)
+        except Exception:  # noqa: BLE001 – a charger cloud error of any kind: logged, the controller tries again
+            _LOGGER.warning("%s.%s on %s failed", domain, service, entity_id, exc_info=True)
 
 
 class ZaptecBackend(ChargerBackend):

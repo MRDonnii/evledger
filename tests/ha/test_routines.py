@@ -406,3 +406,33 @@ async def test_the_silent_window_can_be_set_and_turned_off(hass: HomeAssistant, 
     await set_time(hass, "time.bil_silent_from", time(13, 0))
     await set_time(hass, "time.bil_silent_until", time(15, 0))
     assert not planner.notify.is_quiet()
+
+
+async def test_no_plug_in_reminder_at_night(hass: HomeAssistant, request, freezer):
+    """2026-10-16: the brother was told to plug in at midnight and at 04:30 – the plan's cheapest start was at night.
+    The family sleeps: at night there is no reminder (the evening reminder covers a night start)."""
+    from .test_new_features import quarter_prices
+    freezer.move_to(dt_util.now().replace(hour=22, minute=0, second=5))
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, charger_state="disconnected", soc="30", cheap_now=False)
+    hour = quarter_prices(hass, {q: 0.2 for q in range(8, 16)})  # cheap 00:00–02:00
+    planner = await with_options(hass, entry)
+    planner.async_set_ready_by((hour + timedelta(hours=8)).time())
+    for _ in range(12):
+        await later(hass, freezer, 15)
+    assert not [m for m in sent if "sæt bilen til" in m["title"]], [m["title"] for m in sent]
+
+
+async def test_the_plug_in_reminder_is_not_repeated_after_a_restart(hass: HomeAssistant, request, freezer):
+    from .test_new_features import quarter_prices
+    sent = phones(hass)
+    entry, _ = await setup(hass, request, charger_state="disconnected", soc="30", cheap_now=False)
+    hour = quarter_prices(hass, {q: 0.2 for q in range(8, 16)})
+    planner = await with_options(hass, entry)
+    planner.async_set_ready_by((hour + timedelta(hours=10)).time())
+    await later(hass, freezer, 95)
+    assert len([m for m in sent if m["title"] == "Bil: sæt bilen til"]) == 1
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await later(hass, freezer, 3)
+    assert len([m for m in sent if m["title"] == "Bil: sæt bilen til"]) == 1, "not again after the restart"

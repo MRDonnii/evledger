@@ -490,6 +490,8 @@ class Routines:
         at = datetime.combine(now.date(), p.times["reminder_time"], tzinfo=now.tzinfo)
         if self.evening_checked == now.date() or not at <= now < at + timedelta(hours=REMINDER_WINDOW_HOURS):
             return
+        if p.notify.in_night() and now - at > timedelta(minutes=15):
+            return  # a late catch-up (after a restart) waits for tomorrow rather than waking anyone
         if not p.notify.targets:
             return
         if p._battery_soc() is None and p.last_soc is None and not p._inputs_waited(now):
@@ -510,6 +512,8 @@ class Routines:
         if (block is None or block.start <= now or block.start - now > timedelta(minutes=PLUG_SOON_MINUTES)
                 or self.soon_sent == block.start or not (p.flags["plug_reminder"] and p.notify.targets)):
             return
+        if p.notify.in_night():
+            return  # never at night: a night start is covered by the evening reminder
         if p.car_home() is False or p.car_plugged() is not False:
             return
         soc = p._battery_soc()
@@ -518,6 +522,7 @@ class Routines:
         if soc is None or (soc >= p.settings["reminder_soc"] and (trip_need is None or soc >= trip_need)):
             return
         self.soon_sent = block.start
+        p.notify_listeners()  # kept on the reminder switch, so a restart does not send it again
         cost = p.schedule.cost
         price = f" ({p.notify.money(p, cost)} for {p.schedule.energy_kwh:.1f} kWh)".replace(".", ",") if cost else ""
         text = (f"Billigste ladning starter {p.notify.when(block.start)}{price}. Batteriet er på {soc:.0f} %; "

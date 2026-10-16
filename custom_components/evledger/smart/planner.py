@@ -1549,7 +1549,8 @@ class ChargePlanner:
         best: dict | None = None
         for day in range(LIMIT_LOOK_HOURS // 24):
             begin, until = after + timedelta(days=day), after + timedelta(days=day + 1)
-            for first in cheaper_later(timeline, begin, wall(max(soc, reserve), target), power, factor, until=until):
+            for first in cheaper_later(timeline, begin, wall(max(soc, reserve), target), power, factor, until=until,
+                                       zone=now.tzinfo):
                 need = min(need_at(first.start), target)
                 if wall(max(soc, need), target) < 0.5:
                     continue  # the driving until then needs the whole target tonight
@@ -1559,7 +1560,8 @@ class ChargePlanner:
                 if over_kwh < 0.5:
                     continue
                 over_cost = (full.cost or 0.0) - (below.cost or 0.0)
-                window = next((w for w in cheaper_later(timeline, begin, over_kwh, power, factor, until=until)
+                window = next((w for w in cheaper_later(timeline, begin, over_kwh, power, factor, until=until,
+                                                        zone=now.tzinfo)
                                if w.kind == first.kind), None)
                 if window is None:
                     continue

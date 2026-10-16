@@ -4,6 +4,20 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.9.7] - 2026-10-16
+
+### Fixed
+
+- **The night the clocks go back (25 Oct 2026).** The plan's quarters were kept in local time. In the hour that comes
+  twice, Python compares and sorts local times by the clock alone, so 02:15 the second time equalled 02:15 the first.
+  The plan made a charging period of no length. The quarters are now kept in UTC and only shown in local time.
+  Tested on both nights the clocks change (25 Oct 2026 and 28 Mar 2027) with random cloud lag. Before, every autumn
+  night failed.
+- **No plug-in reminder at night.** The reminder came half an hour before the plan's cheapest start, also at midnight
+  and 04:30 (the brother's phone). Inside the silent window (22–07 by default, also when silent messages are off) none
+  is sent; the evening reminder covers a night start. A reminder is kept across restarts, so it is not sent again.
+- A charger command that fails with an error of any kind is logged, and the controller sends it again.
+
 ## [0.9.6] - 2026-10-16
 
 ### Fixed
