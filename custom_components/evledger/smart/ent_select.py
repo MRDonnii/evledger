@@ -12,7 +12,7 @@ from homeassistant.util import dt as dt_util
 from .const import DEFAULT_WAKE_MINUTES
 from .control import Action
 from .entity import EvSmartChargeListenerEntity
-from .plan import DEFAULT_MODES, MODES, RESOLUTIONS
+from .plan import DEFAULT_MODES, MODES, RESOLUTIONS, finite
 
 
 def build(planner) -> list:
@@ -49,9 +49,8 @@ class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity)
             warned = last.attributes.get("warned")
             if isinstance(warned, list):
                 self.planner.warned = {str(item) for item in warned}
-            last_soc = last.attributes.get("last_soc")
-            if isinstance(last_soc, (int, float)):
-                self.planner.last_soc = float(last_soc)
+            if (last_soc := finite(last.attributes.get("last_soc"))) is not None:
+                self.planner.last_soc = last_soc
             # The charger command sent last (and when), so a car that starts late after a restart is still ours and
             # an old "charging" just after our stop is still known as such.
             command = last.attributes.get("last_command")

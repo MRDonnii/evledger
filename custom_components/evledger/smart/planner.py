@@ -22,7 +22,7 @@ from . import departures as learned_departures
 from . import share as charger_share
 from . import trip, vehicles
 from . import week as week_plan
-from .car_refresh import CarRefresh
+from .car_refresh import CarRefresh, async_update_entities
 from .charger import ChargerBackend, create_backend
 from .const import (
     ASSUMED_SOC,
@@ -115,6 +115,7 @@ from .plan import (
     build_timeline,
     calculate,
     cheaper_later,
+    finite,
     fixed_window,
     floor_slot,
     next_deadline,
@@ -382,10 +383,7 @@ class ChargePlanner:
         for sibling in er.async_entries_for_device(registry, entry.device_id):
             if sibling.domain == "sensor" and sibling.entity_id.endswith("_range"):
                 state = self.hass.states.get(sibling.entity_id)
-                try:
-                    range_km = float(state.state) if state else None
-                except (TypeError, ValueError):
-                    range_km = None
+                range_km = finite(state.state) if state else None
                 if range_km is not None and state.attributes.get("unit_of_measurement") == "mi":
                     range_km *= 1.609344
                 break
@@ -484,6 +482,8 @@ class ChargePlanner:
 
     @callback
     def async_set_setting(self, key: str, value: float) -> None:
+        if (value := finite(value)) is None:
+            return  # NaN or infinity (from a script or a broken restore): the setting stays as it was
         if self.settings.get(key) != value:
             self._rewarn()
         self.settings[key] = value
@@ -774,10 +774,7 @@ class ChargePlanner:
 
     def _battery_soc(self) -> float | None:
         state = self.hass.states.get(self.battery_entity)
-        try:
-            return float(state.state) if state else None
-        except (TypeError, ValueError):
-            return None
+        return finite(state.state) if state else None
 
     @property
     def shared(self) -> bool:
@@ -868,17 +865,14 @@ class ChargePlanner:
         on its own). Clamped to what the car accepts (Tesla: 50–100 %)."""
         if not (entity_id := self._limit_command_entity()) or (state := self.hass.states.get(entity_id)) is None:
             return
-        try:
-            low = float(state.attributes.get("min", 50))
-            high = float(state.attributes.get("max", 100))
-        except (TypeError, ValueError):
+        low, high = finite(state.attributes.get("min", 50)), finite(state.attributes.get("max", 100))
+        if low is None or high is None or low > high:
             low, high = 50.0, 100.0
-        value = min(max(float(target), low), high)
-        try:
-            if abs(float(state.state) - value) < 0.5:
-                return
-        except (TypeError, ValueError):
-            pass  # unknown while the car sleeps: set it anyway
+        if (value := finite(target)) is None:
+            return
+        value = min(max(value, low), high)
+        if (now := finite(state.state)) is not None and abs(now - value) < 0.5:
+            return  # (unknown while the car sleeps: set it anyway)
         try:
             await self.hass.services.async_call("number", "set_value", {"entity_id": entity_id, "value": value},
                                                 blocking=True)
@@ -890,11 +884,8 @@ class ChargePlanner:
         """The charge limit set in the car: it stops there whatever the plan says."""
         if not (entity_id := self._limit_entity()) or (state := self.hass.states.get(entity_id)) is None:
             return None
-        try:
-            value = float(state.state)
-        except (TypeError, ValueError):
-            return None
-        return value if 50 <= value <= 100 else None
+        value = finite(state.state)
+        return value if value is not None and 50 <= value <= 100 else None
 
     def _full_entities(self) -> list[str]:
         """The car's own "full at" time sensors on this car only (the battery sensor's device or a device with the
@@ -1408,9 +1399,7 @@ class ChargePlanner:
             entity for entity in (self.plugged_entity, *self._plug_entities(), self.battery_entity) if entity))
         if entities and self.hass.services.has_service("homeassistant", "update_entity"):
             self.entry.async_create_background_task(
-                self.hass,
-                self.hass.services.async_call("homeassistant", "update_entity", {"entity_id": entities}),
-                "ev_smart_charge_refresh_car")
+                self.hass, async_update_entities(self.hass, entities), "ev_smart_charge_refresh_car")
 
     @callback
     def _alert(self, now: datetime) -> None:

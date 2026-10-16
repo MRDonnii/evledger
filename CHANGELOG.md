@@ -4,6 +4,37 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.10.1] - 2026-10-16
+
+### Fixed
+
+- **A battery sensor at `nan` or `inf` stopped EV Ledger from starting.** Home Assistant then showed the entry as
+  failed. Numbers from other integrations are now read in one way: `nan`, `inf`, text and numbers too large count as
+  unknown, just like `unknown`. This covers the battery level, range, the car's charge limit, its position, the
+  charger's power and session energy, the price now, the prices in the list, and Monta's cost.
+- **A charger power of `nan`** made the home charging power sensor fail on every update.
+- **A price with an end time years ahead** (a broken price list) was split into millions of quarters at every new
+  plan, which would freeze Home Assistant. One price now covers one day at most.
+- **`nan` set on an EV Ledger number** (from a script or an automation) broke the plan. The numbers now turn it away
+  with a message, and so does the plan itself. The actions `log_public_charge`, `add_charge`, `update_charge` and the
+  tyre actions only take kWh, prices and kilometres within sensible limits.
+- **Failing services of other integrations** were logged as errors. Now they are logged as warnings, whatever the
+  error: a phone that cannot be reached, a car that does not answer an update, a climate or calendar call that times
+  out. A calendar answer of an odd shape no longer raises an error, and a failed message is not sent again.
+- **A price answer from the phone with absurd numbers** (hundreds of digits, 0 kWh or more than 300 kWh) is asked
+  again, not saved.
+
+### Tests
+
+- New tests feed EV Ledger broken values on every input it reads, and services of other integrations that fail in
+  every way.
+- A chaos test sets all inputs to random good and broken values for 70 steps per run, while the user picks plans,
+  sets numbers, toggles switches and presses buttons. No error may be logged, and no entity may show `nan` or
+  infinity.
+- Property tests (Hypothesis) check that the charge plan is sane for thousands of random inputs, and that the price
+  parser survives price lists of any shape.
+- New tests cover the charger control through a plain switch.
+
 ## [0.10.0] - 2026-10-16
 
 ### Added

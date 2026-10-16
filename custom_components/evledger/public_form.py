@@ -11,6 +11,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
 from .const import DOMAIN
+from .smart.plan import finite
 
 
 class PublicChargeForm:
@@ -63,7 +64,9 @@ class PublicChargeEnergy(_FormEntity, NumberEntity):
         return self.form.kwh
 
     async def async_set_native_value(self, value: float) -> None:
-        self.form.kwh = float(value)
+        if (value := finite(value)) is None:
+            raise HomeAssistantError("The value is not a number")
+        self.form.kwh = value
         self.async_write_ha_state()
 
 
@@ -83,7 +86,9 @@ class PublicChargePrice(_FormEntity, NumberEntity):
         return self.form.price
 
     async def async_set_native_value(self, value: float) -> None:
-        self.form.price = float(value)
+        if (value := finite(value)) is None:
+            raise HomeAssistantError("The value is not a number")
+        self.form.price = value
         self.async_write_ha_state()
 
 

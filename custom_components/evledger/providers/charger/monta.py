@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from ...models import SessionCost
+from ...smart.plan import finite
 from .base import CAP_COST_LOOKUP, ChargerProvider
 
 
@@ -63,10 +64,8 @@ class MontaChargerProvider(ChargerProvider):
             # hour, before Monta has the second): that cost is not this charge's.
             return None
 
-        try:
-            kwh_f = float(kwh)
-            cost_f = float(cost)
-        except (TypeError, ValueError):
+        kwh_f, cost_f = finite(kwh), finite(cost)
+        if kwh_f is None or cost_f is None:
             return None
 
         if kwh_f <= 0 and cost_f <= 0:

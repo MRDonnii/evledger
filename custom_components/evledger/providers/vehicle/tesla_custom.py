@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.core import HomeAssistant
 
 from ...models import VehicleSnapshot
+from ...smart.plan import finite
 from .base import VehicleProvider
 
 
@@ -14,10 +15,7 @@ def _float_state(hass: HomeAssistant, entity_id: str | None) -> float | None:
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable", ""):
         return None
-    try:
-        return float(state.state)
-    except ValueError:
-        return None
+    return finite(state.state)
 
 
 def _bool_state(
@@ -62,8 +60,10 @@ class TeslaCustomVehicleProvider(VehicleProvider):
         if self._device_tracker_entity:
             tracker_state = hass.states.get(self._device_tracker_entity)
             if tracker_state is not None:
-                latitude = tracker_state.attributes.get("latitude")
-                longitude = tracker_state.attributes.get("longitude")
+                latitude = finite(tracker_state.attributes.get("latitude"))
+                longitude = finite(tracker_state.attributes.get("longitude"))
+                if latitude is None or longitude is None:
+                    latitude = longitude = None
 
         # A binary sensor (Tesla Custom) or a charging-state sensor (Tesla Fleet, Teslemetry: "charging").
         is_charging = _bool_state(hass, self._charging_binary_entity, ("on", "charging"))

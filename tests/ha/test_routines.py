@@ -479,3 +479,34 @@ async def test_a_stop_that_does_not_take_is_told(hass: HomeAssistant, request, f
     await later(hass, freezer, 20)
     assert len([m for m in sent if "ikke stoppe" in m["message"]]) == 1, "once"
     assert state(hass, "select.bil_charge_mode") == "smart", "not taken for a start from the app"
+
+
+async def test_a_charge_stopped_from_the_car_twice_is_respected_and_told(hass: HomeAssistant, request, freezer):
+    """The car or its app stops the charge: tried again once after 10 minutes; stopped again, it is left stopped and
+    the phones are told once (Lad nu continues)."""
+    sent = phones(hass)
+    entry, calls = await setup(hass, request, charger_state="connected_finished", cheap_now=True)
+    await with_options(hass, entry)
+    await later(hass, freezer, 1)
+    assert calls["switch.turn_on"], "started in the cheap hour"
+    starts = len(calls["switch.turn_on"])
+    hass.states.async_set(MODE, "connected_charging")
+    await later(hass, freezer, 8)
+    hass.states.async_set(MODE, "connected_finished")  # stopped from the car, eight minutes after our start
+    await later(hass, freezer, 5)
+    assert len(calls["switch.turn_on"]) == starts, "not started again at once"
+    await later(hass, freezer, 6)
+    assert len(calls["switch.turn_on"]) == starts + 1, "tried again once after 10 minutes"
+    hass.states.async_set(MODE, "connected_charging")
+    await later(hass, freezer, 7)
+    hass.states.async_set(MODE, "connected_finished")  # stopped again
+    await later(hass, freezer, 2)
+    told = [m for m in sent if "stoppet af bilen eller appen" in m["message"]]
+    assert len(told) == 1, [m["message"] for m in sent]
+    await later(hass, freezer, 30)
+    assert len(calls["switch.turn_on"]) == starts + 1, "left stopped"
+    assert len([m for m in sent if "stoppet af bilen eller appen" in m["message"]]) == 1, "told once"
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.bil_charge_mode",
+                                                               "option": "now"}, blocking=True)
+    await later(hass, freezer, 1)
+    assert len(calls["switch.turn_on"]) == starts + 2, "Lad nu continues"

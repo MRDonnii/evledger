@@ -46,6 +46,22 @@ def test_parse_ignores_garbage():
     assert plan.parse_price_attributes(junk) == []
 
 
+def test_parse_skips_prices_that_are_not_numbers():
+    base = datetime(2026, 9, 26, tzinfo=TZ)
+    items = [{"start": (base + timedelta(hours=i)).isoformat(), "end": (base + timedelta(hours=i + 1)).isoformat(),
+              "price": price} for i, price in enumerate([float("inf"), "inf", float("-inf"), "-Infinity", float("nan"),
+                                                         "nan", "1e400", True, "abc", None, 1.5])]
+    slots = plan.parse_price_attributes({"prices": items})
+    assert {slot.price for slot in slots} == {1.5} and len(slots) == 4
+
+
+def test_parse_cuts_a_price_that_lasts_for_ages():
+    base = datetime(2026, 9, 26, tzinfo=TZ)
+    items = [{"start": base.isoformat(), "end": datetime(2100, 1, 1, tzinfo=TZ).isoformat(), "price": 1.0}]
+    slots = plan.parse_price_attributes({"prices": items})
+    assert len(slots) == 96 and slots[-1].end == base + timedelta(days=1)
+
+
 def test_cheapest_window_before_deadline():
     prices = [3.0] * 24
     prices[2] = prices[3] = 0.5

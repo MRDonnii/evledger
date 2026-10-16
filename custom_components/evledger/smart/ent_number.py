@@ -9,8 +9,10 @@ from homeassistant.components.number import (
     RestoreNumber,
 )
 from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfPower, UnitOfTime
+from homeassistant.exceptions import ServiceValidationError
 
 from .entity import EvSmartChargeEntity
+from .plan import finite
 from .planner import ChargePlanner
 
 NUMBERS: tuple[NumberEntityDescription, ...] = (
@@ -103,7 +105,9 @@ class PlanNumber(EvSmartChargeEntity, RestoreNumber):
         return self.entity_description.native_unit_of_measurement
 
     async def async_set_native_value(self, value: float) -> None:
-        self.planner.async_set_setting(self.entity_description.key, float(value))
+        if (value := finite(value)) is None:
+            raise ServiceValidationError("The value is not a number")
+        self.planner.async_set_setting(self.entity_description.key, value)
         self.async_write_ha_state()
         if self.entity_description.key == "target_soc" and self.planner.deadline_target is None:
             # The car's own charge limit follows the target (in the background: a sleeping car can take a while).

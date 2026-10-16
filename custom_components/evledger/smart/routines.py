@@ -10,7 +10,6 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -51,7 +50,7 @@ from .const import (
     STOP_FAILED_ALERT_MINUTES,
 )
 from .control import CONNECTED, Action, ChargerState
-from .plan import MODE_MANUAL, MODE_NOW, MODE_OFF
+from .plan import MODE_MANUAL, MODE_NOW, MODE_OFF, finite
 
 if TYPE_CHECKING:
     from .planner import ChargePlanner
@@ -261,10 +260,11 @@ class Routines:
     def answer_public(self, charge_id: str, reply: str) -> None:
         """The phone's answer: a price, or kWh and price."""
         p = self.planner
-        numbers = [float(value.replace(",", ".")) for value in re.findall(r"\d+(?:[.,]\d+)?", reply or "")]
+        numbers = [number for value in re.findall(r"\d+(?:[.,]\d+)?", reply or "")
+                   if (number := finite(value.replace(",", "."))) is not None]
         kwh = numbers[0] if len(numbers) >= 2 else self.public_asked.get(charge_id)
         price = numbers[1] if len(numbers) >= 2 else (numbers[0] if numbers else None)
-        if price is None or kwh is None or p.ledger is None:
+        if price is None or kwh is None or p.ledger is None or not 0 < kwh <= 300 or price > 100_000:
             text = "Prisen kunne ikke læses. Skriv kWh og pris, fx 23,4 82,50."
             p.entry.async_create_background_task(
                 self.hass, p.notify.async_send_note("public_price", "offentlig ladning", text),
@@ -715,8 +715,8 @@ class Routines:
         async def call() -> None:
             try:
                 await self.hass.services.async_call("climate", service, {"entity_id": entity_id}, blocking=True)
-            except (HomeAssistantError, ValueError) as err:
-                _LOGGER.warning("climate.%s on %s failed: %s", service, entity_id, err)
+            except Exception as err:  # noqa: BLE001 – a car that does not answer
+                _LOGGER.warning("climate.%s on %s failed: %s", service, entity_id, err or type(err).__name__)
 
         self.planner.entry.async_create_background_task(self.hass, call(), "ev_smart_charge_climate")
 
@@ -738,12 +738,14 @@ class Routines:
                 {"entity_id": calendar, "start_date_time": now.isoformat(),
                  "end_date_time": (now + timedelta(hours=CALENDAR_LOOKAHEAD_HOURS)).isoformat()},
                 blocking=True, return_response=True)
-        except (HomeAssistantError, ValueError) as err:
-            _LOGGER.warning("Reading the calendar %s failed: %s", calendar, err)
+        except Exception as err:  # noqa: BLE001 – a calendar that times out or is gone
+            _LOGGER.warning("Reading the calendar %s failed: %s", calendar, err or type(err).__name__)
             return
         finally:
             self._calendar_busy = False
-        events = ((response or {}).get(calendar) or {}).get("events") or []
+        found = response.get(calendar) if isinstance(response, dict) else None
+        events = found.get("events") if isinstance(found, dict) else None
+        events = [event for event in events if isinstance(event, dict)] if isinstance(events, list) else []
         self.planner.async_calendar_trip(self.pick(events, now))
 
     def pick(self, events: list[dict], now: datetime) -> dict | None:

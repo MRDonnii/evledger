@@ -25,7 +25,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from ...models import SessionCost
-from ...smart.plan import SLOT_MINUTES, floor_slot, parse_price_attributes
+from ...smart.plan import SLOT_MINUTES, finite, floor_slot, parse_price_attributes
 from .base import CAP_COST_LOOKUP, ChargerProvider
 
 
@@ -53,9 +53,7 @@ class SpotPriceChargerProvider(ChargerProvider):
         if state is None or state.state in ("unknown", "unavailable", ""):
             return None
 
-        try:
-            price_per_kwh = float(state.state)
-        except ValueError:
+        if (price_per_kwh := finite(state.state)) is None:
             return None
 
         return SessionCost(
@@ -77,7 +75,4 @@ class SpotPriceChargerProvider(ChargerProvider):
                   if start <= slot.start < start + timedelta(minutes=minutes)]
         if inside:
             return sum(inside) / len(inside)
-        try:
-            return float(state.state)
-        except ValueError:
-            return None
+        return finite(state.state)

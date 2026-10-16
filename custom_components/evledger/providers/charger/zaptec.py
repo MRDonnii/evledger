@@ -10,6 +10,7 @@ from __future__ import annotations
 from homeassistant.core import HomeAssistant
 
 from ...models import LiveChargeState
+from ...smart.plan import finite
 from .base import CAP_LIVE_POWER, ChargerProvider
 
 CHARGING_POWER_THRESHOLD_W = 300
@@ -21,9 +22,7 @@ def _numeric_state_in_watts(hass: HomeAssistant, entity_id: str | None) -> float
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable", ""):
         return None
-    try:
-        value = float(state.state)
-    except ValueError:
+    if (value := finite(state.state)) is None:
         return None
     unit = str(state.attributes.get("unit_of_measurement", "")).lower()
     return value * 1000 if unit == "kw" else value
@@ -35,10 +34,7 @@ def _numeric_state(hass: HomeAssistant, entity_id: str | None) -> float | None:
     state = hass.states.get(entity_id)
     if state is None or state.state in ("unknown", "unavailable", ""):
         return None
-    try:
-        return float(state.state)
-    except ValueError:
-        return None
+    return finite(state.state)
 
 
 class ZaptecChargerProvider(ChargerProvider):

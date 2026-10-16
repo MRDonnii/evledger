@@ -58,11 +58,16 @@ from .tyres import KINDS as TYRE_KINDS
 
 _LOGGER = logging.getLogger(__name__)
 
+# Numbers from a service call: within these (a range also turns away NaN and infinity).
+_KWH = vol.All(vol.Coerce(float), vol.Range(min=0, max=1000))
+_MONEY = vol.All(vol.Coerce(float), vol.Range(min=-100_000, max=100_000))
+_KM = vol.All(vol.Coerce(float), vol.Range(min=0, max=10_000_000))
+
 LOG_PUBLIC_CHARGE_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): cv.string,
-        vol.Required(ATTR_KWH): vol.Coerce(float),
-        vol.Required(ATTR_PRICE): vol.Coerce(float),
+        vol.Required(ATTR_KWH): _KWH,
+        vol.Required(ATTR_PRICE): _MONEY,
         vol.Optional(ATTR_LOCATION_NAME): cv.string,
         vol.Optional(ATTR_STARTED_AT): cv.datetime,
         vol.Optional(ATTR_NOTE): cv.string,
@@ -72,8 +77,8 @@ LOG_PUBLIC_CHARGE_SCHEMA = vol.Schema(
 ADD_CHARGE_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): cv.string,
-        vol.Required(ATTR_KWH): vol.Coerce(float),
-        vol.Optional(ATTR_PRICE): vol.Coerce(float),
+        vol.Required(ATTR_KWH): _KWH,
+        vol.Optional(ATTR_PRICE): _MONEY,
         vol.Required(ATTR_STARTED_AT): cv.datetime,
         vol.Optional(ATTR_ENDED_AT): cv.datetime,
         vol.Optional(ATTR_LOCATION, default="home"): vol.In(["home", "public"]),
@@ -93,8 +98,7 @@ SET_READY_BY_ONCE_SCHEMA = CAR_SCHEMA.extend({
 })
 
 _TEXT = vol.Any(None, cv.string)
-_OPT_FLOAT = vol.Any(None, vol.Coerce(float))
-_OPT_INT = vol.Any(None, vol.Coerce(int))
+_OPT_MONEY = vol.Any(None, _MONEY)
 TYRE_FIELDS = {
     vol.Optional("name"): vol.All(cv.string, vol.Length(min=1, max=40)),
     vol.Optional("kind"): vol.In(TYRE_KINDS),
@@ -109,8 +113,8 @@ TYRE_FIELDS = {
     vol.Optional("rim_width_in"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=3, max=14))),
     vol.Optional("rim_offset_mm"): vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=-50, max=90))),
     vol.Optional("purchased"): vol.Any(None, cv.date),
-    vol.Optional("price"): _OPT_FLOAT,
-    vol.Optional("km_before"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0))),
+    vol.Optional("price"): _OPT_MONEY,
+    vol.Optional("km_before"): vol.Any(None, _KM),
     vol.Optional("storage"): _TEXT,
     vol.Optional("note"): _TEXT,
     vol.Optional("retired"): cv.boolean,
@@ -120,13 +124,13 @@ TYRE_SET_SCHEMA = CAR_SCHEMA.extend({vol.Required("set_id"): cv.string})
 CHANGE_TYRES_SCHEMA = CAR_SCHEMA.extend({
     vol.Required("set_id"): cv.string,
     vol.Optional("at"): cv.datetime,
-    vol.Optional("odometer_km"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+    vol.Optional("odometer_km"): _KM,
     vol.Optional("note"): cv.string,
 })
 UPDATE_TYRE_CHANGE_SCHEMA = CAR_SCHEMA.extend({
     vol.Required("change_id"): cv.string,
     vol.Optional("at"): cv.datetime,
-    vol.Optional("odometer_km"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+    vol.Optional("odometer_km"): _KM,
     vol.Optional("note"): cv.string,
 })
 TYRE_CHANGE_SCHEMA = CAR_SCHEMA.extend({vol.Required("change_id"): cv.string})
@@ -136,7 +140,7 @@ LOG_TREAD_SCHEMA = vol.All(CAR_SCHEMA.extend({
     vol.Optional("mm"): _DEPTH,
     vol.Optional("each"): vol.All(cv.ensure_list, [_DEPTH], vol.Length(min=1, max=4)),
     vol.Optional("at"): cv.datetime,
-    vol.Optional("odometer_km"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+    vol.Optional("odometer_km"): _KM,
 }), cv.has_at_least_one_key("mm", "each"))
 DELETE_TREAD_SCHEMA = CAR_SCHEMA.extend({vol.Required("set_id"): cv.string, vol.Required("reading_id"): cv.string})
 DELETE_CHARGE_SCHEMA = vol.Schema(
@@ -150,8 +154,8 @@ UPDATE_CHARGE_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): cv.string,
         vol.Required(ATTR_CHARGE_ID): cv.string,
-        vol.Optional(ATTR_KWH): vol.Coerce(float),
-        vol.Optional(ATTR_PRICE): vol.Coerce(float),
+        vol.Optional(ATTR_KWH): _KWH,
+        vol.Optional(ATTR_PRICE): _MONEY,
         vol.Optional(ATTR_LOCATION_NAME): cv.string,
         vol.Optional(ATTR_NOTE): cv.string,
     }

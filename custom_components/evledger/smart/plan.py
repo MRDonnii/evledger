@@ -52,6 +52,21 @@ class PlanResult:
     price: float | None
 
 
+# The longest interval one price can cover (a daily price); a longer one is cut there.
+LONGEST_PRICE = timedelta(days=1)
+
+
+def finite(value) -> float | None:
+    """A number from a state or an attribute: None for text, NaN and infinity (a broken sensor)."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _to_datetime(value) -> datetime | None:
     if isinstance(value, datetime):
         return value
@@ -82,12 +97,8 @@ def parse_price_attributes(attributes: dict, estimated: bool = False) -> list[Pr
             if not isinstance(item, dict):
                 continue
             start = _to_datetime(_first(item, START_KEYS))
-            price = _first(item, PRICE_KEYS)
-            try:
-                price = float(price)
-            except (TypeError, ValueError):
-                continue
-            if start is None or start.tzinfo is None or math.isnan(price):
+            price = finite(_first(item, PRICE_KEYS))
+            if start is None or start.tzinfo is None or price is None:
                 continue
             end = _to_datetime(_first(item, END_KEYS))
             raw.append((start, end if end and end.tzinfo else None, price))
@@ -104,6 +115,7 @@ def parse_price_attributes(attributes: dict, estimated: bool = False) -> list[Pr
                 end = start + (start - previous)
             else:
                 end = start + timedelta(hours=1)
+        end = min(end, start + LONGEST_PRICE)  # a broken end (the year 2100) must not make millions of quarters
         cursor = start
         while cursor + SLOT <= end:
             slots.setdefault(cursor, PriceSlot(cursor, cursor + SLOT, price, estimated))

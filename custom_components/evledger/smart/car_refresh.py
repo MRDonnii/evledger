@@ -6,10 +6,12 @@ integration only answers with what the car has when it is awake."""
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.const import STATE_UNKNOWN
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -18,6 +20,8 @@ from ..device_resolve import all_devices
 
 if TYPE_CHECKING:
     from .planner import ChargePlanner
+
+_LOGGER = logging.getLogger(__name__)
 
 # Car integrations whose entities are fetched again.
 CAR_PLATFORMS = ("tesla_fleet", "tesla_custom", "teslemetry", "tessie")
@@ -29,6 +33,17 @@ PLUGGED_TRIES = 8
 # A "last update" this old while the car is online: the integration hangs.
 HANGING = timedelta(minutes=30)
 DOMAINS = ("sensor", "binary_sensor", "lock", "climate", "number", "switch", "cover", "select", "device_tracker")
+
+
+async def async_update_entities(hass: HomeAssistant, entity_ids: list[str]) -> None:
+    """Ask the car's integration for fresh data. A car that is asleep or a cloud that fails is only a warning: the
+    plan goes on with what it has."""
+    if not hass.services.has_service("homeassistant", "update_entity"):
+        return
+    try:
+        await hass.services.async_call("homeassistant", "update_entity", {"entity_id": entity_ids}, blocking=True)
+    except Exception as err:  # noqa: BLE001 – any error of the car integration
+        _LOGGER.warning("Fetching %s again failed: %s", ", ".join(entity_ids), err or type(err).__name__)
 
 
 class CarRefresh:
@@ -105,5 +120,4 @@ class CarRefresh:
         self.asked += 1
         p = self.planner
         p.entry.async_create_background_task(
-            p.hass, p.hass.services.async_call("homeassistant", "update_entity", {"entity_id": stale}),
-            "evledger_car_refresh")
+            p.hass, async_update_entities(p.hass, stale), "evledger_car_refresh")

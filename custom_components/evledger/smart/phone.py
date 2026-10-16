@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_HOME
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -396,5 +395,5 @@ class PhoneNotifier:
     async def _call(self, service: str, data: dict) -> None:
         try:
             await self.hass.services.async_call("notify", service, data, blocking=True)
-        except (HomeAssistantError, ValueError) as err:
-            _LOGGER.warning("notify.%s failed: %s", service, err)
+        except Exception as err:  # noqa: BLE001 – a phone that cannot be reached: the next message is tried again
+            _LOGGER.warning("notify.%s failed: %s", service, err or type(err).__name__)

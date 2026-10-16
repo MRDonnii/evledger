@@ -488,6 +488,13 @@ shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
   the missing hour in March are planned like any other.
 - **An extra that fails** (a phone message, the price question, learned times) never stops the charging plan; the fault
   is logged once.
+- **Broken numbers from other integrations** (a sensor at `nan`, `inf`, text or out of range, an entity that is gone)
+  count as unknown. This covers the battery level, range, charge limit, position, the charger's power and energy,
+  and the prices in the list and the price now. A price with a broken end time covers one day at most. EV Ledger's
+  own numbers and actions turn such values away.
+- **Services of other integrations that fail** (a phone that cannot be reached, a car that does not answer an update,
+  a climate or calendar call that times out, a calendar answer of an odd shape) are logged as warnings, never as
+  errors. A failed message is not sent again and again.
 
 ### Several cars on one charger
 
