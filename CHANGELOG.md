@@ -4,6 +4,27 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.10.2] - 2026-10-17
+
+### Fixed
+
+- **A running charge was stopped for a few øre when there were two ready-by times.** On 17 Oct 2026 the week plan
+  wanted 100 % on Saturday at 08:00 and the usual weekday time 06:45 kept the minimum level. A ready-by time like
+  that, which the battery already met, switched off three things: the single charging window, the check that a split
+  plan really pays, and the guard that keeps a running charge going. The plan then wavered every few minutes between
+  one period and two while the car charged. It was planned to stop at 04:45 and finish at 05:45 for 1.6 øre (the car
+  was full first). The brother's car really stopped at 05:00 and started again at 05:30. A ready-by time the battery
+  already meets now changes nothing. With several ready-by times that each still need energy, the running charge also
+  goes on as long as that meets all of them.
+- **A running charge is only paused when that saves at least 2 % and 0.25 (kr).** A stop costs a wake-up at the next
+  start, and stopping a charge for øre is not wanted. The old limit of 0.5 % or 0.02 still holds for a start that is
+  planned but has not begun.
+
+### Tests
+
+- Replays of both cars' nights of 17 Oct with the real quarter prices and the week plan (both fail on 0.10.1).
+- The random nights now also run with the week plan and two ready-by times.
+
 ## [0.10.1] - 2026-10-16
 
 ### Fixed

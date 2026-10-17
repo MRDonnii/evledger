@@ -464,6 +464,10 @@ shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
   measured ones). Periods are made long enough to reach the target anyway, and a plan is only split into several
   periods when that still pays with the wake-ups counted. A few minutes are added to a period rather than opening a
   new one (a new period must give at least 15 minutes of charging).
+- **A charge that is running is not stopped for small change:** the plan only pauses a running charge to go on later
+  when that saves at least 2 % of the rest's cost and at least 0.25 (kr). This also holds with several ready-by times
+  (the week plan's Saturday time and the usual weekday time with the minimum level, a learned departure, a trip). A
+  ready-by time that the battery already meets changes nothing in the plan.
 - **Home Assistant away in the night:**
   - Nothing can control the charger while Home Assistant is down. The charger goes on doing what it did, so a car that
     charged goes on charging and a pause stays a pause.

@@ -11,6 +11,7 @@ minutes to wake, Home Assistant restarts – and through every night the plan mu
 
 import os
 import random
+from datetime import time as clock
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -59,6 +60,7 @@ class Sim:
         self.flicker_at = now + timedelta(minutes=rng.uniform(5, 90))
         self.dear_charging = 0.0  # seconds really charging in a dear hour
         self.unwanted = 0.0  # seconds really charging while the plan did not want it
+        self.lost = 0.0  # minutes the car spent waking up and the charger offline (charging time the plan lost)
         self.log: list[str] = []
 
     def command(self, service: str, now) -> None:
@@ -79,7 +81,9 @@ class Sim:
             self.stale_state, self.stale_until = old, now + timedelta(seconds=self.rng.uniform(2, 150))
 
     def wake(self) -> timedelta:
-        return timedelta(minutes=min(15.0, self.wake_base * self.rng.uniform(0.7, 1.3)))
+        minutes = min(15.0, self.wake_base * self.rng.uniform(0.7, 1.3))
+        self.lost += minutes
+        return timedelta(minutes=minutes)
 
     def step(self, now, t0) -> str:
         if self.wake_at is not None and now >= self.wake_at and self.soc < 99.5:
@@ -95,6 +99,7 @@ class Sim:
     def _answer(self, now) -> str:
         if self.reboot_at is not None and now >= self.reboot_at:  # the charger reboots
             self.reboot_at, self.offline_until = None, now + timedelta(seconds=self.rng.uniform(40, 150))
+            self.lost += (self.offline_until - now).total_seconds() / 60
             self.charging, self.wake_at, self.needs_authorize = False, None, True
         if self.offline_until is not None:
             if now < self.offline_until - timedelta(seconds=20):
@@ -138,6 +143,15 @@ async def play_night(hass: HomeAssistant, request, freezer, seed: int, lad_kun_t
         sim.log.append(f"wake {sim.wake_base:.1f} min, learned {planner.controller.start_delays}")
     else:
         sim.log.append(f"wake {sim.wake_base:.1f} min, not learned yet")
+    if not lad_kun_til and rng.random() < 0.4:
+        # The week plan: tonight's ready-by time later than the usual earliest one, which keeps the minimum level – two
+        # ready-by times (17 Oct 2026: they switched off the guard for the running charge).
+        day = (t0 + timedelta(days=1)).weekday()
+        planner.week = {d: {"time": clock(6, 40) if d == day else clock(6, 0), "target": None} for d in range(7)}
+        planner.week_set = True
+        planner.flags["week_plan"] = True
+        planner.async_set_setting("min_soc", float(rng.choice([20, 40, 60, 70])))
+        sim.log.append(f"week plan 06:40, usual 06:00 with {planner.settings['min_soc']:.0f} %")
     # Home Assistant away for half an hour to two and a half hours some nights (back by 04:00).
     away_at = t0 + timedelta(minutes=rng.uniform(60, 270)) if rng.random() < 0.25 else None
     away_until = min(away_at + timedelta(minutes=rng.uniform(30, 150)), t0 + timedelta(hours=6)) if away_at else None
@@ -206,7 +220,9 @@ async def play_night(hass: HomeAssistant, request, freezer, seed: int, lad_kun_t
         return
     # Dear charging only for what the cheap hours cannot hold, plus the make-up for a car that woke late.
     need_min = (80 - soc0) / 100 * 60 / 0.9 / 11 * 60
-    allowed = max(0.0, need_min - 60 * len(cheap)) + 25 + sim.away_minutes  # an outage: its time, at most
+    # The make-up for the car's wake-ups and a charger reboot: 25 minutes, or what they really took plus 10 if more
+    # (seed 12106: three wake-ups of ten minutes, one after a reboot in a period). An outage: its time, at most.
+    allowed = max(0.0, need_min - 60 * len(cheap)) + max(25.0, sim.lost + 10) + sim.away_minutes
     assert sim.dear_charging <= allowed * 60, (
         f"{sim.dear_charging / 60:.1f} min charging at the dear price (allowed {allowed:.0f}) – {detail}")
     assert sim.soc >= 79, f"only {sim.soc:.1f} % by the morning – {detail}"

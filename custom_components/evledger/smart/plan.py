@@ -207,6 +207,11 @@ MIN_NEW_PERIOD_MINUTES = 15
 # money) are equally cheap: prices a fraction of a cent apart must not move or stop a planned charge.
 WINDOW_TIE = 0.005
 WINDOW_TIE_MIN = 0.02
+# A charge that is running is only stopped (to go on later) when that saves at least this share of its cost and at least
+# RUNNING_TIE_MIN in money. A stop costs a wake-up at the next start, and the user does not want a running charge
+# stopped for øre (17 Oct 2026: planned to stop at 04:45 to finish at 05:45 for 1.6 øre).
+RUNNING_TIE = 0.02
+RUNNING_TIE_MIN = 0.25
 # "Prefer green power": windows that cost at most this much more (share, or money) count as equally cheap, and the one
 # with the least CO2 per kWh wins.
 GREEN_TIE = 0.03
@@ -506,7 +511,8 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             if _split_loses(chosen, window, inside, need):
                 chosen.clear()
                 chosen.update({slot.start: slot for slot in window})
-        kept = _keep_running(list(chosen.values()), inside, need, kwh, data.price_factor, data.keep_start)
+        kept = _keep_running(list(chosen.values()), inside, need, kwh, data.price_factor, data.keep_start,
+                             data.charging)
         if kept:
             chosen.clear()
             chosen.update({slot.start: slot for slot in kept})
@@ -575,9 +581,17 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
 
     # With a price limit, a single window may only use slots below it (not tried while the floor needs dearer ones).
     limit_pool = (lambda slots: [slot for slot in slots if under_limit(slot)]) if limited else (lambda slots: slots)
-    if (data.mode in (MODE_SMART, MODE_MANUAL) and len(constraints) == 1 and chosen
+    # The ready-by times that still need energy. One the battery already meets (the usual time's minimum level while the
+    # week plan wants the target on Saturday at 08:00) changes nothing: on 17 Oct 2026 it switched off the single
+    # window, the split check and the guard for the running charge, which was then planned to stop for 1.6 øre.
+    binding = [index for index, constraint in enumerate(constraints) if wall(constraint.target_soc) > 1e-9]
+
+    def due(index: int) -> datetime:
+        return finishes[index] if finishes else constraints[index].deadline
+
+    if (data.mode in (MODE_SMART, MODE_MANUAL) and len(binding) == 1 and chosen
             and (not limited or all(under_limit(slot) for slot in chosen.values()))):
-        deadline = finishes[0] if finishes else constraints[0].deadline
+        deadline = due(binding[0])
         window = _cheapest_window(limit_pool([slot for slot in usable if slot.end <= deadline]), need, kwh,
                                   data.price_factor, data.keep_start, data.green)
         if window and data.green and _greener(window, list(chosen.values()), need, kwh, data.price_factor):
@@ -587,11 +601,30 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             if _split_loses(chosen, window, pool, need):
                 chosen.clear()
                 chosen.update({slot.start: slot for slot in window})
-        kept = _keep_running(list(chosen.values()), pool, need, kwh, data.price_factor, data.keep_start)
+        kept = _keep_running(list(chosen.values()), pool, need, kwh, data.price_factor, data.keep_start,
+                             data.charging)
         if kept:
             chosen.clear()
             chosen.update({slot.start: slot for slot in kept})
         top_up(pool, need, deadline)
+    elif (data.mode in (MODE_SMART, MODE_MANUAL) and len(binding) > 1 and chosen and data.keep_start is not None
+          and not limited):
+        # Several ready-by times that each need energy (below the minimum level for the usual time, the target later):
+        # the charge running now (or the start announced) still goes on when that meets every one of them and is not
+        # clearly dearer.
+        last = max(due(index) for index in binding)
+        pool = [slot for slot in usable if slot.end <= last]
+        kept = _keep_running(list(chosen.values()), pool, need, kwh, data.price_factor, data.keep_start,
+                             data.charging)
+        if kept:
+            before = dict(chosen)
+            chosen.clear()
+            chosen.update({slot.start: slot for slot in kept})
+            top_up(pool, need, last)
+            got = delivered if data.wake_h > 0 else energy
+            if any(got(due(index)) < wall(constraints[index].target_soc) - 1e-6 for index in binding):
+                chosen.clear()
+                chosen.update(before)
 
     # Charging happens in time order and stops when the energy is in the battery.
     remaining = need
@@ -792,10 +825,10 @@ def _allocation_cost(slots, need: float, kwh: dict, factor: float) -> float:
 
 
 def _keep_running(chosen: list[TimelineSlot], slots: list[TimelineSlot], need: float, kwh: dict, factor: float,
-                  keep_start: datetime | None) -> list[TimelineSlot] | None:
+                  keep_start: datetime | None, running: bool = False) -> list[TimelineSlot] | None:
     """The charge running now (or the start already announced) as one run from keep_start, when the new choice is not
-    clearly cheaper than going on with it (WINDOW_TIE). On 10 Oct a running charge stopped at 01:15 to finish at
-    05:15 for 0.2 øre; a charge must not stop or move for that."""
+    clearly cheaper than going on with it (WINDOW_TIE; RUNNING_TIE for a charge that runs). On 10 Oct a running charge
+    stopped at 01:15 to finish at 05:15 for 0.2 øre; a charge must not stop or move for that."""
     if keep_start is None or not chosen:
         return None
     run: list[TimelineSlot] = []
@@ -813,7 +846,8 @@ def _keep_running(chosen: list[TimelineSlot], slots: list[TimelineSlot], need: f
         return None
     new_cost = _allocation_cost(chosen, need, kwh, factor)
     kept_cost = _allocation_cost(run, need, kwh, factor)
-    if kept_cost <= new_cost + max(new_cost * WINDOW_TIE, WINDOW_TIE_MIN) + 1e-9:
+    tie = max(new_cost * RUNNING_TIE, RUNNING_TIE_MIN) if running else max(new_cost * WINDOW_TIE, WINDOW_TIE_MIN)
+    if kept_cost <= new_cost + tie + 1e-9:
         return run
     return None
 

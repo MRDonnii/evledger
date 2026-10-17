@@ -448,3 +448,58 @@ def test_the_margin_gives_way_when_the_time_is_short():
     result = plan.build_schedule(data, now)
     assert result.shortfall_kwh == 0 and result.energy_kwh == 6.0
     assert result.blocks[-1].end == datetime(2026, 10, 10, 6, 0, tzinfo=TZ)
+
+
+def _night_17_oct():
+    # 17 Oct 2026, 03:45-08:00 (local): a hundredth of a krone between the cheapest quarters, the cheapest at 05:45.
+    start = datetime(2026, 10, 17, 3, 45, tzinfo=TZ)
+    return quarterly(start, [1.661393, 1.649806, 1.650087, 1.654665, 1.662327, 1.668681, 1.669054, 1.664196, 1.642892,
+                             1.852624, 1.8797, 1.9107, 1.9061, 2.0734, 2.0601, 2.0582, 2.0444])
+
+
+def _plan_17_oct(now, soc, keep, constraints, wake_min=5, charging=True):
+    timeline = plan.build_timeline(now, _night_17_oct(), now + timedelta(hours=4))
+    data = plan.ScheduleInput(mode="smart", soc=soc, target_soc=100.0, capacity_kwh=55, efficiency=0.9, power_kw=11,
+                              price_factor=1.0, timeline=timeline,
+                              constraints=tuple(constraints), keep_start=keep, wake_h=wake_min / 60, charging=charging)
+    return plan.build_schedule(data, now)
+
+
+def test_a_ready_by_time_already_met_does_not_switch_off_the_running_charge_guard():
+    """17 Oct 04:34, 98 %: week plan Saturday 08:00 to 100 % and the usual 06:45 for the minimum level (25 %, long
+    met). The running charge was planned to stop at 04:45 and go on at 05:45 for 1.6 øre; alone it goes on."""
+    now = datetime(2026, 10, 17, 4, 34, 57, tzinfo=TZ)
+    usual = plan.Constraint(datetime(2026, 10, 17, 6, 45, tzinfo=TZ), 25.0)
+    week = plan.Constraint(datetime(2026, 10, 17, 8, 0, tzinfo=TZ), 100.0)
+    alone = _plan_17_oct(now, 98.0, now, [week])
+    both = _plan_17_oct(now, 98.0, now, [usual, week])
+    assert alone.charge_now and alone.blocks[0].start == now
+    assert both.blocks == alone.blocks, "a ready-by time the battery already meets changes nothing"
+
+
+def test_the_running_charge_goes_on_with_two_ready_by_times_that_both_need_energy():
+    """Below the minimum level for the usual time and the target later: the running charge is still not stopped for a
+    fraction of a krone, as long as going on meets both times."""
+    now = datetime(2026, 10, 17, 4, 34, 57, tzinfo=TZ)
+    usual = plan.Constraint(datetime(2026, 10, 17, 6, 45, tzinfo=TZ), 99.5)
+    week = plan.Constraint(datetime(2026, 10, 17, 8, 0, tzinfo=TZ), 100.0)
+    kept = _plan_17_oct(now, 98.0, now, [usual, week])
+    assert kept.charge_now and kept.blocks[0].start == now
+    assert len(kept.blocks) == 1
+    free = _plan_17_oct(now, 98.0, None, [usual, week], charging=False)
+    assert not free.charge_now, "without a running charge the cheapest quarter later is fine"
+
+
+def test_a_clearly_cheaper_later_period_may_still_pause_the_running_charge_with_two_ready_by_times():
+    now = datetime(2026, 10, 17, 4, 34, 57, tzinfo=TZ)
+    start = datetime(2026, 10, 17, 3, 45, tzinfo=TZ)
+    prices = [1.66, 1.65, 1.65, 1.65, 1.66, 1.67, 1.67, 1.66, 0.40, 1.85, 1.88, 1.91, 1.91, 2.07, 2.06, 2.06, 2.04]
+    timeline = plan.build_timeline(now, quarterly(start, prices), now + timedelta(hours=4))
+    data = plan.ScheduleInput(mode="smart", soc=90.0, target_soc=100.0, capacity_kwh=55, efficiency=0.9, power_kw=11,
+                              price_factor=1.0, timeline=timeline,
+                              constraints=(plan.Constraint(datetime(2026, 10, 17, 6, 45, tzinfo=TZ), 92.0),
+                                           plan.Constraint(datetime(2026, 10, 17, 8, 0, tzinfo=TZ), 100.0)),
+                              keep_start=now, wake_h=5 / 60, charging=True)
+    result = plan.build_schedule(data, now)
+    cheap = datetime(2026, 10, 17, 5, 50, tzinfo=TZ)
+    assert any(block.start <= cheap < block.end for block in result.blocks), result.blocks

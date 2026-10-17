@@ -370,3 +370,112 @@ async def test_a_normal_restart_is_not_an_outage(hass: HomeAssistant, request, f
     await hass.async_block_till_done(wait_background_tasks=True)
     await at(hass, freezer, t0 + timedelta(hours=1, minutes=5))
     assert not [m for m in sent if "Home Assistant var nede" in m.get("title", "")]
+
+
+NIGHT_17_OCT = [2.1632, 2.1249, 2.0239, 1.9425, 1.9585, 1.9414, 1.8689, 1.7943, 1.8032, 1.7856, 1.7546, 1.7122, 1.699,
+                1.6773, 1.6726, 1.6614, 1.6498, 1.6501, 1.6547, 1.6623, 1.6687, 1.6691, 1.6642, 1.6429, 1.8526, 1.8665,
+                1.8758, 1.8978, 1.8673, 1.8797, 1.9107, 1.9061]
+
+
+async def test_replay_of_the_night_of_17_october_with_the_week_plan(hass: HomeAssistant, request, freezer):
+    """The real night: week plan on (Saturday 08:00, weekdays 06:45 – so the usual 06:45 keeps the minimum level of
+    25 %), plugged in at 00:09 with 89 % to 100 %, quarter prices of the night (05:45 a hundredth of a krone cheaper
+    than 04:30). The plan started at 04:00 and was planned to stop at 04:45 to finish at 05:45 for 1.6 øre; the charge
+    must run to the target in one go, with a plan that stays one period while it charges."""
+    from datetime import time
+
+    t0 = (dt_util.now() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    freezer.move_to(t0 + timedelta(minutes=9))
+    entry, calls = await setup(hass, request, cheap_now=False, soc="89", charger_state="connected_requesting")
+    quarters = [{"start": (t0 + timedelta(minutes=15 * i)).isoformat(),
+                 "end": (t0 + timedelta(minutes=15 * (i + 1))).isoformat(), "price": p}
+                for i, p in enumerate(NIGHT_17_OCT)]
+    hass.states.async_set("sensor.price", "2.02", {"prices": quarters, "unit_of_measurement": "kr/kWh"})
+    planner = hass.data[DOMAIN][entry.entry_id].smart
+    planner.week = {day: {"time": time(8, 0) if day == t0.weekday() else time(6, 45), "target": None}
+                    for day in range(7)}
+    planner.week_set = True
+    planner.flags["week_plan"] = True
+    planner.async_set_setting("min_soc", 25.0)
+    planner.async_set_setting("target_soc", 100.0)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert dt_util.as_local(planner.deadline).strftime("%H:%M") == "08:00"
+    assert len(planner.constraints(dt_util.utcnow())) == 2, "the usual time with the minimum level, and 08:00"
+    blocks = planner.schedule.blocks
+    assert len(blocks) == 1, [(dt_util.as_local(b.start), dt_util.as_local(b.end)) for b in blocks]
+    begin = dt_util.as_local(blocks[0].start)
+    assert t0 + timedelta(hours=4) <= begin <= t0 + timedelta(hours=4, minutes=15), begin
+
+    def started() -> int:
+        return len(calls["switch.turn_on"]) + len(calls["button.press"])
+
+    await at(hass, freezer, begin + timedelta(seconds=30))
+    assert started() == 1, "starts at the planned time (authorised: the car was waiting)"
+    await charger(hass, "connected_charging")
+    levels = {11: "92", 22: "95", 33: "98"}  # the car reports in steps, like the Tesla that night
+    for minute in range(1, 46):
+        if minute in levels:
+            hass.states.async_set("sensor.car_battery", levels[minute], {"unit_of_measurement": "%"})
+        moment = begin + timedelta(minutes=minute, seconds=15)
+        await at(hass, freezer, moment)
+        assert not calls["switch.turn_off"], f"not stopped at {moment:%H:%M} before the target"
+        got = [f"{dt_util.as_local(b.start):%H:%M}-{dt_util.as_local(b.end):%H:%M}" for b in planner.schedule.blocks]
+        assert len(got) == 1 and planner.schedule.charge_now, f"{moment:%H:%M}: one period, running now – got {got}"
+    hass.states.async_set("sensor.car_battery", "100", {"unit_of_measurement": "%"})
+    await at(hass, freezer, begin + timedelta(minutes=46))
+    await charger(hass, "connected_finished")  # the car is full
+    for minute in range(47, 240, 7):
+        await at(hass, freezer, begin + timedelta(minutes=minute))
+        assert started() == 1, "nothing more after the target"
+    assert state(hass, "select.bil_charge_mode") == "smart"
+
+
+async def test_replay_of_the_brothers_night_of_17_october(hass: HomeAssistant, request, freezer):
+    """The brother's car the same night: week plan weekdays 05:40 and Saturday 08:00 (minimum level 20 % by 05:40, met),
+    35 % to 80 %. The plan wavered between one and two periods from 03:48, stopped the running charge at 05:00 and
+    started it again at 05:30 for a few øre. It must charge in one go to the target."""
+    from datetime import time
+
+    t0 = (dt_util.now() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    freezer.move_to(t0 - timedelta(hours=2))
+    entry, calls = await setup(hass, request, cheap_now=False, soc="35", charger_state="connected_requesting")
+    quarters = [{"start": (t0 + timedelta(minutes=15 * i)).isoformat(),
+                 "end": (t0 + timedelta(minutes=15 * (i + 1))).isoformat(), "price": p}
+                for i, p in enumerate(NIGHT_17_OCT)]
+    early = [{"start": (t0 - timedelta(hours=2) + timedelta(minutes=15 * i)).isoformat(),
+              "end": (t0 - timedelta(hours=2) + timedelta(minutes=15 * (i + 1))).isoformat(), "price": 2.3}
+             for i in range(8)]
+    hass.states.async_set("sensor.price", "2.3", {"prices": early + quarters, "unit_of_measurement": "kr/kWh"})
+    planner = hass.data[DOMAIN][entry.entry_id].smart
+    planner.week = {day: {"time": time(8, 0) if day == t0.weekday() else time(5, 40), "target": None}
+                    for day in range(7)}
+    planner.week_set = True
+    planner.flags["week_plan"] = True
+    planner.async_set_setting("min_soc", 20.0)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(planner.constraints(dt_util.utcnow())) == 2
+
+    def started() -> int:
+        return len(calls["switch.turn_on"]) + len(calls["button.press"])
+
+    soc, charging, moment = 35.0, False, t0 - timedelta(hours=2)
+    while moment < t0 + timedelta(hours=8):
+        moment += timedelta(minutes=1)
+        if charging:
+            soc += 11 * 0.9 / 60 * 100 / 60
+            hass.states.async_set("sensor.car_battery", str(min(80, int(soc))), {"unit_of_measurement": "%"})
+        await at(hass, freezer, moment)
+        if not charging and started():
+            charging = True
+            await charger(hass, "connected_charging")
+        if charging and soc < 80:
+            assert not calls["switch.turn_off"], f"stopped at {moment:%H:%M} on {soc:.0f} % before the target"
+        if charging and soc >= 80:
+            await charger(hass, "connected_finished")
+            charging = False
+            break
+    assert soc >= 80, f"only {soc:.0f} % by 08:00"
+    for minute in range(5, 120, 9):
+        await at(hass, freezer, moment + timedelta(minutes=minute))
+    assert started() == 1, "one start for the whole charge"
+    assert state(hass, "select.bil_charge_mode") == "smart"
