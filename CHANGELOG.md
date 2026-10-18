@@ -4,6 +4,15 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.10.3] - 2026-10-18
+
+### Fixed
+
+- **No "Laderen lader sig ikke stoppe" for a full car.** On 18 Oct 2026 the car reached 100 % at 04:58 and the plan
+  stopped the charger. Zaptec's cloud then said "charging" (with the old power) for 6.8 minutes. A few more minutes
+  would have sent a false alert at five in the morning. A car at 100 % or at its own charge limit cannot charge on,
+  so it gets no alert. The stop is still repeated until the charger says it has stopped.
+
 ## [0.10.2] - 2026-10-17
 
 ### Fixed

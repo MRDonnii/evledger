@@ -483,6 +483,7 @@ shows and controls all of it with `smart_charge: select.<car>_charge_mode`.
   again.
 - **A stop that does not take:** the stop is repeated every 45 seconds. When the charger still charges 10 minutes
   after the plan stopped it, the phones are told (the car would otherwise charge through the pause at the dear price).
+  Not for a full car (100 % or its own charge limit): it cannot charge on, whatever the charger's cloud says.
 - **A charger command that fails** (a timeout or error of any kind) is logged, and the controller sends it again.
 - **A car that does not start charging** after three quick attempts is reported. It is tried again every 15 minutes,
   and is never given up.

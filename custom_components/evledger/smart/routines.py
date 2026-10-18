@@ -523,9 +523,11 @@ class Routines:
         the dear price without anyone knowing."""
         p = self.planner
         c = p.controller
-        # (Counted from the first stop: an old "charging" just after it lasts a minute, far below the alert time.)
+        # (Counted from the first stop: an old "charging" just after it lasts a minute, far below the alert time. A full
+        # car – 100 % or its own charge limit – cannot charge on, so a "charging" then is nothing to wake anyone for: on
+        # 18 Oct 2026 Zaptec's cloud said "charging" for 6.8 minutes after the stop of a car at 100 %.)
         stuck = (p.backend is not None and not p.charge_desired and p.charger_state == ChargerState.CHARGING
-                 and p.car_present
+                 and p.car_present and not p.car_full
                  and c.last_command == Action.STOP and c.manual_since is None and p.mode not in (MODE_MANUAL, MODE_NOW))
         if not stuck:
             self._stuck_since = None

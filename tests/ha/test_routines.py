@@ -3,6 +3,7 @@ preconditioning and trips from a calendar."""
 
 from datetime import datetime, time, timedelta
 
+import pytest
 from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -479,6 +480,26 @@ async def test_a_stop_that_does_not_take_is_told(hass: HomeAssistant, request, f
     await later(hass, freezer, 20)
     assert len([m for m in sent if "ikke stoppe" in m["message"]]) == 1, "once"
     assert state(hass, "select.bil_charge_mode") == "smart", "not taken for a start from the app"
+
+
+@pytest.mark.parametrize(("soc", "limit"), [("100", None), ("80", 80)])
+async def test_no_stop_alert_for_a_full_car(hass: HomeAssistant, request, freezer, soc, limit):
+    """18 Oct 2026: the car reached 100 % at 04:58 and the plan stopped the charger, but Zaptec's cloud said "charging"
+    (and the old power) for 6.8 minutes. A full car – at 100 % or at its own charge limit – cannot charge on, so the
+    charger's "charging" is nothing to wake anyone for: the stop is still repeated, but no alert."""
+    from .test_smart_charge import car_with_limit
+
+    sent = phones(hass)
+    if limit:
+        car_with_limit(hass, limit)
+    entry, calls = await setup(hass, request, charger_state="connected_charging", cheap_now=False, soc=soc)
+    await with_options(hass, entry)
+    await later(hass, freezer, 1)
+    assert calls["switch.turn_off"], "stopped"
+    for _ in range(5):
+        await later(hass, freezer, 5)
+    assert len(calls["switch.turn_off"]) >= 3, "the stop is still repeated"
+    assert not [m for m in sent if "ikke stoppe" in m["message"]], [m["message"] for m in sent]
 
 
 async def test_a_charge_stopped_from_the_car_twice_is_respected_and_told(hass: HomeAssistant, request, freezer):
