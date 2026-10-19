@@ -475,6 +475,9 @@
     "binary_sensor": {
       "charge_now": {
         "name": "Charge now"
+      },
+      "plugged_in": {
+        "name": "Plugged in"
       }
     }
   },

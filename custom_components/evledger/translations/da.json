@@ -475,6 +475,9 @@
     "binary_sensor": {
       "charge_now": {
         "name": "Lad nu-signal"
+      },
+      "plugged_in": {
+        "name": "Sat til"
       }
     }
   },

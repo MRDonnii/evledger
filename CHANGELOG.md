@@ -4,6 +4,17 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.10.4] - 2026-10-19
+
+### Added
+
+- **`binary_sensor.<car>_plugged_in`** ("Sat til"): whether the car is plugged in, the way the plan sees it. Where EV
+  Ledger has a charger, the charger decides, together with whether this car is the one on it. Otherwise the car's own
+  plug sensors decide, and any one of them saying plugged in is enough. On 19 Oct 2026 Tesla Custom's charger sensor
+  stayed "off" for a day while the car was plugged in. EV Ledger itself saw the car, but the dashboard cards that read
+  that one sensor said "Ikke sat til". Dashboards and automations can now use this sensor. Attributes: `charger`,
+  `car_says_plugged`, `car_plugged_since` and `car_sensors`.
+
 ## [0.10.3] - 2026-10-18
 
 ### Fixed
