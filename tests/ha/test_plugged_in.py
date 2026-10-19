@@ -1,6 +1,6 @@
 """binary_sensor.<car>_plugged_in: one plug state for dashboards and automations, the way the plan sees it – the
-charger (and that it is this car on it) where EV Ledger has one, else the car's own plug sensors, any of them on (19 Oct
-2026: Tesla Custom's charger sensor stayed "off" for a day while the car was plugged in; the cards said "Ikke sat til")."""
+charger (and that it is this car on it) where EV Ledger has one, else the car's own plug sensors, any of them on.
+19 Oct 2026: Tesla Custom's charger sensor stayed "off" for a day while the car was plugged in ("Ikke sat til")."""
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
