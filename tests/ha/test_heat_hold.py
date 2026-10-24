@@ -70,3 +70,27 @@ async def test_pause_wins(hass: HomeAssistant, request, freezer):
                                    blocking=True)
     await later(hass, freezer, 1)
     assert not planner.heat_holding and planner.heat_hold_reason == "paused" and not planner.charge_desired
+
+
+async def test_climate_still_on_from_the_drive_waits(hass: HomeAssistant, request, freezer):
+    """Plugged in with the climate still on from the drive: no charging for it until it has stayed on a while
+    (the driver leaving turns it off); a climate switched on while plugged in counts at once."""
+    car_with_climate(hass)
+    entry, _ = await setup(hass, request, charger_state="disconnected", cheap_now=False, soc="70")
+    planner = entry.runtime_data
+    planner.async_set_flag("heat_hold", True)
+    planner.async_set_setting("heat_hold_price", 3.5)
+    hass.states.async_set("climate.car_climate", "heat_cool")  # on during the drive home
+    await later(hass, freezer, 1)
+    hass.states.async_set("sensor.charger_mode", "connected_finished")  # plugged in
+    await later(hass, freezer, 1)
+    assert not planner.heat_holding and planner.heat_hold_reason == "just_arrived" and not planner.charge_desired
+    await later(hass, freezer, 5)  # left on (on purpose): now it is heating on the charger
+    assert planner.heat_holding and planner.charge_desired
+
+    hass.states.async_set("climate.car_climate", "off")
+    await later(hass, freezer, 1)
+    assert not planner.heat_holding
+    hass.states.async_set("climate.car_climate", "heat_cool")  # switched on while plugged in
+    await later(hass, freezer, 1)
+    assert planner.heat_holding

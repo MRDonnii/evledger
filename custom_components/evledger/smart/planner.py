@@ -61,6 +61,7 @@ from .const import (
     DEFAULT_TRIP_RESERVE,
     DEFAULT_WAKE_MINUTES,
     FORECAST_MARGIN,
+    HEAT_HOLD_ARRIVAL_SECONDS,
     HEAT_HOLD_MARGIN,
     INPUT_WAIT_SECONDS,
     LIMIT_LOOK_HOURS,
@@ -312,6 +313,7 @@ class ChargePlanner:
         self._notify_pending = False
         self._info_pending = False
         self._disconnected_since: datetime | None = None
+        self._plugged_at: datetime | None = None
         self._alerted: set[str] = set()
         self._new_plug = False  # a car was plugged in while running (not just found plugged in at start-up)
         self._plug_told = False  # the plugged-in message (plan or confirmation) has been queued for this plug-in
@@ -1032,6 +1034,10 @@ class ChargePlanner:
                 self._disconnected_since = self._disconnected_since or now
             elif self.charger_state in CONNECTED:
                 self._disconnected_since = None
+            if self.charger_state in CONNECTED and self.car_present:
+                self._plugged_at = self._plugged_at or now
+            else:
+                self._plugged_at = None
             unplugged = self.unplugged(now)
             if self.mode not in (self.default_mode, MODE_MANUAL):
                 if self.charger_state in CONNECTED:
@@ -1311,6 +1317,8 @@ class ChargePlanner:
             reason = "not_plugged_in"
         elif not self._climate_on():
             reason = "climate_off"
+        elif self._climate_from_the_drive(now):
+            reason = "just_arrived"
         else:
             soc = self._battery_soc()
             price = self.price_now(now)
@@ -1329,6 +1337,18 @@ class ChargePlanner:
             _LOGGER.debug("Keeping the battery at the target while heating: %s (%s)", holding, reason)
         self.heat_holding, self.heat_hold_reason = holding, reason
         return holding
+
+    def _climate_from_the_drive(self, now: datetime) -> bool:
+        """The climate was already on when the car was plugged in (still on from the drive) and the plug-in is recent:
+        the driver is about to leave the car, which turns it off. Charging for it would start the charger for a minute
+        whenever the car comes home (Claude AI, 2026-10-24)."""
+        if self.heat_holding or self._plugged_at is None:
+            return False
+        climate = self.routines.climate_entity()
+        state = self.hass.states.get(climate) if climate else None
+        if state is None or state.last_changed >= self._plugged_at:
+            return False
+        return now - self._plugged_at < timedelta(seconds=HEAT_HOLD_ARRIVAL_SECONDS)
 
     def _climate_on(self) -> bool:
         climate = self.routines.climate_entity()

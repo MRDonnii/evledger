@@ -146,6 +146,10 @@ DEFAULT_LOW_PRICE = 0.5
 # when the battery is this far below the target.
 DEFAULT_HEAT_HOLD_PRICE = 3.0
 HEAT_HOLD_MARGIN = 1.0
+# A climate that is still on from the drive when the car is plugged in is not heating on the charger: it only counts
+# once it has stayed on this long after the plug-in (it goes off when the driver leaves the car). A climate turned on
+# while plugged in (preconditioning) counts at once.
+HEAT_HOLD_ARRIVAL_SECONDS = 300
 
 # "Wait for a cheaper day": skip charging tonight when a night within WAIT_MAX_DAYS is clearly cheaper (at least
 # WAIT_MIN_SHARE per kWh and WAIT_MIN_KR in all) and the battery lasts until then with WAIT_RESERVE % above the
