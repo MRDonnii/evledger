@@ -104,10 +104,16 @@
           "tesla_model_key": "Model / trim for efficiency comparison (optional)",
           "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
           "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')",
-          "ocm_api_key": "Open Charge Map API key (optional)"
+          "ocm_api_key": "Open Charge Map API key (optional)",
+          "monta_client_id": "Monta Public API client id (optional)",
+          "monta_client_secret": "Monta Public API client secret (optional)",
+          "eco_movement_token": "Eco-Movement token (optional)"
         },
         "data_description": {
-          "ocm_api_key": "Gives public charges the station's name and operator. Free: sign in at openchargemap.org, open My Profile → My Apps, register an application and copy its API key here. Leave empty to not use it."
+          "ocm_api_key": "Gives public charges the station's name and operator. Free: sign in at openchargemap.org, open My Profile → My Apps, register an application and copy its API key here. Leave empty to not use it.",
+          "monta_client_id": "The operators' own prices (EU AFIR data) for EWII, Norlys, go'energi, NRGi, Uno-X, Energi Fyn and others on Monta. Free: sign in at portal2.monta.app with your Monta account, open your profile (bottom left) → Applications → + Add Application, and copy the client id here.",
+          "monta_client_secret": "The client secret shown once when the application is made.",
+          "eco_movement_token": "The operators' own prices (EU AFIR data) for Clever, Circle K, Q8, Allego, Ionity, Lidl, Fastned and others. Ask support@eco-movement.com for a token to their Danish NAP feed (nap-dk.eco-movement.com). Spirii's, OK's, EV-EL's and TotalEnergies' data are used without a key."
         }
       },
       "smart_charge": {

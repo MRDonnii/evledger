@@ -21,13 +21,16 @@ from .const import (
     TRIP_MIN_DISTANCE_KM,
 )
 from .models import ChargeSession, LiveChargeState, Trip, VehicleSnapshot
+from .afir import afir, charge_price, site_prices
 from .public_place import (
     PLACE_RADIUS_M,
+    async_afir_stations,
     async_place,
     distance_m,
     nearest_place,
     open_charge_map,
     superchargers,
+    without_duplicates,
     zone_at,
 )
 from .providers.charger.base import CAP_COST_LOOKUP, CAP_LIVE_POWER, ChargerProvider
@@ -53,7 +56,7 @@ PUBLIC_CHARGE_EFFICIENCY = 0.95
 # A station from this power counts as a fast charger: an operator's fast price applies
 FAST_KW = 50
 # Prices a public charge gets by itself (replaced by any price given later)
-AUTO_PRICE_SOURCES = ("place", "zone", "operator", "default")
+AUTO_PRICE_SOURCES = ("place", "zone", "station", "operator", "default")
 
 
 class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -88,6 +91,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._vehicle_was_charging = False
         self.battery_capacity_kwh: float | None = None  # set from the entry; trips' energy for the tyre use
         self.ocm_api_key: str | None = None  # set from the entry: Open Charge Map for public charging stations
+        self.afir_credentials: dict = {}  # set from the entry: Monta's and Eco-Movement's access for their AFIR data
 
     async def _async_update_data(self) -> dict[str, Any]:
         snapshot = self._vehicle_provider.get_snapshot(self.hass)
@@ -221,26 +225,45 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         charge.latitude, charge.longitude = snapshot.latitude, snapshot.longitude
         try:
             found = await async_place(self.hass, snapshot.latitude, snapshot.longitude,
-                                      self.store.settings.get("places"), self.ocm_api_key)
+                                      self.store.settings.get("places"), self.ocm_api_key, self.afir_credentials)
         except Exception:  # noqa: BLE001 - the place is an extra, the charge must be saved
             _LOGGER.debug("%s: place of the public charge not found", self.vehicle_name, exc_info=True)
             return
         charge.zone, charge.location_name, charge.operator = found["zone"], found["name"], found["operator"]
-        charge.station_kw = found.get("max_kw")
+        charge.station_kw, charge.station_id = found.get("max_kw"), found.get("station_id")
         if not found.get("certain", True) and (smart := getattr(self, "smart", None)) is not None:
             # Several operators right here and none clearly nearest: ask which one (the nearest stays until answered)
             candidates = found["candidates"]
             smart._optional("public operator question", lambda: smart.routines.ask_operator(charge, candidates))
 
+    def _station_charge_price(self, charge: ChargeSession) -> tuple[float | None, float]:
+        """The operator's own price per kWh at the charge's AFIR station when it started (DC when the car charged faster
+        than AC can), and the fixed costs (start fee, minute fees)."""
+        site = afir(self.hass).site((charge.station_id or "").removeprefix("afir:")) if charge.station_id else None
+        started = dt_util.parse_datetime(charge.started_at or "")
+        if site is None or started is None:
+            return None, 0.0
+        ended = dt_util.parse_datetime(charge.ended_at or "") or dt_util.utcnow()
+        minutes = max((ended - started).total_seconds() / 60, 0)
+        kwh = charge.kwh or self.public_kwh_estimate(charge)[0]
+        avg_kw = kwh / (minutes / 60) if kwh and minutes >= 5 else None
+        return charge_price(site, dt_util.as_local(started), avg_kw, minutes)
+
+    def _auto_fees(self, charge: ChargeSession, source: str | None) -> float:
+        """Fixed costs on top of kWh × price: the AFIR station's start fee and minute fees."""
+        return self._station_charge_price(charge)[1] if source == "station" else 0.0
+
     def _auto_price(self, charge: ChargeSession) -> tuple[float | None, str | None]:
         """The price per kWh a public charge gets by itself, and from where: a place named before, the zone, the
-        operator, the default price."""
+        operator's own price at its AFIR station, the operator's price set here, the default price."""
         if charge.latitude is not None and charge.longitude is not None:
             place = nearest_place(self.store.settings.get("places"), charge.latitude, charge.longitude)
             if place is not None and place.get("price") is not None:
                 return float(place["price"]), "place"
         if (zone_price := self.zone_price(charge.zone)) is not None:
             return zone_price, "zone"
+        if (station_price := self._station_charge_price(charge)[0]) is not None:
+            return station_price, "station"
         if (operator_price := self.operator_price(charge.operator, charge.station_kw)) is not None:
             return operator_price, "operator"
         default = self.public_default_price()
@@ -288,11 +311,13 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         charge.location_name = station.get("name") or charge.location_name
         charge.operator = station.get("operator")
         charge.station_kw = station.get("max_kw")
-        if charge.ended_at and charge.price_source in (None, "operator", "default"):
+        charge.station_id = station.get("id") if station.get("kind") == "afir" else None
+        if charge.ended_at and charge.price_source in (None, "station", "operator", "default"):
             per_kwh, source = self._auto_price(charge)
             kwh = charge.kwh or self.public_kwh_estimate(charge)[0]
             if per_kwh is not None and kwh:
-                charge.kwh, charge.price, charge.price_source = kwh, round(kwh * per_kwh, 2), source
+                charge.kwh, charge.price_source = kwh, source
+                charge.price = round(kwh * per_kwh + self._auto_fees(charge, source), 2)
                 charge.needs_review = False
         await self.store.async_upsert_charge(charge)
         await self.async_request_refresh()
@@ -402,25 +427,41 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         operator = station.get("operator")
         normal = self.operator_price(operator, None)
         fast = self.operator_price(operator, FAST_KW)
+        extra: dict = {}
+        site = afir(self.hass).site(str(station.get("id") or "").removeprefix("afir:")) \
+            if station.get("kind") == "afir" else None
+        own = site_prices(site, dt_util.now()) if site is not None else None
+        if own is not None and (own["ac"] is not None or own["dc"] is not None):
+            # The operator's own price now (AC and DC), with its fees
+            normal, fast = own["ac"], own["dc"]
+            extra = {"start_fee": own["start_fee"], "minute_fees": own["minute_fees"], "day_range": own["day_range"]}
         if place is not None and place.get("price") is not None:
             price, source = float(place["price"]), "place"
         elif (zone_price := self.zone_price(zone_id)) is not None:
             price, source = zone_price, "zone"
+        elif own is not None and (own["ac"] is not None or own["dc"] is not None):
+            dc = isinstance(station.get("max_kw"), (int, float)) and station["max_kw"] >= FAST_KW
+            price, source = ((own["dc"] if dc and own["dc"] is not None else own["ac"] if own["ac"] is not None
+                              else own["dc"]), "station")
         elif (chosen := self.operator_price(operator, station.get("max_kw"))) is not None:
             price, source = chosen, "operator"
         else:
             default = self.public_default_price()
             price, source = (default, "default") if default else (None, None)
-        return {"price": price, "price_source": source, "price_normal": normal, "price_fast": fast if fast != normal else None,
-                "place": place.get("name") if place else None}
+        return {"price": price, "price_source": source, "price_normal": normal,
+                "price_fast": fast if fast != normal else None, "place": place.get("name") if place else None, **extra}
 
     async def async_stations_around(self, lat: float, lon: float, radius_km: float) -> list[dict]:
-        """Charging stations around a point for a map: Superchargers, Open Charge Map's (with the key), the named places
-        and the zones with a price, nearest first, each with its price."""
+        """Charging stations around a point for a map: Superchargers, the operators' AFIR stations (with their own
+        prices), Open Charge Map's (with the key; not where an AFIR station is), the named places and the zones with a
+        price, nearest first, each with its price."""
         radius_m = radius_km * 1000
         found = await superchargers(self.hass).around(lat, lon, radius_m)
+        own = await async_afir_stations(self.hass, lat, lon, radius_m, self.afir_credentials)
+        found += own
         if self.ocm_api_key:
-            for station in await open_charge_map(self.hass).stations(self.ocm_api_key, lat, lon, radius_km, 200):
+            ocm = await open_charge_map(self.hass).stations(self.ocm_api_key, lat, lon, radius_km, 200)
+            for station in without_duplicates(ocm, own):
                 tesla = ("tesla" in (station.get("operator") or "").lower()
                          or "supercharger" in (station.get("name") or "").lower())
                 if tesla and any(distance_m(station["latitude"], station["longitude"], sc["latitude"], sc["longitude"]) < 120
@@ -861,7 +902,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             kwh = self.public_kwh_estimate(open_public)[0] if per_kwh is not None else None
             if per_kwh is not None and (kwh or per_kwh == 0):
                 open_public.kwh = kwh
-                open_public.price = round((kwh or 0) * per_kwh, 2)
+                open_public.price = round((kwh or 0) * per_kwh + self._auto_fees(open_public, source), 2)
                 open_public.price_source = source
                 open_public.needs_review = False
             await self.store.async_upsert_charge(open_public)
@@ -869,7 +910,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "%s: public charging ended, %s",
                 self.vehicle_name,
                 f"priced with the {open_public.price_source} price ({open_public.kwh} kWh, {open_public.price})"
-                if open_public.price_source in ("place", "zone", "operator", "default") else "waiting for price (log_public_charge service)",
+                if open_public.price_source in AUTO_PRICE_SOURCES else "waiting for price (log_public_charge service)",
             )
             if (smart := getattr(self, "smart", None)) is not None:
                 # A message is an extra: a fault in it must not stop the ledger (the charge is already saved).

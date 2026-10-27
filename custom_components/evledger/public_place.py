@@ -5,7 +5,9 @@ endnu bedre" and "norlys, clever og dem der nu er … byg det hele ind"). In thi
 2. a Home Assistant zone the car is in (it can have its own price),
 3. a Tesla Supercharger within SUPERCHARGER_RADIUS_M, from supercharge.info's public list (fetched when first needed,
    then at most once a week, kept in .storage so it works offline),
-4. the nearest charging station in Open Charge Map (with the user's own free API key), with its operator.
+4. a station in the operators' own AFIR data (afir.py: their stations and ad hoc prices; Spirii's, OK's and others'
+   without a key, Monta's – EWII, Norlys … – and Eco-Movement's – Clever, Circle K … – with the user's own access),
+5. the nearest charging station in Open Charge Map (with the user's own free API key), with its operator.
 
 Open Charge Map has names for most stations in Denmark, but the operator for only some (2026-10: PowerGo, Tesla, Clever,
 Circle K, Ionity …; Norlys hardly). A place the user names once is therefore the reliable way."""
@@ -21,6 +23,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .afir import afir, site_station
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,6 +39,8 @@ OCM_CACHE = timedelta(hours=6)
 # Stations this close to the car are where it may be charging; one clearly nearer than the rest is taken without asking
 CANDIDATE_RADIUS_M = 150
 SURE_WITHIN_M = 40
+# An Open Charge Map station this close to an AFIR station is that station
+AFIR_SAME_SITE_M = 60
 # Open Charge Map's stand-ins for "no operator"
 OCM_NO_OPERATOR = ("unknown", "business owner", "private residence")
 # Sites that do not charge (yet or any more)
@@ -240,16 +245,42 @@ def open_charge_map(hass: HomeAssistant) -> OpenChargeMap:
     return hass.data[key]
 
 
-async def async_candidates(hass: HomeAssistant, lat: float, lon: float, ocm_key: str | None) -> list[dict]:
-    """The stations the car may be charging at (within CANDIDATE_RADIUS_M), nearest first: Superchargers and Open Charge
-    Map's (an Open Charge Map Tesla entry at a Supercharger is that Supercharger)."""
+async def async_afir_stations(hass: HomeAssistant, lat: float, lon: float, radius_m: float,
+                              credentials: dict | None) -> list[dict]:
+    """The stations of the operators' AFIR data within radius_m, nearest first (old feeds are fetched again in the
+    background; the stations known now are used meanwhile)."""
+    try:
+        data = afir(hass)
+        await data.async_load()
+        data.ensure_fresh(credentials or {})
+        return [site_station(site, meters) for meters, site in data.around(lat, lon, radius_m, credentials or {})]
+    except Exception:  # noqa: BLE001 - each source on its own
+        _LOGGER.debug("AFIR lookup failed", exc_info=True)
+        return []
+
+
+def without_duplicates(stations: list[dict], afir_stations: list[dict], within_m: float = AFIR_SAME_SITE_M) -> list[dict]:
+    """Open Charge Map's stations that are not an AFIR station already (Open Charge Map copies many from other lists,
+    mostly without the operator; the operator's own data wins)."""
+    return [station for station in stations
+            if not any(distance_m(station["latitude"], station["longitude"], other["latitude"], other["longitude"])
+                       <= within_m for other in afir_stations)]
+
+
+async def async_candidates(hass: HomeAssistant, lat: float, lon: float, ocm_key: str | None,
+                           credentials: dict | None = None) -> list[dict]:
+    """The stations the car may be charging at (within CANDIDATE_RADIUS_M), nearest first: Superchargers, the operators'
+    AFIR stations and Open Charge Map's (an Open Charge Map Tesla entry at a Supercharger is that Supercharger)."""
     try:
         found = await superchargers(hass).around(lat, lon, CANDIDATE_RADIUS_M)
     except Exception:  # noqa: BLE001 - each source on its own
         _LOGGER.debug("Supercharger lookup failed", exc_info=True)
         found = []
+    stations = await async_afir_stations(hass, lat, lon, CANDIDATE_RADIUS_M, credentials)
+    found += stations
     if ocm_key:
-        for station in await open_charge_map(hass).stations(ocm_key, lat, lon, CANDIDATE_RADIUS_M / 1000):
+        for station in without_duplicates(await open_charge_map(hass).stations(ocm_key, lat, lon,
+                                                                                CANDIDATE_RADIUS_M / 1000), stations):
             tesla = "tesla" in (station.get("operator") or "").lower() or "supercharger" in (station.get("name") or "").lower()
             if tesla and any(distance_m(station["latitude"], station["longitude"], sc["latitude"], sc["longitude"]) < 120
                              for sc in found if sc["kind"] == "supercharger"):
@@ -270,11 +301,12 @@ def is_certain(candidates: list[dict]) -> bool:
 
 
 async def async_place(hass: HomeAssistant, lat: float | None, lon: float | None, places: list[dict] | None = None,
-                      ocm_key: str | None = None) -> dict:
-    """Where the car is: {"zone", "name", "operator", "max_kw", "place", "candidates", "certain"} (place = a place the
-    user named, with its price; candidates = the stations it may be charging at when it is not certain which)."""
-    found: dict = {"zone": None, "name": None, "operator": None, "max_kw": None, "place": None, "candidates": [],
-                   "certain": True}
+                      ocm_key: str | None = None, credentials: dict | None = None) -> dict:
+    """Where the car is: {"zone", "name", "operator", "max_kw", "place", "station_id", "candidates", "certain"} (place =
+    a place the user named, with its price; station_id = the AFIR station, with the operator's price; candidates = the
+    stations it may be charging at when it is not certain which)."""
+    found: dict = {"zone": None, "name": None, "operator": None, "max_kw": None, "place": None, "station_id": None,
+                   "candidates": [], "certain": True}
     if lat is None or lon is None:
         return found
     if (place := nearest_place(places, lat, lon)) is not None:
@@ -285,9 +317,11 @@ async def async_place(hass: HomeAssistant, lat: float | None, lon: float | None,
         found.update(zone=zone.entity_id, name=str(zone.attributes.get("friendly_name") or zone.name))
         return found
     try:
-        candidates = await async_candidates(hass, lat, lon, ocm_key)
+        candidates = await async_candidates(hass, lat, lon, ocm_key, credentials)
         if not candidates:  # nothing right here: a Supercharger or a station a little further away still names it
             candidates = (await superchargers(hass).around(lat, lon, SUPERCHARGER_RADIUS_M))[:1]
+            if not candidates:
+                candidates = (await async_afir_stations(hass, lat, lon, SUPERCHARGER_RADIUS_M, credentials))[:1]
             if not candidates and ocm_key:
                 candidates = (await open_charge_map(hass).stations(ocm_key, lat, lon))[:1]
     except Exception:  # noqa: BLE001 - a place name is an extra, never a reason to lose the charge
@@ -296,5 +330,6 @@ async def async_place(hass: HomeAssistant, lat: float | None, lon: float | None,
     if candidates:
         best = candidates[0]
         found.update(name=best.get("name"), operator=best.get("operator"), max_kw=best.get("max_kw"),
+                     station_id=best.get("id") if best.get("kind") == "afir" else None,
                      candidates=candidates[:4], certain=is_certain(candidates))
     return found

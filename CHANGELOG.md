@@ -4,6 +4,26 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.14.0] - 2026-10-28
+
+### Added
+
+- **The operators' own stations and prices (EU AFIR data).** EV Ledger reads the Danish AFIR feeds: Spirii's (Spirii,
+  PowerGo, Aura, Verdo, EDF, Looad, Shell Recharge …), OK's, EV-EL's and TotalEnergies' without a key, Monta's (EWII,
+  Norlys, go'energi, NRGi, Uno-X …) with your own Monta Public API application, and Eco-Movement's (Clever, Circle K,
+  Q8, Ionity …) with a token from Eco-Movement. A public charge at such a station gets the operator's price per kWh
+  when it started (DC above 22 kW average, else AC), plus a start fee and a price per minute from the first minute.
+  Price order: named place, zone, the operator's own price, an operator price set here, the default price. Charges
+  keep `station_id`.
+- **Options:** Monta client id and secret, Eco-Movement token (redacted in diagnostics).
+- **`evledger/chargers`** returns these stations with their AC and DC price now, start fee, minute fees, the day's
+  price range and the feed, plus the feeds' status (`afir`). An Open Charge Map station within 60 m of one is left out.
+
+### Changed
+
+- The feeds are fetched only when a map or a public charge needs them, at most every 6 hours, in the background, one
+  site at a time; each tariff is kept once (Spirii's 654 were 105 different ones).
+
 ## [0.13.0] - 2026-10-27
 
 ### Added

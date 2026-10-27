@@ -101,6 +101,7 @@ class ChargeSession:
     longitude: float | None = None
     operator: str | None = None
     station_kw: float | None = None  # the station's highest power: a fast charger (FAST_KW and up) may cost more
+    station_id: str | None = None  # the operator's own (AFIR) station, whose ad hoc price the charge gets
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

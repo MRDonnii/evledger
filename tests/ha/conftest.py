@@ -19,3 +19,13 @@ def clock_at_start_of_hour(freezer):
     before the default ready-by time (06:45) the next morning whatever the time of day the tests run at (CI
     failed at night, when 06:45 cut the cheap hour)."""
     freezer.move_to(dt_util.now().replace(hour=12, minute=0, second=5, microsecond=0))
+
+
+@pytest.fixture(autouse=True)
+def no_afir_fetch(monkeypatch):
+    """The operators' AFIR feeds are never fetched by themselves in tests (a test fetches them on purpose)."""
+    from custom_components.evledger import afir
+    from custom_components.evledger.afir import Afir
+
+    monkeypatch.setattr(Afir, "ensure_fresh", lambda self, credentials: None)
+    monkeypatch.setattr(afir, "FEED_PAUSE", 0)  # the clock stands still in tests

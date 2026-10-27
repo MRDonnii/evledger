@@ -2,8 +2,9 @@
 det også vise de her lade steder på kortet … trykke på lade stedet og se prisen").
 
 `evledger/chargers` takes any EV Ledger entity (for the car's ledger), a point and a radius, and answers with the
-Superchargers, Open Charge Map's stations (with the ledger's own key, which never leaves Home Assistant), the places the
-user named and the zones with a price, each with the price per kWh the ledger would use there."""
+Superchargers, the operators' own AFIR stations with their prices (afir.py), Open Charge Map's stations (with the
+ledger's own key, which never leaves Home Assistant), the places the user named and the zones with a price, each with the
+price per kWh the ledger would use there, and how far the AFIR feeds are ("afir": feeds, sites, fetched, loading)."""
 from __future__ import annotations
 
 from typing import Any
@@ -13,6 +14,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
+from .afir import afir
 from .const import DOMAIN
 
 MAX_RADIUS_KM = 25
@@ -41,4 +43,5 @@ async def ws_chargers(hass: HomeAssistant, connection: websocket_api.ActiveConne
     connection.send_result(msg["id"], {
         "stations": stations, "open_charge_map": bool(coordinator.ocm_api_key), "currency": coordinator.currency,
         "default_price": coordinator.public_default_price(),
+        "afir": afir(hass).status(coordinator.afir_credentials),
     })

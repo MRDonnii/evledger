@@ -23,6 +23,9 @@ from .const import (
     CONF_MODEL_LABEL,
     CONF_MONTA_LAST_CHARGE_ENTITY,
     CONF_OCM_API_KEY,
+    CONF_ECO_MOVEMENT_TOKEN,
+    CONF_MONTA_CLIENT_ID,
+    CONF_MONTA_CLIENT_SECRET,
     CONF_MONTA_WALLET_ENTITY,
     CONF_ODOMETER_ENTITY,
     CONF_OUTSIDE_TEMP_ENTITY,
@@ -318,6 +321,19 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_OCM_API_KEY,
                 description={"suggested_value": defaults.get(CONF_OCM_API_KEY)},
             ): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
+            # The operators' own stations and prices (AFIR): Monta's (EWII, Norlys …) and Eco-Movement's (Clever …)
+            vol.Optional(
+                CONF_MONTA_CLIENT_ID,
+                description={"suggested_value": defaults.get(CONF_MONTA_CLIENT_ID)},
+            ): selector.TextSelector(),
+            vol.Optional(
+                CONF_MONTA_CLIENT_SECRET,
+                description={"suggested_value": defaults.get(CONF_MONTA_CLIENT_SECRET)},
+            ): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
+            vol.Optional(
+                CONF_ECO_MOVEMENT_TOKEN,
+                description={"suggested_value": defaults.get(CONF_ECO_MOVEMENT_TOKEN)},
+            ): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
             vol.Optional(
                 CONF_TESLA_MODEL_KEY,
                 default=defaults.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY),
@@ -527,10 +543,11 @@ class EvLedgerOptionsFlow(OptionsFlow):
                 self._data.pop(CONF_SPOT_PRICE_ENTITY, None)
 
             self._data[CONF_CHARGER_PROVIDERS] = providers
-            if not (user_input.get(CONF_OCM_API_KEY) or "").strip():
-                self._data.pop(CONF_OCM_API_KEY, None)
-            else:
-                self._data[CONF_OCM_API_KEY] = user_input[CONF_OCM_API_KEY].strip()
+            for key in (CONF_OCM_API_KEY, CONF_MONTA_CLIENT_ID, CONF_MONTA_CLIENT_SECRET, CONF_ECO_MOVEMENT_TOKEN):
+                if not (user_input.get(key) or "").strip():
+                    self._data.pop(key, None)
+                else:
+                    self._data[key] = user_input[key].strip()
             _process_efficiency(self._data, user_input)
             return await self.async_step_smart_charge()
 

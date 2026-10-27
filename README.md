@@ -283,6 +283,36 @@ with a button per station. Dashboards can show the stations around a point with 
 `evledger/chargers` (`entity_id`: any EV Ledger entity of the car, `latitude`, `longitude`, `radius_km` up to 25). The
 Tesla card in Smart Home Cards uses it for its map.
 
+### The operators' own stations and prices (AFIR)
+
+Since 14 April 2026 the EU's AFIR rules make every operator of public chargers publish its stations and its ad hoc
+price through its country's national access point (in Denmark Vejdirektoratet's Dataudveksler). EV Ledger reads the
+Danish feeds and gives a public charge at such a station the operator's own price per kWh when the charge started (DC
+when the car charged faster than 22 kW, else AC), plus a start fee or price per minute when the operator has one. The
+order is: a named place, the zone, **the operator's own price**, an operator price set here, the default price.
+
+| Feed | Operators | Access |
+|---|---|---|
+| Spirii | Spirii, PowerGo, Aura, Verdo, EDF, Looad, Shell Recharge, DEAS, nef Strøm, Region H … | none |
+| OK | OK (stations only, no prices: OK's operator price applies) | none |
+| EV-EL, TotalEnergies | themselves | none |
+| Monta | EWII, Norlys, go'energi, NRGi, Uno-X, Energi Fyn, Apcoa and smaller ones | your own Monta Public API application |
+| Eco-Movement | Clever, Circle K, Q8, Allego, Ionity, Lidl, Fastned, Mercedes-Benz … | a token from Eco-Movement |
+
+- **Monta:** sign in at [portal2.monta.app](https://portal2.monta.app/) with your Monta account, open your profile
+  (bottom left) → **Applications** → **+ Add Application**, and put the client id and client secret in EV Ledger's
+  options.
+- **Eco-Movement:** ask support@eco-movement.com for a token to their Danish NAP feed (nap-dk.eco-movement.com), and put
+  it in the options.
+
+The feeds are fetched when a map or a public charge needs them, at most every 6 hours, in the background (Spirii's
+whole feed is some 165 MB of text with a price per quarter of an hour; EV Ledger keeps about 2,200 sites compactly in
+`.storage/evledger_afir`). The WebSocket command `evledger/chargers` returns these stations with the operator's AC and
+DC price now, start fee, minute fees and the day's price range, and how far the feeds are (`afir`). An Open Charge Map
+station within 60 m of one of them is left out. Tesla's Superchargers are not in any Danish feed; their operator price
+here applies. The operators' ids in Spirii's feed and the feeds' quirks follow
+[ChargingPrices](https://github.com/zipel/ChargingPrices) (MIT).
+
 ## Fixing a mistake
 
 Trips and charges can be wrong — a phantom trip from GPS drift, a charge

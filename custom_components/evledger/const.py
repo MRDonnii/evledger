@@ -59,6 +59,10 @@ CONF_MONTA_WALLET_ENTITY = "monta_wallet_entity"
 CONF_SPOT_PRICE_ENTITY = "spot_price_entity"
 # Open Charge Map API key (optional): names and operators of public charging stations
 CONF_OCM_API_KEY = "ocm_api_key"
+# The operators' own stations and prices (AFIR): Monta's Public API application, Eco-Movement's token
+CONF_MONTA_CLIENT_ID = "monta_client_id"
+CONF_MONTA_CLIENT_SECRET = "monta_client_secret"
+CONF_ECO_MOVEMENT_TOKEN = "eco_movement_token"
 
 # --- Provider registry ids ---
 VEHICLE_PROVIDER_TESLA_CUSTOM = "tesla_custom"

@@ -35,6 +35,9 @@ from .const import (
     ATTR_TRIP_ID,
     CONF_BATTERY_CAPACITY_KWH,
     CONF_OCM_API_KEY,
+    CONF_ECO_MOVEMENT_TOKEN,
+    CONF_MONTA_CLIENT_ID,
+    CONF_MONTA_CLIENT_SECRET,
     CONF_CURRENCY,
     CONF_VEHICLE_NAME,
     DEFAULT_CURRENCY,
@@ -224,6 +227,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator.battery_capacity_kwh = entry.data.get(CONF_BATTERY_CAPACITY_KWH)
     coordinator.ocm_api_key = (entry.data.get(CONF_OCM_API_KEY) or "").strip() or None
+    coordinator.afir_credentials = {
+        "monta_client_id": (entry.data.get(CONF_MONTA_CLIENT_ID) or "").strip() or None,
+        "monta_client_secret": (entry.data.get(CONF_MONTA_CLIENT_SECRET) or "").strip() or None,
+        "eco_token": (entry.data.get(CONF_ECO_MOVEMENT_TOKEN) or "").strip() or None,
+    }
     # A failing first ledger update (e.g. the car's cloud is down right after a restart) must not hold
     # back the charger control; the ledger sensors catch up on the next update.
     await coordinator.async_refresh()

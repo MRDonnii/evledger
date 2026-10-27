@@ -25,7 +25,7 @@ from .const import (
 from .smart.const import CONF_NOTIFY_SERVICES, CONF_NOTIFY_URL
 
 # Where the car has been, and who gets the messages.
-TO_REDACT = {"ocm_api_key", "latitude", "longitude", "start_lat", "start_lon", "end_lat", "end_lon", "gps_accuracy",
+TO_REDACT = {"ocm_api_key", "monta_client_id", "monta_client_secret", "eco_movement_token", "latitude", "longitude", "start_lat", "start_lon", "end_lat", "end_lon", "gps_accuracy",
              CONF_NOTIFY_SERVICES, CONF_NOTIFY_URL}
 SOURCES = (CONF_BATTERY_ENTITY, CONF_ODOMETER_ENTITY, CONF_DEVICE_TRACKER_ENTITY, CONF_CHARGING_BINARY_ENTITY,
            CONF_LOCKED_ENTITY, CONF_OUTSIDE_TEMP_ENTITY, CONF_ZAPTEC_POWER_ENTITY, CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
