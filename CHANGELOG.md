@@ -4,6 +4,34 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.13.0] - 2026-10-27
+
+### Added
+
+- **"Which charger?"** When the car starts charging away from home with several operators within 150 m and none
+  clearly nearest, the phones are asked which one, with a button per station ("CLEVER · 150 kW", "Circle K · 22 kW").
+  The nearest within 40 m with the next twice as far counts as clearly nearest. The answer sets the place, operator and
+  power, and a charge already priced by itself is priced again. Without an answer the nearest stays.
+- **Fast charger prices.** `evledger.set_operator_price` takes `fast_price`. A station of 50 kW and up (its power comes
+  from Open Charge Map or the Supercharger list) uses it. Charges keep `station_kw`.
+- **Correct a charge's price per kWh.** `evledger.update_charge` takes `price_per_kwh` (the total becomes kWh × it),
+  `entity_id` (any EV Ledger entity of the car) instead of `entry_id`, and `remember` (`place` or `operator`) to use the
+  price for the next charges at that place, or as the operator's price (its fast price at 50 kW and up). A price set
+  with `update_charge` is marked as typed in and is never replaced by an automatic price; a correction that is refused
+  leaves the charge as it was. Correcting only the kWh of a charge priced by itself keeps its price per kWh.
+- **"Ret kr/kWh" on the phone.** The message after a public charge priced by itself (a place's, the zone's, the
+  operator's or the default price) says which price was used and has a "Ret kr/kWh" button: the answer "3,95" puts the
+  price per kWh right, "Clever 3,95" also names and remembers the place.
+- **`evledger/chargers`** (WebSocket): the stations around a point for a map. It returns Superchargers, Open Charge
+  Map's stations (with the ledger's own key, which stays in Home Assistant), the named places and the zones with a
+  price. Each has its price per kWh, its source, the operator's normal and fast price, power, connectors and the
+  number of points.
+
+### Fixed
+
+- **Questions about charging away reached no phone with "only when home".** The phones are away when the car charges
+  away. These messages now go to the phones within 2 km of the car, else to all chosen phones.
+
 ## [0.12.0] - 2026-10-27
 
 ### Added

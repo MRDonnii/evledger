@@ -277,6 +277,12 @@ application), a charge elsewhere gets the nearest station's name and operator, a
 (`evledger.forget_place` removes it). The order: a named place, the zone, the operator, the default price, else the
 phones are asked.
 
+An operator can have a fast-charger price too (`fast_price`, used at stations of 50 kW and up). When the car starts
+charging with several operators within 150 m and none clearly nearest, the phones near the car are asked which one,
+with a button per station. Dashboards can show the stations around a point with the WebSocket command
+`evledger/chargers` (`entity_id`: any EV Ledger entity of the car, `latitude`, `longitude`, `radius_km` up to 25). The
+Tesla card in Smart Home Cards uses it for its map.
+
 ## Fixing a mistake
 
 Trips and charges can be wrong — a phantom trip from GPS drift, a charge
@@ -292,6 +298,26 @@ data:
   price: 2.77
   note: "Counted twice by the charger"
 ```
+
+A wrong price per kWh is put right with `price_per_kwh` instead of the total: the total becomes the charge's kWh times
+it. Instead of `entry_id` any EV Ledger entity of the car can be given as `entity_id`. A price set here is kept: it is
+never replaced by an automatic price. With `remember: place` (and a `location_name`) the next charges within 100 m get
+the price by themselves; with `remember: operator` it becomes the operator's price (its fast price when the charge was
+at 50 kW and up). Correcting only the kWh of a charge that was priced by itself keeps its price per kWh.
+
+```yaml
+service: evledger.update_charge
+data:
+  entity_id: sensor.<vehicle>_last_charge
+  charge_id: <the charge's id>
+  price_per_kwh: 3.95
+  location_name: Clever Bilka
+  remember: place
+```
+
+The message after a public charge priced by itself has a **Ret kr/kWh** button: answer with the right price per kWh
+("3,95"), or with a name and the price ("Clever 3,95") to name and remember the place. The Tesla card in Smart Home
+Cards has a **Ret pris** dialog for the same.
 
 A charge EV Ledger did not record itself (for example from before it was set up) can be added, so the monthly and
 yearly costs are complete; it counts in the month it ended:

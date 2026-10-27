@@ -203,6 +203,8 @@ class Routines:
         # The ready-by time the morning check was made for; the public charges asked about (id: estimated kWh).
         self.morning_for: datetime | None = None
         self.public_asked: dict[str, float | None] = {}
+        # Public charges asked "which charger?": their candidate stations, for the answer
+        self.operator_asked: dict[str, list[dict]] = {}
 
     # -- the target was not reached --------------------------------------------------------------
 
@@ -258,16 +260,20 @@ class Routines:
         source = getattr(charge, "price_source", None)
         name = getattr(charge, "location_name", None)
         place = (f" hos {name}" if getattr(charge, "zone", None) else f" ved {name}") if name else " ude"
-        if source in ("default", "zone") and charge.price is not None:
-            # Already priced (the zone's price or the public default price): say so; a reply replaces it
+        priced = source in ("default", "zone", "operator", "place") and charge.price is not None
+        if priced:
+            # Already priced (a place's, the zone's, the operator's or the default price): say so; a reply replaces it
             amount = f"{self._kr(charge.kwh, 1)} kWh" if charge.kwh else "Ladningen"
             if charge.price == 0:
                 saved = f"{amount} er gemt som gratis. Var den ikke gratis, så skriv prisen"
             else:
                 per = charge.price / charge.kwh if charge.kwh else 0
-                which = "zonens pris" if source == "zone" else "standardprisen"
+                operator = getattr(charge, "operator", None)
+                which = {"zone": "zonens pris", "place": "stedets pris",
+                         "operator": f"{operator}s pris" if operator else "operatørens pris"}.get(source,
+                                                                                                  "standardprisen")
                 saved = (f"Gemt med {which} {self._kr(per)} kr/kWh: {amount} = {self._kr(charge.price)} kr. "
-                         "Var prisen en anden, så skriv den")
+                         "Var prisen en anden, så ret kr/kWh, eller skriv prisen")
             text = f"Bilen har ladet{place} {when}{battery}. {saved} i kr, eller kWh og pris (fx 23,4 82,50)."
         else:
             text = (f"Bilen har ladet{place} {when}{battery}{estimate}. Skriv prisen i kr, eller kWh og pris "
@@ -276,9 +282,63 @@ class Routines:
             text += " Skriv et navn og prisen pr. kWh (fx Clever 3,95), så husker jeg stedet til næste gang."
         actions = [{"action": f"{p.notify.prefix}PUBLIC_{charge.id}", "title": "Skriv pris",
                     "behavior": "textInput", "textInputButtonTitle": "Gem", "textInputPlaceholder": "82,50"}]
+        if priced and charge.kwh:
+            # A wrong price per kWh is put right with just the right one (Claude AI, 2026-10-27)
+            actions.insert(0, {"action": f"{p.notify.prefix}PUBKWH_{charge.id}", "title": "Ret kr/kWh",
+                               "behavior": "textInput", "textInputButtonTitle": "Gem",
+                               "textInputPlaceholder": self._kr(charge.price / charge.kwh)})
+        lat, lon = getattr(charge, "latitude", None), getattr(charge, "longitude", None)
+        near = (lat, lon) if lat is not None and lon is not None else None
         p.entry.async_create_background_task(
-            self.hass, p.notify.async_send_note("public_price", "offentlig ladning", text, actions),
+            self.hass, p.notify.async_send_note("public_price", "offentlig ladning", text, actions, near=near),
             "ev_smart_charge_notify_public")
+
+    @staticmethod
+    def _station_label(station: dict) -> str:
+        operator = station.get("operator") or station.get("name") or "Ukendt"
+        power = station.get("max_kw")
+        return f"{operator} · {round(power)} kW" if isinstance(power, (int, float)) else operator
+
+    def ask_operator(self, charge: Any, candidates: list[dict]) -> None:
+        """Several operators where the car started charging and none clearly nearest (Claude AI, 2026-10-27; user:
+        "hvis den er i tvivl skal den spørge efter de operatører der er på pladsen så jeg kan vælge den korrekte"): a
+        button per station. The answer sets place, operator and power, so the price is right; without one the nearest
+        stays."""
+        p = self.planner
+        if not (p.flags["ask_public_price"] and p.notify.targets) or not candidates or charge.id in self.operator_asked:
+            return
+        self.operator_asked[charge.id] = candidates
+        listed = ", ".join(f"{self._station_label(station)} ({station.get('distance_m')} m)" for station in candidates)
+        text = (f"Bilen er begyndt at lade, og der er flere ladere her: {listed}. Hvilken holder du ved? "
+                "Uden svar bruger jeg den nærmeste.")
+        actions = [{"action": f"{p.notify.prefix}PUBOP_{charge.id}_{index}", "title": self._station_label(station)[:40]}
+                   for index, station in enumerate(candidates[:4])]
+        near = (charge.latitude, charge.longitude) if charge.latitude is not None else None
+        p.entry.async_create_background_task(
+            self.hass, p.notify.async_send_note("public_operator", "hvilken lader?", text, actions,
+                                                icon="mdi:ev-station", near=near), "ev_smart_charge_notify_operator")
+
+    def answer_operator(self, charge_id: str, index: int) -> None:
+        """The station picked on the phone."""
+        p = self.planner
+        candidates = self.operator_asked.pop(charge_id, None) or []
+        if p.ledger is None or not 0 <= index < len(candidates):
+            return
+        station = candidates[index]
+
+        async def save() -> None:
+            charge = await p.ledger.async_choose_station(charge_id, station)
+            if charge is None:
+                return
+            if charge.price is not None and charge.kwh:
+                text = (f"Gemt: {charge.location_name}, {self._kr(charge.kwh, 1)} kWh = {self._kr(charge.price)} kr "
+                        f"({self._kr(charge.price / charge.kwh)} kr/kWh).")
+            else:
+                text = f"Noteret: {charge.location_name}. Prisen sættes, når opladningen slutter."
+            near = (charge.latitude, charge.longitude) if charge.latitude is not None else None
+            await p.notify.async_send_note("public_operator", "lader valgt", text, icon="mdi:ev-station", near=near)
+
+        p.entry.async_create_background_task(self.hass, save(), "ev_smart_charge_operator_saved")
 
     def answer_public(self, charge_id: str, reply: str) -> None:
         """The phone's answer: a price, or kWh and price; with a name ("Clever 3,95") the place is named, and a single
@@ -315,6 +375,38 @@ class Routines:
             per = f" ({self._kr(price / kwh)} kr/kWh)" if kwh else ""
             await p.notify.async_send_note("public_price", "offentlig ladning gemt",
                                            f"Gemt: {self._kr(kwh, 1)} kWh for {self._kr(price)} kr{per}.")
+
+        self.public_asked.pop(charge_id, None)
+        p.entry.async_create_background_task(self.hass, save(), "ev_smart_charge_public_saved")
+
+    def answer_per_kwh(self, charge_id: str, reply: str) -> None:
+        """The phone's right price per kWh for a charge priced by itself ("3,95", or with a name, "Clever 3,95", the
+        place is named and remembered)."""
+        p = self.planner
+        first = re.search(r"-?\d+(?:[.,]\d+)?", reply or "")
+        per_kwh = finite(first.group(0).replace(",", ".")) if first else None
+        name = " ".join((reply or "")[:first.start()].split()).strip(" ,.-:") if first else ""
+        if per_kwh is None or not 0 <= per_kwh <= 100 or p.ledger is None:
+            p.entry.async_create_background_task(
+                self.hass, p.notify.async_send_note("public_price", "offentlig ladning",
+                                                    "Prisen kunne ikke læses. Skriv prisen pr. kWh, fx 3,95."),
+                "ev_smart_charge_notify_public")
+            return
+
+        async def save() -> None:
+            changes: dict[str, Any] = {"price_per_kwh": per_kwh}
+            stored = p.ledger.store.get_charge(charge_id)
+            if name and stored is not None and stored.latitude is not None and stored.longitude is not None:
+                changes.update(location_name=name, remember="place")
+            try:
+                charge = await p.ledger.async_update_charge(charge_id, changes)
+            except ValueError:
+                await p.notify.async_send_note("public_price", "offentlig ladning",
+                                               "Ladningen kunne ikke rettes (den mangler kWh). Skriv kWh og pris.")
+                return
+            await p.notify.async_send_note(
+                "public_price", "offentlig ladning rettet",
+                f"Rettet: {self._kr(charge.kwh, 1)} kWh × {self._kr(per_kwh)} kr/kWh = {self._kr(charge.price)} kr.")
 
         self.public_asked.pop(charge_id, None)
         p.entry.async_create_background_task(self.hass, save(), "ev_smart_charge_public_saved")

@@ -12,6 +12,7 @@ from homeassistant.const import STATE_HOME
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
+from ..public_place import distance_m
 from .const import (
     CONF_NOTIFY_ICON,
     CONF_NOTIFY_ONLY_HOME,
@@ -22,6 +23,9 @@ from .const import (
     NOTIFY_COLOR,
 )
 from .plan import MODE_FIXED, MODE_MANUAL, MODE_NOW, MODE_OFF, MODE_PRICE_CAP, MODE_SMART, fixed_window
+
+# A message about charging away goes to the phones this close to the car
+NEAR_CAR_M = 2000
 
 if TYPE_CHECKING:
     from .planner import ChargePlanner
@@ -77,8 +81,20 @@ class PhoneNotifier:
     def targets(self) -> list[str]:
         return [service.removeprefix("notify.") for service in self.options.get(CONF_NOTIFY_SERVICES) or []]
 
-    def recipients(self) -> list[str]:
-        """The chosen phones; with "only when home", the ones whose app reports being home."""
+    def recipients(self, near: tuple[float, float] | None = None) -> list[str]:
+        """The chosen phones; with "only when home", the ones whose app reports being home. A message about charging
+        away (near = the car's position) goes to the phones within NEAR_CAR_M of the car instead, else to all of them:
+        "only when home" is for home charging (Claude AI, 2026-10-27: public price questions never arrived)."""
+        if near is not None:
+            close = []
+            for service in self.targets:
+                tracker = self.hass.states.get(tracker_for(service))
+                lat = tracker.attributes.get("latitude") if tracker is not None else None
+                lon = tracker.attributes.get("longitude") if tracker is not None else None
+                if isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and \
+                        distance_m(near[0], near[1], lat, lon) <= NEAR_CAR_M:
+                    close.append(service)
+            return close or self.targets
         if not self.options.get(CONF_NOTIFY_ONLY_HOME):
             return self.targets
         result = []
@@ -105,6 +121,12 @@ class PhoneNotifier:
                 planner.async_set_limit_wait(answer == "WAIT")
             elif answer in ("PRE_ON", "PRE_SKIP"):
                 planner.routines.answer_precondition(answer == "PRE_ON")
+            elif answer.startswith("PUBOP_"):
+                charge_id, _, index = answer.removeprefix("PUBOP_").rpartition("_")
+                if index.isdigit():
+                    planner.routines.answer_operator(charge_id, int(index))
+            elif answer.startswith("PUBKWH_"):
+                planner.routines.answer_per_kwh(answer.removeprefix("PUBKWH_"), str(event.data.get("reply_text") or ""))
             elif answer.startswith("PUBLIC_"):
                 planner.routines.answer_public(answer.removeprefix("PUBLIC_"), str(event.data.get("reply_text") or ""))
             elif mode := ANSWERS.get(answer):
@@ -361,14 +383,14 @@ class PhoneNotifier:
             await self._call(service, data)
 
     async def async_send_note(self, kind: str, title: str, text: str, actions: list[dict] | None = None,
-                              icon: str | None = None) -> None:
+                              icon: str | None = None, near: tuple[float, float] | None = None) -> None:
         """A message under its own tag: charging started (with Pause), the charge is done, a reminder to plug in,
         the charger is offline."""
         data = {"title": f"{self.entry.title}: {title}", "message": text,
                 "data": {**self._tap(), **({"notification_icon": icon} if icon else {}), "tag": f"{self.tag}_{kind}",
                          **({"actions": actions} if actions else {}),
                          **(self.quiet() if kind in QUIET_KINDS else {})}}
-        for service in self.recipients():
+        for service in self.recipients(near):
             await self._call(service, data)
 
     async def async_send_plan(self, planner: ChargePlanner) -> None:

@@ -29,6 +29,8 @@ from .const import (
     ATTR_LOCATION_NAME,
     ATTR_NOTE,
     ATTR_PRICE,
+    ATTR_PRICE_PER_KWH,
+    ATTR_REMEMBER,
     ATTR_STARTED_AT,
     ATTR_TRIP_ID,
     CONF_BATTERY_CAPACITY_KWH,
@@ -60,6 +62,7 @@ from .smart import week as week_plan
 from .smart.ent_datetime import set_once
 from .smart.planner import ChargePlanner
 from .smart.setup import ledger_vehicle, planner_options, smart_enabled
+from . import websocket_api
 from .store import EvLedgerStore
 from .tyres import KINDS as TYRE_KINDS
 
@@ -94,6 +97,7 @@ SET_OPERATOR_PRICE_SCHEMA = vol.Schema(
         vol.Required("entry_id"): cv.string,
         vol.Required(ATTR_OPERATOR): cv.string,
         vol.Optional(ATTR_PRICE): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100))),
+        vol.Optional("fast_price"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100))),
     }
 )
 
@@ -175,15 +179,22 @@ DELETE_CHARGE_SCHEMA = vol.Schema(
     }
 )
 
-UPDATE_CHARGE_SCHEMA = vol.Schema(
-    {
-        vol.Required("entry_id"): cv.string,
-        vol.Required(ATTR_CHARGE_ID): cv.string,
-        vol.Optional(ATTR_KWH): _KWH,
-        vol.Optional(ATTR_PRICE): _MONEY,
-        vol.Optional(ATTR_LOCATION_NAME): cv.string,
-        vol.Optional(ATTR_NOTE): cv.string,
-    }
+# The car by its entry or by any of its EV Ledger entities (a card knows the entity); the price as a total or per kWh
+UPDATE_CHARGE_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Optional("entry_id"): cv.string,
+            vol.Optional(ATTR_ENTITY_ID): cv.entity_id,
+            vol.Required(ATTR_CHARGE_ID): cv.string,
+            vol.Optional(ATTR_KWH): _KWH,
+            vol.Exclusive(ATTR_PRICE, "price"): _MONEY,
+            vol.Exclusive(ATTR_PRICE_PER_KWH, "price"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+            vol.Optional(ATTR_LOCATION_NAME): cv.string,
+            vol.Optional(ATTR_NOTE): cv.string,
+            vol.Optional(ATTR_REMEMBER): vol.In(["place", "operator"]),
+        }
+    ),
+    cv.has_at_least_one_key("entry_id", ATTR_ENTITY_ID),
 )
 
 DELETE_TRIP_SCHEMA = vol.Schema(
@@ -240,6 +251,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(cancel)
 
     _async_register_services(hass)
+    if not hass.data.get(f"{DOMAIN}_ws"):
+        hass.data[f"{DOMAIN}_ws"] = True
+        websocket_api.async_register(hass)  # the map's charging stations
 
     return True
 
@@ -311,7 +325,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_set_operator_price(call: ServiceCall) -> None:
         """A charging operator's price per kWh (e.g. Clever's); without a price the operator's price goes."""
-        await _ledger_of_entry(call).async_set_operator_price(call.data[ATTR_OPERATOR], call.data.get(ATTR_PRICE))
+        await _ledger_of_entry(call).async_set_operator_price(call.data[ATTR_OPERATOR], call.data.get(ATTR_PRICE),
+                                                              call.data.get("fast_price"))
 
     async def _handle_forget_place(call: ServiceCall) -> None:
         """Forget a named public charging place."""
@@ -447,27 +462,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await coordinator.async_request_refresh()
 
     async def _handle_update_charge(call: ServiceCall) -> None:
-        entry_id = call.data["entry_id"]
-        coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
-        if coordinator is None:
-            raise ServiceValidationError(f"Unknown EV Ledger entry_id: {entry_id}")
-
-        charge = coordinator.store.get_charge(call.data[ATTR_CHARGE_ID])
-        if charge is None:
-            raise ServiceValidationError(f"No charge with id {call.data[ATTR_CHARGE_ID]!r}")
         # Home charges too: a measured charge can be wrong (e.g. a charger counter that ran on through pauses).
-
-        if ATTR_KWH in call.data:
-            charge.kwh = call.data[ATTR_KWH]
-        if ATTR_PRICE in call.data:
-            charge.price = call.data[ATTR_PRICE]
-        if ATTR_LOCATION_NAME in call.data:
-            charge.location_name = call.data[ATTR_LOCATION_NAME] or None
-        if ATTR_NOTE in call.data:
-            charge.note = call.data[ATTR_NOTE] or None
-        charge.needs_review = charge.kwh is None or charge.price is None
-        await coordinator.store.async_upsert_charge(charge)
-        await coordinator.async_request_refresh()
+        coordinator = (_ledger_of_entry(call) if call.data.get("entry_id") else _ledger(call))
+        changes = {key: call.data[key] for key in (ATTR_KWH, ATTR_PRICE, ATTR_PRICE_PER_KWH, ATTR_LOCATION_NAME,
+                                                   ATTR_NOTE, ATTR_REMEMBER) if key in call.data}
+        try:
+            await coordinator.async_update_charge(call.data[ATTR_CHARGE_ID], changes)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
 
     async def _handle_delete_trip(call: ServiceCall) -> None:
         entry_id = call.data["entry_id"]

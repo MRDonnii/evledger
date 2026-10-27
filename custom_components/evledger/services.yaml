@@ -78,14 +78,23 @@ delete_charge:
         text:
 
 update_charge:
-  name: Update public charge
-  description: Update price, energy, location, or note on one public charge session.
+  name: Update charge
+  description: >-
+    Correct one charge session (home or public): energy, the total price or the price per kWh, location, or note. A
+    price set here is kept (never replaced by an automatic price). With remember, the price per kWh is also used for
+    the next charges at this place or with this operator.
   fields:
     entry_id:
       name: Vehicle
-      required: true
+      description: The vehicle's EV Ledger entry (or give one of its EV Ledger entities instead).
       selector:
         config_entry:
+          integration: evledger
+    entity_id:
+      name: Vehicle entity
+      description: Any EV Ledger entity of the vehicle (instead of the entry).
+      selector:
+        entity:
           integration: evledger
     charge_id:
       name: Charge ID
@@ -102,11 +111,21 @@ update_charge:
           unit_of_measurement: kWh
     price:
       name: Total price
+      description: The total price (or give the price per kWh instead).
       selector:
         number:
           min: 0
           max: 10000
           step: 0.01
+    price_per_kwh:
+      name: Price per kWh
+      description: The price per kWh; the total becomes the charge's kWh times this.
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01
+          mode: box
     location_name:
       name: Location
       selector:
@@ -115,6 +134,16 @@ update_charge:
       name: Note
       selector:
         text:
+    remember:
+      name: Remember the price
+      description: Also use this price per kWh for the next charges at this place, or with this operator.
+      selector:
+        select:
+          options:
+            - label: At this place
+              value: place
+            - label: With this operator
+              value: operator
 
 delete_trip:
   name: Delete trip
@@ -589,9 +618,19 @@ set_operator_price:
         text:
     price:
       name: Price per kWh
-      description: The operator's price per kWh. Leave it out to remove the operator's price.
+      description: The operator's price per kWh (normal/AC charging). Leave both prices out to remove the operator's price.
       required: false
       example: 3.95
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01
+    fast_price:
+      name: Fast charger price per kWh
+      description: The operator's price per kWh at a fast charger (50 kW and up), if it differs.
+      required: false
+      example: 5.48
       selector:
         number:
           min: 0

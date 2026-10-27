@@ -100,6 +100,7 @@ class ChargeSession:
     latitude: float | None = None
     longitude: float | None = None
     operator: str | None = None
+    station_kw: float | None = None  # the station's highest power: a fast charger (FAST_KW and up) may cost more
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

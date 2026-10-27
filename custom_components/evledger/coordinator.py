@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -20,7 +21,15 @@ from .const import (
     TRIP_MIN_DISTANCE_KM,
 )
 from .models import ChargeSession, LiveChargeState, Trip, VehicleSnapshot
-from .public_place import PLACE_RADIUS_M, async_place, distance_m, nearest_place
+from .public_place import (
+    PLACE_RADIUS_M,
+    async_place,
+    distance_m,
+    nearest_place,
+    open_charge_map,
+    superchargers,
+    zone_at,
+)
 from .providers.charger.base import CAP_COST_LOOKUP, CAP_LIVE_POWER, ChargerProvider
 from .smart.plan import SLOT_MINUTES
 from .providers.vehicle.base import VehicleProvider
@@ -41,6 +50,10 @@ PUBLIC_BEFORE_HOME_MINUTES = 10
 PUBLIC_DEFAULT_REPLACE_HOURS = 12
 # A fast charger loses a few % on the way into the battery: the battery's gain is that much less than was billed
 PUBLIC_CHARGE_EFFICIENCY = 0.95
+# A station from this power counts as a fast charger: an operator's fast price applies
+FAST_KW = 50
+# Prices a public charge gets by itself (replaced by any price given later)
+AUTO_PRICE_SOURCES = ("place", "zone", "operator", "default")
 
 
 class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -190,7 +203,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if location_name and pending.latitude is not None and pending.longitude is not None:
                 # Named here: the next charge at this place gets its name and price per kWh by itself
                 await self.async_remember_place(location_name.strip(), pending.latitude, pending.longitude,
-                                                price / kwh if kwh else None, pending.operator)
+                                                price / kwh if kwh else None, pending.operator, pending.station_kw)
         else:
             await self.store.async_upsert_charge(ChargeSession(
                 id=self.store.new_id(), location_kind=LOCATION_PUBLIC, provider="manual",
@@ -213,6 +226,11 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("%s: place of the public charge not found", self.vehicle_name, exc_info=True)
             return
         charge.zone, charge.location_name, charge.operator = found["zone"], found["name"], found["operator"]
+        charge.station_kw = found.get("max_kw")
+        if not found.get("certain", True) and (smart := getattr(self, "smart", None)) is not None:
+            # Several operators right here and none clearly nearest: ask which one (the nearest stays until answered)
+            candidates = found["candidates"]
+            smart._optional("public operator question", lambda: smart.routines.ask_operator(charge, candidates))
 
     def _auto_price(self, charge: ChargeSession) -> tuple[float | None, str | None]:
         """The price per kWh a public charge gets by itself, and from where: a place named before, the zone, the
@@ -223,44 +241,128 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return float(place["price"]), "place"
         if (zone_price := self.zone_price(charge.zone)) is not None:
             return zone_price, "zone"
-        if (operator_price := self.operator_price(charge.operator)) is not None:
+        if (operator_price := self.operator_price(charge.operator, charge.station_kw)) is not None:
             return operator_price, "operator"
         default = self.public_default_price()
         return (default, "default") if default else (None, None)
 
-    def operator_price(self, operator: str | None) -> float | None:
-        """The price per kWh set for a charging operator (matched without case, either name inside the other)."""
+    def operator_price(self, operator: str | None, station_kw: float | None = None) -> float | None:
+        """The price per kWh set for a charging operator (matched without case, either name inside the other); its fast
+        price at a station of FAST_KW and up, when one is set."""
         if not operator:
             return None
         wanted = operator.lower()
-        for name, price in (self.store.settings.get("operator_prices") or {}).items():
+        for name, setting in (self.store.settings.get("operator_prices") or {}).items():
             key = str(name).lower()
-            if key and (key in wanted or wanted in key):
-                try:
-                    value = float(price)
-                except (TypeError, ValueError):
-                    continue
-                if math.isfinite(value) and value >= 0:
-                    return value
+            if not key or not (key in wanted or wanted in key):
+                continue
+            price, fast = (setting.get("price"), setting.get("fast")) if isinstance(setting, dict) else (setting, None)
+            if station_kw is not None and station_kw >= FAST_KW and fast is not None:
+                price = fast
+            try:
+                value = float(price)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value >= 0:
+                return value
         return None
 
-    async def async_set_operator_price(self, operator: str, price: float | None) -> None:
-        """Set (or with None remove) a charging operator's price per kWh."""
+    async def async_set_operator_price(self, operator: str, price: float | None, fast_price: float | None = None) -> None:
+        """Set (or with no price remove) a charging operator's price per kWh, and its fast-charger price."""
         prices = {name: value for name, value in (self.store.settings.get("operator_prices") or {}).items()
                   if name.lower() != operator.strip().lower()}
-        if price is not None:
-            prices[operator.strip()] = round(float(price), 4)
+        if price is not None or fast_price is not None:
+            prices[operator.strip()] = {"price": None if price is None else round(float(price), 4),
+                                        "fast": None if fast_price is None else round(float(fast_price), 4)}
+            if prices[operator.strip()]["price"] is None:
+                prices[operator.strip()]["price"] = prices[operator.strip()]["fast"]
         await self.store.async_set_setting("operator_prices", prices)
         self.async_update_listeners()
 
+    async def async_choose_station(self, charge_id: str, station: dict) -> ChargeSession | None:
+        """The phone picked where the car charges: its name, operator and power; a charge already priced by itself
+        gets the price again (a price typed in is kept)."""
+        charge = self.store.get_charge(charge_id)
+        if charge is None or charge.location_kind != LOCATION_PUBLIC:
+            return None
+        charge.location_name = station.get("name") or charge.location_name
+        charge.operator = station.get("operator")
+        charge.station_kw = station.get("max_kw")
+        if charge.ended_at and charge.price_source in (None, "operator", "default"):
+            per_kwh, source = self._auto_price(charge)
+            kwh = charge.kwh or self.public_kwh_estimate(charge)[0]
+            if per_kwh is not None and kwh:
+                charge.kwh, charge.price, charge.price_source = kwh, round(kwh * per_kwh, 2), source
+                charge.needs_review = False
+        await self.store.async_upsert_charge(charge)
+        await self.async_request_refresh()
+        return charge
+
+    async def async_update_charge(self, charge_id: str, changes: dict) -> ChargeSession:
+        """Correct a charge (Claude AI, 2026-10-27; user: "så man selv kan rette kWh-prisen på en ladning hvis den
+        ikke er korrekt"): kWh, the total price or the price per kWh (times the charge's kWh), place and note; a price
+        set here is typed in and never replaced by itself. With remember the price per kWh is kept for the place
+        (named, at the charge's position) or for the operator (its fast price at a fast charger)."""
+        stored = self.store.get_charge(charge_id)
+        if stored is None:
+            raise ValueError(f"No charge with id {charge_id!r}")
+        charge = replace(stored)  # changed as a copy: a correction that is refused leaves the charge as it was
+        old_per_kwh = charge.price / charge.kwh if charge.price is not None and charge.kwh else None
+        if "kwh" in changes:
+            charge.kwh = changes["kwh"]
+        if changes.get("price_per_kwh") is not None:
+            kwh = charge.kwh or (self.public_kwh_estimate(charge)[0] if charge.location_kind == LOCATION_PUBLIC
+                                 else None)
+            if not kwh:
+                raise ValueError("The charge has no kWh: give the kWh with the price per kWh")
+            charge.kwh, charge.price = kwh, round(kwh * float(changes["price_per_kwh"]), 2)
+            charge.price_source = "manual"
+        elif "price" in changes:
+            charge.price = changes["price"]
+            charge.price_source = "manual"
+        elif "kwh" in changes and charge.price_source in AUTO_PRICE_SOURCES and old_per_kwh is not None and charge.kwh:
+            # Priced by itself at a price per kWh: the price follows the corrected kWh
+            charge.price = round(charge.kwh * old_per_kwh, 2)
+        if "location_name" in changes:
+            charge.location_name = changes["location_name"] or None
+        if "note" in changes:
+            charge.note = changes["note"] or None
+        charge.needs_review = charge.kwh is None or charge.price is None
+        remember = changes.get("remember")
+        per_kwh = (float(changes["price_per_kwh"]) if changes.get("price_per_kwh") is not None  # as typed, not rounded
+                   else charge.price / charge.kwh if charge.price is not None and charge.kwh else None)
+        if remember == "place" and (charge.latitude is None or charge.longitude is None or not charge.location_name):
+            raise ValueError("Only a public charge with a position and a place name can be remembered for the place")
+        if remember == "operator" and not charge.operator:
+            raise ValueError("The charge has no operator")
+        if remember and per_kwh is None:
+            raise ValueError("The charge needs kWh and a price to remember its price per kWh")
+        await self.store.async_upsert_charge(charge)
+        if remember == "place":
+            await self.async_remember_place(charge.location_name.strip(), charge.latitude, charge.longitude, per_kwh,
+                                            charge.operator, charge.station_kw)
+        elif remember == "operator":
+            setting = next((value for name, value in (self.store.settings.get("operator_prices") or {}).items()
+                            if name.lower() == charge.operator.strip().lower()), None)
+            normal, fast = ((setting.get("price"), setting.get("fast")) if isinstance(setting, dict)
+                            else (setting, None))
+            if charge.station_kw is not None and charge.station_kw >= FAST_KW:
+                fast = per_kwh
+            else:
+                normal = per_kwh
+            await self.async_set_operator_price(charge.operator, normal, fast)
+        await self.async_request_refresh()
+        return charge
+
     async def async_remember_place(self, name: str, latitude: float, longitude: float, price: float | None,
-                                   operator: str | None = None) -> None:
+                                   operator: str | None = None, max_kw: float | None = None) -> None:
         """Keep a named place (and its price per kWh): a public charge within PLACE_RADIUS_M gets them by itself."""
         places = [place for place in (self.store.settings.get("places") or [])
                   if not (distance_m(latitude, longitude, float(place["latitude"]), float(place["longitude"]))
                           <= PLACE_RADIUS_M or str(place.get("name", "")).lower() == name.lower())]
         places.append({"name": name, "latitude": round(latitude, 6), "longitude": round(longitude, 6),
-                       "price": None if price is None else round(float(price), 4), "operator": operator})
+                       "price": None if price is None else round(float(price), 4), "operator": operator,
+                       "max_kw": max_kw})
         await self.store.async_set_setting("places", places)
         self.async_update_listeners()
 
@@ -290,6 +392,69 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.store.async_set_setting("zone_prices", prices)
         self.async_update_listeners()
 
+    def station_price(self, station: dict) -> dict:
+        """The price per kWh the ledger would use at a station (a named place, the zone, the operator, the default),
+        with the operator's normal and fast price."""
+        lat, lon = station.get("latitude"), station.get("longitude")
+        place = nearest_place(self.store.settings.get("places"), lat, lon) if lat is not None else None
+        zone = zone_at(self.hass, lat, lon) if lat is not None else None
+        zone_id = zone.entity_id if zone is not None and zone.entity_id != "zone.home" else None
+        operator = station.get("operator")
+        normal = self.operator_price(operator, None)
+        fast = self.operator_price(operator, FAST_KW)
+        if place is not None and place.get("price") is not None:
+            price, source = float(place["price"]), "place"
+        elif (zone_price := self.zone_price(zone_id)) is not None:
+            price, source = zone_price, "zone"
+        elif (chosen := self.operator_price(operator, station.get("max_kw"))) is not None:
+            price, source = chosen, "operator"
+        else:
+            default = self.public_default_price()
+            price, source = (default, "default") if default else (None, None)
+        return {"price": price, "price_source": source, "price_normal": normal, "price_fast": fast if fast != normal else None,
+                "place": place.get("name") if place else None}
+
+    async def async_stations_around(self, lat: float, lon: float, radius_km: float) -> list[dict]:
+        """Charging stations around a point for a map: Superchargers, Open Charge Map's (with the key), the named places
+        and the zones with a price, nearest first, each with its price."""
+        radius_m = radius_km * 1000
+        found = await superchargers(self.hass).around(lat, lon, radius_m)
+        if self.ocm_api_key:
+            for station in await open_charge_map(self.hass).stations(self.ocm_api_key, lat, lon, radius_km, 200):
+                tesla = ("tesla" in (station.get("operator") or "").lower()
+                         or "supercharger" in (station.get("name") or "").lower())
+                if tesla and any(distance_m(station["latitude"], station["longitude"], sc["latitude"], sc["longitude"]) < 120
+                                 for sc in found if sc["kind"] == "supercharger"):
+                    continue
+                found.append(station)
+        for place in self.store.settings.get("places") or []:
+            try:
+                meters = distance_m(lat, lon, float(place["latitude"]), float(place["longitude"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if meters <= radius_m and not any(distance_m(item["latitude"], item["longitude"], place["latitude"],
+                                                          place["longitude"]) <= PLACE_RADIUS_M for item in found):
+                found.append({"name": place.get("name"), "operator": place.get("operator"), "latitude": place["latitude"],
+                              "longitude": place["longitude"], "distance_m": round(meters), "max_kw": place.get("max_kw"),
+                              "kind": "place"})
+        for zone_id in self.store.settings.get("zone_prices") or {}:
+            zone = self.hass.states.get(zone_id)
+            z_lat = zone.attributes.get("latitude") if zone else None
+            z_lon = zone.attributes.get("longitude") if zone else None
+            if isinstance(z_lat, (int, float)) and isinstance(z_lon, (int, float)) and \
+                    (meters := distance_m(lat, lon, z_lat, z_lon)) <= radius_m:
+                found.append({"name": str(zone.attributes.get("friendly_name") or zone_id), "operator": None,
+                              "latitude": z_lat, "longitude": z_lon, "distance_m": round(meters), "max_kw": None,
+                              "kind": "zone"})
+        result = []
+        for index, station in enumerate(sorted(found, key=lambda item: item["distance_m"])):
+            item = {key: value for key, value in station.items() if key != "id"}
+            item["id"] = station.get("id") or f"{station['kind']}{index}"
+            item["fast"] = isinstance(station.get("max_kw"), (int, float)) and station["max_kw"] >= FAST_KW
+            item.update(self.station_price(station))
+            result.append(item)
+        return result
+
     def _recent_auto_priced(self, now: datetime) -> ChargeSession | None:
         """The latest public charge priced with the default or a zone price, if it ended within
         PUBLIC_DEFAULT_REPLACE_HOURS: a price logged by hand now is that charge's real price ("unless I put in something
@@ -297,7 +462,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         latest = None
         for charge in self.store.charges:
             ended = dt_util.parse_datetime(charge.ended_at or "")
-            if (charge.location_kind == LOCATION_PUBLIC and charge.price_source in ("place", "zone", "operator", "default")
+            if (charge.location_kind == LOCATION_PUBLIC and charge.price_source in AUTO_PRICE_SOURCES
                     and ended is not None
                     and now - ended <= timedelta(hours=PUBLIC_DEFAULT_REPLACE_HOURS)
                     and (latest is None or ended > latest[0])):

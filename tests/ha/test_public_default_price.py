@@ -201,7 +201,7 @@ async def test_the_supercharger_list_is_fetched_once_and_kept(hass: HomeAssistan
     assert await cache.near(56.12052, 8.12215) == "Supercharger Søndervig"
     assert await cache.near(55.0, 9.0) is None
     assert aioclient_mock.call_count == 1, "fetched once, then kept for a week"
-    assert cache.sites == [[56.120494, 8.12219, "Søndervig"]], "a site being built does not charge yet"
+    assert cache.sites == [[56.120494, 8.12219, "Søndervig", None]], "a site being built does not charge yet"
 
 
 async def test_a_named_place_is_remembered(hass: HomeAssistant, request, freezer):
@@ -230,8 +230,9 @@ async def test_a_named_place_is_remembered(hass: HomeAssistant, request, freezer
 async def test_an_operator_price_from_open_charge_map(hass: HomeAssistant, request, aioclient_mock):
     from custom_components.evledger.public_place import OCM_URL
     aioclient_mock.get(OCM_URL, json=[
-        {"AddressInfo": {"Title": "Herning Rådhus", "Distance": 0.2}, "OperatorInfo": None},
-        {"AddressInfo": {"Title": "Bilka Herning", "Distance": 0.04}, "OperatorInfo": {"Title": "CLEVER"}},
+        {"AddressInfo": {"Title": "Herning Rådhus", "Latitude": 56.1385, "Longitude": 8.9706}, "OperatorInfo": None},
+        {"AddressInfo": {"Title": "Bilka Herning", "Latitude": 56.13673, "Longitude": 8.97062},
+         "OperatorInfo": {"Title": "CLEVER"}},
     ])
     entry, _ = await setup(hass, request)
     coordinator = hass.data[DOMAIN][entry.entry_id]
@@ -274,3 +275,87 @@ async def test_a_phone_answer_with_a_name(hass: HomeAssistant, request, reply, n
     assert charge.price == pytest.approx(round(estimate * per_kwh, 2) if per_kwh else 120.0)
     assert charge.location_name == name
     assert [place["name"] for place in coordinator.store.settings.get("places") or []] == ([name] if name else [])
+
+
+async def test_an_operator_fast_price_at_a_fast_charger(hass: HomeAssistant, request, aioclient_mock):
+    from custom_components.evledger.public_place import OCM_URL
+    aioclient_mock.get(OCM_URL, json=[{"ID": 1, "AddressInfo": {"Title": "Bilka Herning", "Latitude": 56.13671,
+                                                                 "Longitude": 8.97061},
+                                       "OperatorInfo": {"Title": "CLEVER"},
+                                       "Connections": [{"PowerKW": 150, "ConnectionType": {"Title": "CCS (Type 2)"}}]}])
+    entry, _ = await setup(hass, request)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ocm_api_key = "k"
+    await hass.services.async_call(DOMAIN, "set_operator_price", {"entry_id": entry.entry_id, "operator": "Clever",
+                                                                  "price": 4.04, "fast_price": 5.48}, blocking=True)
+    hass.states.async_set("device_tracker.car", "not_home", {"latitude": 56.1367, "longitude": 8.9706})
+    await charge_away(hass, entry)
+    [charge] = public_charges(hass, entry)
+    assert (charge.station_kw, charge.price_source) == (150, "operator")
+    assert charge.price == pytest.approx(round(charge.kwh * 5.48, 2)), "the fast price at a 150 kW station"
+
+
+def two_operators(aioclient_mock) -> None:
+    from custom_components.evledger.public_place import OCM_URL
+    aioclient_mock.get(OCM_URL, json=[
+        {"ID": 1, "AddressInfo": {"Title": "Bilka", "Latitude": 56.13675, "Longitude": 8.97065},
+         "OperatorInfo": {"Title": "CLEVER"}, "Connections": [{"PowerKW": 150}]},
+        {"ID": 2, "AddressInfo": {"Title": "Bilka P", "Latitude": 56.13690, "Longitude": 8.97080},
+         "OperatorInfo": {"Title": "Circle K"}, "Connections": [{"PowerKW": 22}]},
+    ])
+
+
+async def test_several_operators_ask_which_one(hass: HomeAssistant, request, aioclient_mock):
+    from .test_failing_services import with_options
+    from .test_routines import phones
+
+    two_operators(aioclient_mock)
+    sent = phones(hass)
+    entry, _ = await setup(hass, request)
+    planner = await with_options(hass, entry, notify_only_home=True)
+    planner.flags["ask_public_price"] = True
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ocm_api_key = "k"
+    await set_default_price(hass, entry, 2.6)
+    await hass.services.async_call(DOMAIN, "set_operator_price", {"entry_id": entry.entry_id, "operator": "Circle K",
+                                                                  "price": 3.99}, blocking=True)
+    hass.states.async_set("device_tracker.car", "not_home", {"latitude": 56.1368, "longitude": 8.9707})
+    hass.states.async_set("sensor.car_battery", "40", {"unit_of_measurement": "%"})
+    hass.states.async_set("binary_sensor.car_charging", "on")
+    await poll(hass, entry)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    asked = [m for m in sent if "hvilken lader" in m.get("title", "")]
+    assert len(asked) == 1, "asked although the phone is not at home (only-home is for home charging)"
+    titles = [a["title"] for a in asked[0]["data"]["actions"]]
+    assert titles == ["CLEVER · 150 kW", "Circle K · 22 kW"]
+    hass.bus.async_fire("mobile_app_notification_action", {"action": asked[0]["data"]["actions"][1]["action"]})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    hass.states.async_set("sensor.car_battery", "70", {"unit_of_measurement": "%"})
+    hass.states.async_set("binary_sensor.car_charging", "off")
+    await poll(hass, entry)
+    [charge] = public_charges(hass, entry)
+    assert (charge.operator, charge.price_source) == ("Circle K", "operator")
+    assert charge.price == pytest.approx(round(charge.kwh * 3.99, 2))
+
+
+async def test_the_map_gets_stations_with_prices(hass: HomeAssistant, request, aioclient_mock, hass_ws_client):
+    two_operators(aioclient_mock)
+    entry, _ = await setup(hass, request)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ocm_api_key = "k"
+    stub_superchargers(hass, [[56.1390, 8.9750, "Herning", 250]])
+    await set_default_price(hass, entry, 2.6)
+    await hass.services.async_call(DOMAIN, "set_operator_price", {"entry_id": entry.entry_id, "operator": "Clever",
+                                                                  "price": 4.04, "fast_price": 5.48}, blocking=True)
+    any_entity = er.async_get(hass).async_get_entity_id("number", DOMAIN, f"{entry.entry_id}_public_default_price")
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "evledger/chargers", "entity_id": any_entity, "latitude": 56.1368,
+                            "longitude": 8.9707, "radius_km": 2})
+    reply = await client.receive_json()
+    assert reply["success"], reply
+    stations = {s["name"]: s for s in reply["result"]["stations"]}
+    assert stations["CLEVER – Bilka"]["price"] == 5.48 and stations["CLEVER – Bilka"]["price_fast"] == 5.48
+    assert stations["CLEVER – Bilka"]["price_normal"] == 4.04 and stations["CLEVER – Bilka"]["fast"]
+    assert stations["Circle K – Bilka P"]["price_source"] == "default"
+    assert stations["Supercharger Herning"]["max_kw"] == 250
+    assert reply["result"]["open_charge_map"] is True

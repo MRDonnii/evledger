@@ -32,6 +32,10 @@ SUPERCHARGER_RADIUS_M = 300
 PLACE_RADIUS_M = 100
 OCM_URL = "https://api.openchargemap.io/v3/poi/"
 OCM_RADIUS_KM = 0.3
+OCM_CACHE = timedelta(hours=6)
+# Stations this close to the car are where it may be charging; one clearly nearer than the rest is taken without asking
+CANDIDATE_RADIUS_M = 150
+SURE_WITHIN_M = 40
 # Open Charge Map's stand-ins for "no operator"
 OCM_NO_OPERATOR = ("unknown", "business owner", "private residence")
 # Sites that do not charge (yet or any more)
@@ -76,7 +80,7 @@ class Superchargers:
                                    headers={"User-Agent": "EV Ledger (Home Assistant integration)"}) as response:
                 response.raise_for_status()
                 raw = await response.json(content_type=None)
-        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+        except Exception as err:  # noqa: BLE001 - no list this time; names fall back to the other sources
             self._retry_after = now + SITES_RETRY
             _LOGGER.debug("Supercharger list not fetched: %s", err)
             return
@@ -91,26 +95,37 @@ class Superchargers:
             country = str((site.get("address") or {}).get("country") or "")
             if country:
                 name = name.replace(f", {country}", "").strip(" ,")
-            sites.append([round(float(lat), 6), round(float(lon), 6), name])
+            power = site.get("powerKilowatt")
+            sites.append([round(float(lat), 6), round(float(lon), 6), name,
+                          float(power) if isinstance(power, (int, float)) else None])
         if not sites:
             self._retry_after = now + SITES_RETRY
             return
         self.sites, self.fetched = sites, now
         await self._store.async_save({"fetched": now.isoformat(), "sites": sites})
 
-    async def near(self, lat: float, lon: float) -> str | None:
-        """The name of a Supercharger within SUPERCHARGER_RADIUS_M of the point, the nearest one."""
+    async def around(self, lat: float, lon: float, radius_m: float) -> list[dict]:
+        """The Superchargers within radius_m of the point, nearest first."""
         await self._load()
         if self.sites is None or self.fetched is None or dt_util.utcnow() - self.fetched > SITES_MAX_AGE:
             await self._refresh()
-        best: tuple[float, str] | None = None
-        for site_lat, site_lon, name in self.sites or []:
-            if abs(site_lat - lat) > 0.01 or abs(site_lon - lon) > 0.02:  # well over 300 m away
+        box_lat, box_lon = radius_m / 111_000 + 0.001, radius_m / 55_000 + 0.002
+        found = []
+        for site in self.sites or []:
+            site_lat, site_lon, name = site[0], site[1], site[2]
+            if abs(site_lat - lat) > box_lat or abs(site_lon - lon) > box_lon:
                 continue
             meters = distance_m(lat, lon, site_lat, site_lon)
-            if meters <= SUPERCHARGER_RADIUS_M and (best is None or meters < best[0]):
-                best = (meters, name)
-        return f"Supercharger {best[1]}" if best else None
+            if meters <= radius_m:
+                found.append({"name": f"Supercharger {name}", "operator": "Tesla", "latitude": site_lat,
+                              "longitude": site_lon, "distance_m": round(meters), "max_kw": site[3] if len(site) > 3 else None,
+                              "kind": "supercharger"})
+        return sorted(found, key=lambda item: item["distance_m"])
+
+    async def near(self, lat: float, lon: float) -> str | None:
+        """The name of a Supercharger within SUPERCHARGER_RADIUS_M of the point, the nearest one."""
+        found = await self.around(lat, lon, SUPERCHARGER_RADIUS_M)
+        return found[0]["name"] if found else None
 
 
 def superchargers(hass: HomeAssistant) -> Superchargers:
@@ -156,44 +171,66 @@ def _operator_name(title: str | None) -> str | None:
 
 
 class OpenChargeMap:
-    """The nearest station of a point (name, operator), one call per place and kept for the session."""
+    """Stations around a point (name, operator, position, power, connectors), kept for OCM_CACHE per area."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
-        self._cache: dict[tuple[float, float], tuple[str | None, str | None]] = {}
+        self._cache: dict[tuple, tuple[datetime, list[dict]]] = {}
 
-    async def station(self, key: str, lat: float, lon: float) -> tuple[str | None, str | None]:
-        spot = (round(lat, 4), round(lon, 4))
-        if spot in self._cache:
-            return self._cache[spot]
-        params = {"output": "json", "latitude": f"{lat:.6f}", "longitude": f"{lon:.6f}", "distance": OCM_RADIUS_KM,
-                  "distanceunit": "KM", "maxresults": 5, "compact": "false", "verbose": "false"}
+    async def stations(self, key: str, lat: float, lon: float, radius_km: float = OCM_RADIUS_KM,
+                       maxresults: int = 10) -> list[dict]:
+        """The stations within radius_km, nearest first ([] when Open Charge Map cannot be reached)."""
+        spot = (round(lat, 3 if radius_km > 1 else 4), round(lon, 3 if radius_km > 1 else 4), round(radius_km, 1),
+                maxresults)
+        cached = self._cache.get(spot)
+        if cached is not None and dt_util.utcnow() - cached[0] < OCM_CACHE:
+            return cached[1]
+        params = {"output": "json", "latitude": f"{lat:.6f}", "longitude": f"{lon:.6f}", "distance": radius_km,
+                  "distanceunit": "KM", "maxresults": maxresults, "compact": "false", "verbose": "false"}
         try:
             session = async_get_clientsession(self.hass)
             async with session.get(OCM_URL, params=params, timeout=aiohttp.ClientTimeout(total=20),
                                    headers={"X-API-Key": key, "User-Agent": "EV Ledger (Home Assistant integration)"}) as response:
                 response.raise_for_status()
-                stations = await response.json(content_type=None)
-        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+                raw = await response.json(content_type=None)
+        except Exception as err:  # noqa: BLE001 - Open Charge Map is an extra
             _LOGGER.debug("Open Charge Map: %s", err)
-            return None, None
-        best = None
-        for station in stations if isinstance(stations, list) else []:
+            return []
+        found = []
+        for station in raw if isinstance(raw, list) else []:
             info = station.get("AddressInfo") or {}
-            far = info.get("Distance")
-            if not isinstance(far, (int, float)) or far > OCM_RADIUS_KM:
+            s_lat, s_lon = info.get("Latitude"), info.get("Longitude")
+            if not (isinstance(s_lat, (int, float)) and isinstance(s_lon, (int, float))):
                 continue
-            if best is None or far < best[0]:
-                best = (far, str(info.get("Title") or "").strip() or None,
-                        _operator_name((station.get("OperatorInfo") or {}).get("Title")))
-        result = (None, None)
-        if best is not None:
-            name, operator = best[1], best[2]
-            if operator and name and operator.lower() not in name.lower():
-                name = f"{operator} – {name}"
-            result = (name or operator, operator)
-        self._cache[spot] = result
-        return result
+            meters = distance_m(lat, lon, s_lat, s_lon)
+            if meters > radius_km * 1000:
+                continue
+            title = str(info.get("Title") or "").strip() or None
+            operator = _operator_name((station.get("OperatorInfo") or {}).get("Title"))
+            connectors, powers = [], []
+            for conn in station.get("Connections") or []:
+                power = conn.get("PowerKW")
+                if isinstance(power, (int, float)) and power > 0:
+                    powers.append(float(power))
+                connectors.append({"type": ((conn.get("ConnectionType") or {}).get("Title") or "").split(" (")[0] or None,
+                                   "kw": power if isinstance(power, (int, float)) else None,
+                                   "count": conn.get("Quantity") or 1})
+            name = title
+            if operator and title and operator.lower() not in title.lower():
+                name = f"{operator} – {title}"
+            found.append({"name": name or operator, "operator": operator, "latitude": s_lat, "longitude": s_lon,
+                          "distance_m": round(meters), "max_kw": max(powers) if powers else None,
+                          "connectors": connectors, "points": station.get("NumberOfPoints"),
+                          "usage_cost": (station.get("UsageCost") or None), "kind": "ocm",
+                          "id": f"ocm{station.get('ID')}"})
+        found.sort(key=lambda item: item["distance_m"])
+        self._cache[spot] = (dt_util.utcnow(), found)
+        return found
+
+    async def station(self, key: str, lat: float, lon: float) -> tuple[str | None, str | None]:
+        """The nearest station's (name, operator)."""
+        found = await self.stations(key, lat, lon)
+        return (found[0]["name"], found[0]["operator"]) if found else (None, None)
 
 
 def open_charge_map(hass: HomeAssistant) -> OpenChargeMap:
@@ -203,30 +240,61 @@ def open_charge_map(hass: HomeAssistant) -> OpenChargeMap:
     return hass.data[key]
 
 
+async def async_candidates(hass: HomeAssistant, lat: float, lon: float, ocm_key: str | None) -> list[dict]:
+    """The stations the car may be charging at (within CANDIDATE_RADIUS_M), nearest first: Superchargers and Open Charge
+    Map's (an Open Charge Map Tesla entry at a Supercharger is that Supercharger)."""
+    try:
+        found = await superchargers(hass).around(lat, lon, CANDIDATE_RADIUS_M)
+    except Exception:  # noqa: BLE001 - each source on its own
+        _LOGGER.debug("Supercharger lookup failed", exc_info=True)
+        found = []
+    if ocm_key:
+        for station in await open_charge_map(hass).stations(ocm_key, lat, lon, CANDIDATE_RADIUS_M / 1000):
+            tesla = "tesla" in (station.get("operator") or "").lower() or "supercharger" in (station.get("name") or "").lower()
+            if tesla and any(distance_m(station["latitude"], station["longitude"], sc["latitude"], sc["longitude"]) < 120
+                             for sc in found if sc["kind"] == "supercharger"):
+                continue
+            found.append(station)
+    return sorted(found, key=lambda item: item["distance_m"])
+
+
+def is_certain(candidates: list[dict]) -> bool:
+    """Whether the nearest candidate is surely where the car charges: the only one, all of one operator, or clearly
+    nearer than the next (within SURE_WITHIN_M, the next at least twice as far and 80 m away)."""
+    if len(candidates) <= 1:
+        return True
+    if len({(item.get("operator") or item.get("name") or "").lower() for item in candidates}) == 1:
+        return True
+    first, second = candidates[0]["distance_m"], candidates[1]["distance_m"]
+    return first <= SURE_WITHIN_M and second >= max(80, 2 * first)
+
+
 async def async_place(hass: HomeAssistant, lat: float | None, lon: float | None, places: list[dict] | None = None,
                       ocm_key: str | None = None) -> dict:
-    """Where the car is: {"zone", "name", "operator", "place"} (place = a place the user named, with its price)."""
-    found: dict = {"zone": None, "name": None, "operator": None, "place": None}
+    """Where the car is: {"zone", "name", "operator", "max_kw", "place", "candidates", "certain"} (place = a place the
+    user named, with its price; candidates = the stations it may be charging at when it is not certain which)."""
+    found: dict = {"zone": None, "name": None, "operator": None, "max_kw": None, "place": None, "candidates": [],
+                   "certain": True}
     if lat is None or lon is None:
         return found
     if (place := nearest_place(places, lat, lon)) is not None:
-        found.update(name=place.get("name"), operator=place.get("operator"), place=place)
+        found.update(name=place.get("name"), operator=place.get("operator"), max_kw=place.get("max_kw"), place=place)
         return found
     zone = zone_at(hass, lat, lon)
     if zone is not None and zone.entity_id != "zone.home":
         found.update(zone=zone.entity_id, name=str(zone.attributes.get("friendly_name") or zone.name))
         return found
     try:
-        name = await superchargers(hass).near(lat, lon)
+        candidates = await async_candidates(hass, lat, lon, ocm_key)
+        if not candidates:  # nothing right here: a Supercharger or a station a little further away still names it
+            candidates = (await superchargers(hass).around(lat, lon, SUPERCHARGER_RADIUS_M))[:1]
+            if not candidates and ocm_key:
+                candidates = (await open_charge_map(hass).stations(ocm_key, lat, lon))[:1]
     except Exception:  # noqa: BLE001 - a place name is an extra, never a reason to lose the charge
-        _LOGGER.debug("Supercharger lookup failed", exc_info=True)
-        name = None
-    if name:
-        found.update(name=name, operator="Tesla")
-        return found
-    if ocm_key:
-        try:
-            found["name"], found["operator"] = await open_charge_map(hass).station(ocm_key, lat, lon)
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("Open Charge Map lookup failed", exc_info=True)
+        _LOGGER.debug("Station lookup failed", exc_info=True)
+        candidates = []
+    if candidates:
+        best = candidates[0]
+        found.update(name=best.get("name"), operator=best.get("operator"), max_kw=best.get("max_kw"),
+                     candidates=candidates[:4], certain=is_certain(candidates))
     return found
