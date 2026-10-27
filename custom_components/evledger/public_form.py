@@ -146,12 +146,16 @@ class PublicDefaultPrice(NumberEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        """The zones with their own price per kWh (evledger.set_zone_price), by name."""
+        """The zones and operators with their own price per kWh (set_zone_price, set_operator_price) and the places named
+        before (their position is not shown)."""
         prices = {}
         for zone, price in (self.coordinator.store.settings.get("zone_prices") or {}).items():
             state = self.hass.states.get(zone) if self.hass else None
             prices[str(state.attributes.get("friendly_name") or zone) if state else zone] = price
-        return {"zone_prices": prices}
+        settings = self.coordinator.store.settings
+        return {"zone_prices": prices, "operator_prices": dict(settings.get("operator_prices") or {}),
+                "places": [{"name": place.get("name"), "price": place.get("price"), "operator": place.get("operator")}
+                           for place in settings.get("places") or []]}
 
     async def async_set_native_value(self, value: float) -> None:
         if (value := finite(value)) is None or value < 0:

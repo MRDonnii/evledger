@@ -20,7 +20,7 @@ from .const import (
     TRIP_MIN_DISTANCE_KM,
 )
 from .models import ChargeSession, LiveChargeState, Trip, VehicleSnapshot
-from .public_place import async_place
+from .public_place import PLACE_RADIUS_M, async_place, distance_m, nearest_place
 from .providers.charger.base import CAP_COST_LOOKUP, CAP_LIVE_POWER, ChargerProvider
 from .smart.plan import SLOT_MINUTES
 from .providers.vehicle.base import VehicleProvider
@@ -74,6 +74,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._home_cooldown_until: datetime | None = None
         self._vehicle_was_charging = False
         self.battery_capacity_kwh: float | None = None  # set from the entry; trips' energy for the tyre use
+        self.ocm_api_key: str | None = None  # set from the entry: Open Charge Map for public charging stations
 
     async def _async_update_data(self) -> dict[str, Any]:
         snapshot = self._vehicle_provider.get_snapshot(self.hass)
@@ -186,6 +187,10 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             pending.needs_review = False
             pending.price_source = "manual"
             await self.store.async_upsert_charge(pending)
+            if location_name and pending.latitude is not None and pending.longitude is not None:
+                # Named here: the next charge at this place gets its name and price per kWh by itself
+                await self.async_remember_place(location_name.strip(), pending.latitude, pending.longitude,
+                                                price / kwh if kwh else None, pending.operator)
         else:
             await self.store.async_upsert_charge(ChargeSession(
                 id=self.store.new_id(), location_kind=LOCATION_PUBLIC, provider="manual",
@@ -196,13 +201,75 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
 
     async def _find_place(self, charge: ChargeSession, snapshot: VehicleSnapshot | None) -> None:
-        """The zone or Tesla Supercharger the car charges at, as the charge's place (never fatal)."""
-        if snapshot is None or charge.location_name or charge.zone:
+        """Where the car charges (a named place, a zone, a Tesla Supercharger, an Open Charge Map station): the
+        charge's place, operator and position (never fatal)."""
+        if snapshot is None or charge.location_name or charge.zone or snapshot.latitude is None:
             return
+        charge.latitude, charge.longitude = snapshot.latitude, snapshot.longitude
         try:
-            charge.zone, charge.location_name = await async_place(self.hass, snapshot.latitude, snapshot.longitude)
+            found = await async_place(self.hass, snapshot.latitude, snapshot.longitude,
+                                      self.store.settings.get("places"), self.ocm_api_key)
         except Exception:  # noqa: BLE001 - the place is an extra, the charge must be saved
             _LOGGER.debug("%s: place of the public charge not found", self.vehicle_name, exc_info=True)
+            return
+        charge.zone, charge.location_name, charge.operator = found["zone"], found["name"], found["operator"]
+
+    def _auto_price(self, charge: ChargeSession) -> tuple[float | None, str | None]:
+        """The price per kWh a public charge gets by itself, and from where: a place named before, the zone, the
+        operator, the default price."""
+        if charge.latitude is not None and charge.longitude is not None:
+            place = nearest_place(self.store.settings.get("places"), charge.latitude, charge.longitude)
+            if place is not None and place.get("price") is not None:
+                return float(place["price"]), "place"
+        if (zone_price := self.zone_price(charge.zone)) is not None:
+            return zone_price, "zone"
+        if (operator_price := self.operator_price(charge.operator)) is not None:
+            return operator_price, "operator"
+        default = self.public_default_price()
+        return (default, "default") if default else (None, None)
+
+    def operator_price(self, operator: str | None) -> float | None:
+        """The price per kWh set for a charging operator (matched without case, either name inside the other)."""
+        if not operator:
+            return None
+        wanted = operator.lower()
+        for name, price in (self.store.settings.get("operator_prices") or {}).items():
+            key = str(name).lower()
+            if key and (key in wanted or wanted in key):
+                try:
+                    value = float(price)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(value) and value >= 0:
+                    return value
+        return None
+
+    async def async_set_operator_price(self, operator: str, price: float | None) -> None:
+        """Set (or with None remove) a charging operator's price per kWh."""
+        prices = {name: value for name, value in (self.store.settings.get("operator_prices") or {}).items()
+                  if name.lower() != operator.strip().lower()}
+        if price is not None:
+            prices[operator.strip()] = round(float(price), 4)
+        await self.store.async_set_setting("operator_prices", prices)
+        self.async_update_listeners()
+
+    async def async_remember_place(self, name: str, latitude: float, longitude: float, price: float | None,
+                                   operator: str | None = None) -> None:
+        """Keep a named place (and its price per kWh): a public charge within PLACE_RADIUS_M gets them by itself."""
+        places = [place for place in (self.store.settings.get("places") or [])
+                  if not (distance_m(latitude, longitude, float(place["latitude"]), float(place["longitude"]))
+                          <= PLACE_RADIUS_M or str(place.get("name", "")).lower() == name.lower())]
+        places.append({"name": name, "latitude": round(latitude, 6), "longitude": round(longitude, 6),
+                       "price": None if price is None else round(float(price), 4), "operator": operator})
+        await self.store.async_set_setting("places", places)
+        self.async_update_listeners()
+
+    async def async_forget_place(self, name: str) -> bool:
+        places = self.store.settings.get("places") or []
+        kept = [place for place in places if str(place.get("name", "")).lower() != name.strip().lower()]
+        await self.store.async_set_setting("places", kept)
+        self.async_update_listeners()
+        return len(kept) != len(places)
 
     def zone_price(self, zone: str | None) -> float | None:
         """The price per kWh of charging in this zone (0 = free), if one is set."""
@@ -230,7 +297,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         latest = None
         for charge in self.store.charges:
             ended = dt_util.parse_datetime(charge.ended_at or "")
-            if (charge.location_kind == LOCATION_PUBLIC and charge.price_source in ("default", "zone")
+            if (charge.location_kind == LOCATION_PUBLIC and charge.price_source in ("place", "zone", "operator", "default")
                     and ended is not None
                     and now - ended <= timedelta(hours=PUBLIC_DEFAULT_REPLACE_HOURS)
                     and (latest is None or ended > latest[0])):
@@ -623,11 +690,9 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             open_public.end_battery_pct = snapshot.battery_pct
             if open_public.location_name is None and open_public.zone is None:
                 await self._find_place(open_public, snapshot)  # the car had no position when it started
-            # The zone's own price (e.g. free at family), else the public default price (e.g. Tesla Supercharger's flat
-            # price) prices the charge at once; any price given later (the phone, the form, the action) replaces it
-            zone_price = self.zone_price(open_public.zone)
-            per_kwh, source = ((zone_price, "zone") if zone_price is not None
-                               else (self.public_default_price() or None, "default"))
+            # A place named before, the zone (e.g. free at family), the operator, else the public default price (e.g.
+            # Tesla Supercharger's flat price) prices the charge at once; any price given later replaces it
+            per_kwh, source = self._auto_price(open_public)
             kwh = self.public_kwh_estimate(open_public)[0] if per_kwh is not None else None
             if per_kwh is not None and (kwh or per_kwh == 0):
                 open_public.kwh = kwh
@@ -639,7 +704,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "%s: public charging ended, %s",
                 self.vehicle_name,
                 f"priced with the {open_public.price_source} price ({open_public.kwh} kWh, {open_public.price})"
-                if open_public.price_source in ("default", "zone") else "waiting for price (log_public_charge service)",
+                if open_public.price_source in ("place", "zone", "operator", "default") else "waiting for price (log_public_charge service)",
             )
             if (smart := getattr(self, "smart", None)) is not None:
                 # A message is an extra: a fault in it must not stop the ledger (the charge is already saved).

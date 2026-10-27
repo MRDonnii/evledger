@@ -270,6 +270,13 @@ data:
   price: 0      # free there; leave the price out to remove the zone's price
 ```
 
+With a free Open Charge Map API key in the options (openchargemap.org → My Profile → My Apps → register an
+application), a charge elsewhere gets the nearest station's name and operator, and an operator can have a price
+(`evledger.set_operator_price`, e.g. operator `Clever`, price `3.95`). Name a place once, with the phone answer
+"Clever 3,95" or a place in the form, and the next charge within 100 m gets that name and price by itself
+(`evledger.forget_place` removes it). The order: a named place, the zone, the operator, the default price, else the
+phones are asked.
+
 ## Fixing a mistake
 
 Trips and charges can be wrong — a phantom trip from GPS drift, a charge

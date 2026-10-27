@@ -17,9 +17,13 @@ from .const import (
     SERVICE_ADD_CHARGE,
     SERVICE_CLEAR_READY_BY_ONCE,
     SERVICE_SET_READY_BY_ONCE,
+    SERVICE_FORGET_PLACE,
+    SERVICE_SET_OPERATOR_PRICE,
     SERVICE_SET_ZONE_PRICE,
     SERVICE_SET_WEEK_PLAN,
     ATTR_CHARGE_ID,
+    ATTR_NAME,
+    ATTR_OPERATOR,
     ATTR_ZONE,
     ATTR_KWH,
     ATTR_LOCATION_NAME,
@@ -28,6 +32,7 @@ from .const import (
     ATTR_STARTED_AT,
     ATTR_TRIP_ID,
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_OCM_API_KEY,
     CONF_CURRENCY,
     CONF_VEHICLE_NAME,
     DEFAULT_CURRENCY,
@@ -83,6 +88,16 @@ SET_ZONE_PRICE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_PRICE): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100))),
     }
 )
+
+SET_OPERATOR_PRICE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entry_id"): cv.string,
+        vol.Required(ATTR_OPERATOR): cv.string,
+        vol.Optional(ATTR_PRICE): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100))),
+    }
+)
+
+FORGET_PLACE_SCHEMA = vol.Schema({vol.Required("entry_id"): cv.string, vol.Required(ATTR_NAME): cv.string})
 
 ADD_CHARGE_SCHEMA = vol.Schema(
     {
@@ -197,6 +212,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         store=store,
     )
     coordinator.battery_capacity_kwh = entry.data.get(CONF_BATTERY_CAPACITY_KWH)
+    coordinator.ocm_api_key = (entry.data.get(CONF_OCM_API_KEY) or "").strip() or None
     # A failing first ledger update (e.g. the car's cloud is down right after a restart) must not hold
     # back the charger control; the ledger sensors catch up on the next update.
     await coordinator.async_refresh()
@@ -255,6 +271,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 SERVICE_SET_READY_BY_ONCE,
                 SERVICE_CLEAR_READY_BY_ONCE,
                 SERVICE_SET_ZONE_PRICE,
+                SERVICE_SET_OPERATOR_PRICE,
+                SERVICE_FORGET_PLACE,
                 *TYRE_SERVICES,
             ):
                 if hass.services.has_service(DOMAIN, service):
@@ -284,6 +302,21 @@ def _async_register_services(hass: HomeAssistant) -> None:
         if coordinator is None:
             raise ServiceValidationError(f"Unknown EV Ledger entry_id: {call.data['entry_id']}")
         await coordinator.async_set_zone_price(call.data[ATTR_ZONE], call.data.get(ATTR_PRICE))
+
+    def _ledger_of_entry(call: ServiceCall) -> EvLedgerCoordinator:
+        coordinator: EvLedgerCoordinator | None = hass.data.get(DOMAIN, {}).get(call.data["entry_id"])
+        if coordinator is None:
+            raise ServiceValidationError(f"Unknown EV Ledger entry_id: {call.data['entry_id']}")
+        return coordinator
+
+    async def _handle_set_operator_price(call: ServiceCall) -> None:
+        """A charging operator's price per kWh (e.g. Clever's); without a price the operator's price goes."""
+        await _ledger_of_entry(call).async_set_operator_price(call.data[ATTR_OPERATOR], call.data.get(ATTR_PRICE))
+
+    async def _handle_forget_place(call: ServiceCall) -> None:
+        """Forget a named public charging place."""
+        if not await _ledger_of_entry(call).async_forget_place(call.data[ATTR_NAME]):
+            raise ServiceValidationError(f"No place named {call.data[ATTR_NAME]!r}")
 
     async def _handle_add_charge(call: ServiceCall) -> None:
         """A finished charge at home or away that the ledger did not record (e.g. from before EV Ledger)."""
@@ -455,6 +488,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
         (SERVICE_DELETE_TRIP, _handle_delete_trip, DELETE_TRIP_SCHEMA),
         (SERVICE_ADD_CHARGE, _handle_add_charge, ADD_CHARGE_SCHEMA),
         (SERVICE_SET_ZONE_PRICE, _handle_set_zone_price, SET_ZONE_PRICE_SCHEMA),
+        (SERVICE_SET_OPERATOR_PRICE, _handle_set_operator_price, SET_OPERATOR_PRICE_SCHEMA),
+        (SERVICE_FORGET_PLACE, _handle_forget_place, FORGET_PLACE_SCHEMA),
         (SERVICE_SET_WEEK_PLAN, _handle_set_week_plan, SET_WEEK_PLAN_SCHEMA),
         (SERVICE_SET_READY_BY_ONCE, _handle_set_ready_by_once, SET_READY_BY_ONCE_SCHEMA),
         (SERVICE_CLEAR_READY_BY_ONCE, _handle_clear_ready_by_once, CAR_SCHEMA),

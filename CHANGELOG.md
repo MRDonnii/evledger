@@ -4,6 +4,26 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.12.0] - 2026-10-27
+
+### Added
+
+- **Open Charge Map for public charging stations.** Put your own free API key in the options (sign in at
+  openchargemap.org, My Profile → My Apps → register an application). A public charge that is not in a zone or at a
+  Supercharger then gets the nearest station's name and operator within 300 m, e.g. "CLEVER – Bilka Herning". In
+  Denmark the database names most stations, but the operator for only some (PowerGo, Tesla, Clever, Circle K, Ionity…;
+  Norlys hardly). The key is redacted in diagnostics.
+- **Operator prices, `evledger.set_operator_price`** (operator, price per kWh; part of the name is enough). A charge at
+  that operator's station gets its price.
+- **Named places.** When a public charge is given a name with its price (the phone answer "Clever 3,95", the dashboard
+  form's place, or `log_public_charge` with `location_name`), the ledger remembers the place: a charge within 100 m
+  later gets that name and price per kWh by itself. `evledger.forget_place` removes one. The order a public charge is
+  priced in: a named place, the zone, the operator, the default price, else the phones are asked.
+- Public charges keep their position (`latitude`/`longitude`, redacted in diagnostics) and `operator`. The default
+  price number shows `operator_prices` and `places` (names and prices, no positions).
+- A phone answer with a name and one number up to 15 (or "kr/kWh") is a price per kWh. Above that it is the charge's
+  total. After a restart the answer uses the ledger's own kWh estimate.
+
 ## [0.11.0] - 2026-10-27
 
 ### Added

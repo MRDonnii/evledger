@@ -566,3 +566,52 @@ set_zone_price:
           min: 0
           max: 100
           step: 0.01
+
+set_operator_price:
+  name: Set operator price
+  description: >-
+    The price per kWh of a charging operator (e.g. Clever, PowerGo, Ionity), used for a public charge at that
+    operator's station when Open Charge Map knows the operator. Leave the price out to remove it.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this applies to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    operator:
+      name: Operator
+      description: The operator's name as Open Charge Map has it (part of it is enough, e.g. "Clever").
+      required: true
+      example: Clever
+      selector:
+        text:
+    price:
+      name: Price per kWh
+      description: The operator's price per kWh. Leave it out to remove the operator's price.
+      required: false
+      example: 3.95
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01
+
+forget_place:
+  name: Forget place
+  description: Forget a public charging place that was named with a price (the next charge there is asked again).
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this applies to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    name:
+      name: Name
+      description: The place's name.
+      required: true
+      selector:
+        text:

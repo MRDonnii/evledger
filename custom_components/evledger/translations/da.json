@@ -103,7 +103,11 @@
           "spot_price_entity": "Elpris-sensor (valgfri — lad stå tom for at fjerne spotpris-estimater)",
           "tesla_model_key": "Model / variant til effektivitetssammenligning (valgfri)",
           "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
-          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')"
+          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')",
+          "ocm_api_key": "Open Charge Map API-nøgle (valgfri)"
+        },
+        "data_description": {
+          "ocm_api_key": "Giver offentlige opladninger ladestandens navn og operatør. Gratis: log ind på openchargemap.org, åbn My Profile → My Apps, registrér en app (Register an application) og kopiér dens API-nøgle hertil. Lad feltet stå tomt for ikke at bruge den."
         }
       },
       "smart_charge": {

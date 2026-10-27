@@ -22,6 +22,7 @@ from .const import (
     CONF_LOCKED_ENTITY,
     CONF_MODEL_LABEL,
     CONF_MONTA_LAST_CHARGE_ENTITY,
+    CONF_OCM_API_KEY,
     CONF_MONTA_WALLET_ENTITY,
     CONF_ODOMETER_ENTITY,
     CONF_OUTSIDE_TEMP_ENTITY,
@@ -312,6 +313,11 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_SPOT_PRICE_ENTITY,
                 description={"suggested_value": defaults.get(CONF_SPOT_PRICE_ENTITY)},
             ): _entity_selector("sensor"),
+            # Names and operators of public charging stations (Claude AI, 2026-10-27): a free key of the user's own
+            vol.Optional(
+                CONF_OCM_API_KEY,
+                description={"suggested_value": defaults.get(CONF_OCM_API_KEY)},
+            ): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
             vol.Optional(
                 CONF_TESLA_MODEL_KEY,
                 default=defaults.get(CONF_TESLA_MODEL_KEY, SKIP_MODEL_KEY),
@@ -521,6 +527,10 @@ class EvLedgerOptionsFlow(OptionsFlow):
                 self._data.pop(CONF_SPOT_PRICE_ENTITY, None)
 
             self._data[CONF_CHARGER_PROVIDERS] = providers
+            if not (user_input.get(CONF_OCM_API_KEY) or "").strip():
+                self._data.pop(CONF_OCM_API_KEY, None)
+            else:
+                self._data[CONF_OCM_API_KEY] = user_input[CONF_OCM_API_KEY].strip()
             _process_efficiency(self._data, user_input)
             return await self.async_step_smart_charge()
 

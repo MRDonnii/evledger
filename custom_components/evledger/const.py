@@ -57,6 +57,8 @@ CONF_MONTA_LAST_CHARGE_ENTITY = "monta_last_charge_entity"
 CONF_MONTA_WALLET_ENTITY = "monta_wallet_entity"
 
 CONF_SPOT_PRICE_ENTITY = "spot_price_entity"
+# Open Charge Map API key (optional): names and operators of public charging stations
+CONF_OCM_API_KEY = "ocm_api_key"
 
 # --- Provider registry ids ---
 VEHICLE_PROVIDER_TESLA_CUSTOM = "tesla_custom"
@@ -82,6 +84,8 @@ SERVICE_SET_WEEK_PLAN = "set_week_plan"
 SERVICE_SET_READY_BY_ONCE = "set_ready_by_once"
 SERVICE_CLEAR_READY_BY_ONCE = "clear_ready_by_once"
 SERVICE_SET_ZONE_PRICE = "set_zone_price"
+SERVICE_SET_OPERATOR_PRICE = "set_operator_price"
+SERVICE_FORGET_PLACE = "forget_place"
 SERVICE_SAVE_TYRE_SET = "save_tyre_set"
 SERVICE_DELETE_TYRE_SET = "delete_tyre_set"
 SERVICE_CHANGE_TYRES = "change_tyres"
@@ -100,6 +104,8 @@ ATTR_STARTED_AT = "started_at"
 ATTR_NOTE = "note"
 ATTR_CHARGE_ID = "charge_id"
 ATTR_ZONE = "zone"
+ATTR_OPERATOR = "operator"
+ATTR_NAME = "name"
 ATTR_TRIP_ID = "trip_id"
 
 SIGNAL_UPDATE = f"{DOMAIN}_update"

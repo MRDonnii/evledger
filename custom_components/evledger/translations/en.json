@@ -103,7 +103,11 @@
           "spot_price_entity": "Electricity price sensor (optional — leave empty to drop spot-price estimates)",
           "tesla_model_key": "Model / trim for efficiency comparison (optional)",
           "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
-          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')"
+          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')",
+          "ocm_api_key": "Open Charge Map API key (optional)"
+        },
+        "data_description": {
+          "ocm_api_key": "Gives public charges the station's name and operator. Free: sign in at openchargemap.org, open My Profile → My Apps, register an application and copy its API key here. Leave empty to not use it."
         }
       },
       "smart_charge": {

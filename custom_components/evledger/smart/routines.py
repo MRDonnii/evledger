@@ -52,6 +52,9 @@ from .const import (
 from .control import CONNECTED, Action, ChargerState
 from .plan import MODE_MANUAL, MODE_NOW, MODE_OFF, finite
 
+# A phone answer with a name and one number up to this is a price per kWh ("Clever 3,95"), above it the charge's total
+PER_KWH_MAX = 15.0
+
 if TYPE_CHECKING:
     from .planner import ChargePlanner
 
@@ -269,6 +272,8 @@ class Routines:
         else:
             text = (f"Bilen har ladet{place} {when}{battery}{estimate}. Skriv prisen i kr, eller kWh og pris "
                     "(fx 23,4 82,50).")
+        if not getattr(charge, "zone", None) and getattr(charge, "price_source", None) != "place":
+            text += " Skriv et navn og prisen pr. kWh (fx Clever 3,95), så husker jeg stedet til næste gang."
         actions = [{"action": f"{p.notify.prefix}PUBLIC_{charge.id}", "title": "Skriv pris",
                     "behavior": "textInput", "textInputButtonTitle": "Gem", "textInputPlaceholder": "82,50"}]
         p.entry.async_create_background_task(
@@ -276,12 +281,28 @@ class Routines:
             "ev_smart_charge_notify_public")
 
     def answer_public(self, charge_id: str, reply: str) -> None:
-        """The phone's answer: a price, or kWh and price."""
+        """The phone's answer: a price, or kWh and price; with a name ("Clever 3,95") the place is named, and a single
+        number up to PER_KWH_MAX (or followed by "kr/kWh") is then the price per kWh."""
         p = self.planner
-        numbers = [number for value in re.findall(r"\d+(?:[.,]\d+)?", reply or "")
-                   if (number := finite(value.replace(",", "."))) is not None]
-        kwh = numbers[0] if len(numbers) >= 2 else self.public_asked.get(charge_id)
+        tokens = re.findall(r"-?\d+(?:[.,]\d+)?", reply or "")
+        numbers = [finite(token.replace(",", ".")) for token in tokens]
+        if any(number is None or number < 0 for number in numbers):
+            numbers = []  # a number that cannot be read, or a negative one: the answer makes no sense
+        # The name is the words before the first number ("Clever 3,95", "Ionity Vejle 120")
+        first = re.search(r"-?\d", reply or "")
+        name = " ".join((reply or "")[:first.start()].split()).strip(" ,.-:") if first else ""
+        name = name or None
+        estimate = self.public_asked.get(charge_id)
+        if estimate is None and p.ledger is not None and (stored := p.ledger.store.get_charge(charge_id)) is not None:
+            # The question's estimate is gone after a restart: the charge's kWh, else the ledger's estimate again
+            estimate = stored.kwh or (p.ledger.public_kwh_estimate(stored)[0]
+                                      if hasattr(p.ledger, "public_kwh_estimate") else None)
+        kwh = numbers[0] if len(numbers) >= 2 else estimate
         price = numbers[1] if len(numbers) >= 2 else (numbers[0] if numbers else None)
+        per_kwh = len(numbers) == 1 and price is not None and (
+            "kwh" in (reply or "").lower() or (name is not None and price <= PER_KWH_MAX))
+        if per_kwh and kwh:
+            price = round(price * kwh, 2)
         if price is None or kwh is None or p.ledger is None or not 0 < kwh <= 300 or price > 100_000:
             text = "Prisen kunne ikke læses. Skriv kWh og pris, fx 23,4 82,50."
             p.entry.async_create_background_task(
@@ -290,7 +311,7 @@ class Routines:
             return
 
         async def save() -> None:
-            await p.ledger.async_log_public_charge(kwh, price, charge_id=charge_id)
+            await p.ledger.async_log_public_charge(kwh, price, name, charge_id=charge_id)
             per = f" ({self._kr(price / kwh)} kr/kWh)" if kwh else ""
             await p.notify.async_send_note("public_price", "offentlig ladning gemt",
                                            f"Gemt: {self._kr(kwh, 1)} kWh for {self._kr(price)} kr{per}.")

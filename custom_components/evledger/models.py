@@ -90,11 +90,16 @@ class ChargeSession:
     end_battery_pct: float | None
     needs_review: bool = False
     note: str | None = None
-    # Where the price came from: "default" = the public default price per kWh, "zone" = the price of the zone it happened
-    # in (both replaced by any price given later), "manual" = typed in; None for the rest (home charges, older records)
+    # Where the price came from: "place" = a place named before, "zone" = the zone's price, "operator" = the operator's
+    # price, "default" = the public default price per kWh (all replaced by any price given later), "manual" = typed in;
+    # None for the rest (home charges, older records)
     price_source: str | None = None
     # The Home Assistant zone a public charge happened in (its own price per kWh may apply), if any
     zone: str | None = None
+    # Where a public charge happened (to remember the place when it is named), and the station's operator if known
+    latitude: float | None = None
+    longitude: float | None = None
+    operator: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
