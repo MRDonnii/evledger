@@ -249,6 +249,27 @@ The same from a dashboard, without helpers of your own: type the kWh, the price 
 `text.<vehicle>_public_charge_location`, and press `button.<vehicle>_log_public_charge`. The fields are
 emptied when the charge is saved.
 
+### A default price for public charging
+
+Some networks have one price around the clock, e.g. Tesla's Superchargers. Put it in
+`number.<vehicle>_default_public_price_per_kwh` (price per kWh, 0 = off). When a public charge ends, it gets that price at
+once, and it counts in the monthly and yearly figures like any other charge. The kWh comes from the car's own "energy
+added" counter (Tesla `charge_energy_added` / `energy_added`) if it changed during the charge, else from the battery's
+gain. The phone message, if on, says what was saved, and a reply with another price replaces it. A price logged with
+`log_public_charge` or the dashboard form within 12 hours replaces the default-priced charge too, instead of adding a
+second one.
+
+The charge also gets a place: the zone the car is in, else the Tesla Supercharger within 300 m (from supercharge.info's
+public list, fetched at most once a week). A zone can have its own price per kWh, used instead of the default:
+
+```yaml
+service: evledger.set_zone_price
+data:
+  entry_id: <your vehicle's config entry id>
+  zone: zone.family
+  price: 0      # free there; leave the price out to remove the zone's price
+```
+
 ## Fixing a mistake
 
 Trips and charges can be wrong — a phantom trip from GPS drift, a charge

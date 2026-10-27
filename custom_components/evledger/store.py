@@ -29,6 +29,7 @@ class EvLedgerStore:
         self._tyre_sets: dict[str, TyreSet] = {}
         self._tyre_changes: dict[str, TyreChange] = {}
         self.tyre_notified: str | None = None
+        self.settings: dict = {}  # the ledger's own settings (public_default_price)
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
@@ -40,6 +41,7 @@ class EvLedgerStore:
             self._tyre_sets = {t["id"]: TyreSet.from_dict(t) for t in tyres.get("sets", [])}
             self._tyre_changes = {c["id"]: TyreChange.from_dict(c) for c in tyres.get("changes", [])}
             self.tyre_notified = tyres.get("notified")
+            self.settings = dict(data.get("settings") or {})
 
     def _data(self) -> dict:
         return {
@@ -49,10 +51,15 @@ class EvLedgerStore:
             "tyres": {"sets": [t.to_dict() for t in self._tyre_sets.values()],
                       "changes": [c.to_dict() for c in self._tyre_changes.values()],
                       "notified": self.tyre_notified},
+            "settings": self.settings,
         }
 
     async def _async_save(self) -> None:
         await self._store.async_save(self._data())
+
+    async def async_set_setting(self, key: str, value) -> None:
+        self.settings[key] = value
+        await self._async_save()
 
     def meter(self, charge_id: str) -> dict | None:
         """For the open charge: the charger's session counter when it began ("kwh"), at the last look ("last"), and

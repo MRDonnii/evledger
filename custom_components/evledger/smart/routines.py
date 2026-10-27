@@ -230,7 +230,10 @@ class Routines:
         return f"{value:.{digits}f}".replace(".", ",")
 
     def public_kwh(self, charge: Any) -> float | None:
-        """About what a public charge put in: the battery's gain (fast chargers lose a few %)."""
+        """About what a public charge put in: the ledger's estimate (the car's own counter, else the battery's gain)."""
+        ledger = self.planner.ledger
+        if ledger is not None and hasattr(ledger, "public_kwh_estimate"):
+            return ledger.public_kwh_estimate(charge)[0]
         start, end = charge.start_battery_pct, charge.end_battery_pct
         if start is None or end is None or end <= start or self.planner.capacity <= 0:
             return None
@@ -249,8 +252,23 @@ class Routines:
         battery = (f", {charge.start_battery_pct:.0f} → {charge.end_battery_pct:.0f} %"
                    if charge.start_battery_pct is not None and charge.end_battery_pct is not None else "")
         estimate = f", ca. {self._kr(kwh, 1)} kWh" if kwh else ""
-        text = (f"Bilen har ladet ude {when}{battery}{estimate}. Skriv prisen i kr, eller kWh og pris "
-                "(fx 23,4 82,50).")
+        source = getattr(charge, "price_source", None)
+        name = getattr(charge, "location_name", None)
+        place = (f" hos {name}" if getattr(charge, "zone", None) else f" ved {name}") if name else " ude"
+        if source in ("default", "zone") and charge.price is not None:
+            # Already priced (the zone's price or the public default price): say so; a reply replaces it
+            amount = f"{self._kr(charge.kwh, 1)} kWh" if charge.kwh else "Ladningen"
+            if charge.price == 0:
+                saved = f"{amount} er gemt som gratis. Var den ikke gratis, så skriv prisen"
+            else:
+                per = charge.price / charge.kwh if charge.kwh else 0
+                which = "zonens pris" if source == "zone" else "standardprisen"
+                saved = (f"Gemt med {which} {self._kr(per)} kr/kWh: {amount} = {self._kr(charge.price)} kr. "
+                         "Var prisen en anden, så skriv den")
+            text = f"Bilen har ladet{place} {when}{battery}. {saved} i kr, eller kWh og pris (fx 23,4 82,50)."
+        else:
+            text = (f"Bilen har ladet{place} {when}{battery}{estimate}. Skriv prisen i kr, eller kWh og pris "
+                    "(fx 23,4 82,50).")
         actions = [{"action": f"{p.notify.prefix}PUBLIC_{charge.id}", "title": "Skriv pris",
                     "behavior": "textInput", "textInputButtonTitle": "Gem", "textInputPlaceholder": "82,50"}]
         p.entry.async_create_background_task(

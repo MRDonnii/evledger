@@ -310,6 +310,9 @@
       },
       "smart_floor_soc": {
         "name": "Always keep at least"
+      },
+      "public_default_price": {
+        "name": "Default public price per kWh"
       }
     },
     "time": {

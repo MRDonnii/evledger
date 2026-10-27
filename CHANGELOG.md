@@ -4,6 +4,37 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.11.0] - 2026-10-27
+
+### Added
+
+- **A default price for public charging, `number.<car>_default_public_price_per_kwh`** ("Standardpris ude pr. kWh"; 0 = off,
+  the default). Tesla's Superchargers have one price around the clock. With the price set, a public charge is priced
+  when it ends and counts in the monthly and yearly cost straight away. The kWh comes from the car's own "energy added"
+  counter (Tesla Fleet `charge_energy_added`, Tesla Custom `energy_added`, found on the battery sensor's device) when it
+  changed during this charge and agrees with the battery's gain within a factor of two. Otherwise the battery's gain
+  divided by 0.95 is used, as before. Any price given later replaces it: the phone's answer, `log_public_charge` or the
+  dashboard form within 12 hours. The phone message says the charge was saved with the default price.
+- **The place of a public charge.** When it starts (or ends, if the car had no position), the charge gets the name of
+  the Home Assistant zone the car is in, else of a Tesla Supercharger within 300 m ("Supercharger Søndervig"). The
+  Supercharger sites come from supercharge.info's public list: fetched when a public charge first needs it, at most
+  once a week, and kept in `.storage`.
+- **Zone prices, `evledger.set_zone_price`** (zone, price per kWh; no price removes it). A public charge in such a
+  zone gets the zone's price instead of the default price, e.g. 0 where charging is free at family. They are shown in
+  the default price number's `zone_prices` attribute.
+- Charges record where their price came from (`price_source`: `default`, `zone` or `manual`) and their `zone`.
+
+### Fixed
+
+- **A hanging car integration no longer keeps a charge running.** On 27 Oct 2026 Tesla Custom stopped updating at a
+  Supercharger. It said "charging" (and the position there) for over an hour after the charge ended and the car had
+  left, while Tesla Fleet already said "disconnected". The ledger kept the public charge open and the plan showed it
+  charging. For the charging state, the battery, the position, the lock and the outside temperature, the ledger now
+  reads every one of the car's integrations: Tesla Custom, Tesla Fleet, Teslemetry or Tessie devices with the car's
+  name. It uses the one that reported last (`last_reported`). The odometer stays with the configured entity, because
+  two integrations' counters differ a little and switching would make trips out of nothing. The car's "energy added"
+  counter for a public charge is chosen the same way.
+
 ## [0.10.4] - 2026-10-19
 
 ### Added

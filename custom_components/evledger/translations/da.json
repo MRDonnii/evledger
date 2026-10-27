@@ -310,6 +310,9 @@
       },
       "smart_floor_soc": {
         "name": "Behold altid mindst"
+      },
+      "public_default_price": {
+        "name": "Standardpris ude pr. kWh"
       }
     },
     "time": {

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -19,6 +20,7 @@ from .const import (
     TRIP_MIN_DISTANCE_KM,
 )
 from .models import ChargeSession, LiveChargeState, Trip, VehicleSnapshot
+from .public_place import async_place
 from .providers.charger.base import CAP_COST_LOOKUP, CAP_LIVE_POWER, ChargerProvider
 from .smart.plan import SLOT_MINUTES
 from .providers.vehicle.base import VehicleProvider
@@ -35,6 +37,10 @@ HOME_TO_PUBLIC_COOLDOWN_MINUTES = 2
 # The other way round: the car can report charging a poll or two before the home charger does. A public session it
 # opened this shortly before the home charger began was the start of that home charge, not a charge away from home.
 PUBLIC_BEFORE_HOME_MINUTES = 10
+# A public charge priced with the default price per kWh is replaced by a price logged by hand this long after it
+PUBLIC_DEFAULT_REPLACE_HOURS = 12
+# A fast charger loses a few % on the way into the battery: the battery's gain is that much less than was billed
+PUBLIC_CHARGE_EFFICIENCY = 0.95
 
 
 class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -170,22 +176,110 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         now = dt_util.utcnow()
         pending = self.store.get_charge(charge_id) if charge_id else None
         if pending is None or pending.location_kind != LOCATION_PUBLIC:
-            pending = self.store.get_latest_pending_review_charge(LOCATION_PUBLIC)
+            pending = (self.store.get_latest_pending_review_charge(LOCATION_PUBLIC)
+                       or self._recent_auto_priced(now))
         if pending is not None:
             pending.kwh = kwh
             pending.price = price
             pending.location_name = location_name or pending.location_name
             pending.note = note or pending.note
             pending.needs_review = False
+            pending.price_source = "manual"
             await self.store.async_upsert_charge(pending)
         else:
             await self.store.async_upsert_charge(ChargeSession(
                 id=self.store.new_id(), location_kind=LOCATION_PUBLIC, provider="manual",
                 started_at=(started_at or now).isoformat(), ended_at=now.isoformat(), kwh=kwh, price=price,
                 price_currency=self.currency, location_name=location_name, start_battery_pct=None,
-                end_battery_pct=None, needs_review=False, note=note,
+                end_battery_pct=None, needs_review=False, note=note, price_source="manual",
             ))
         await self.async_request_refresh()
+
+    async def _find_place(self, charge: ChargeSession, snapshot: VehicleSnapshot | None) -> None:
+        """The zone or Tesla Supercharger the car charges at, as the charge's place (never fatal)."""
+        if snapshot is None or charge.location_name or charge.zone:
+            return
+        try:
+            charge.zone, charge.location_name = await async_place(self.hass, snapshot.latitude, snapshot.longitude)
+        except Exception:  # noqa: BLE001 - the place is an extra, the charge must be saved
+            _LOGGER.debug("%s: place of the public charge not found", self.vehicle_name, exc_info=True)
+
+    def zone_price(self, zone: str | None) -> float | None:
+        """The price per kWh of charging in this zone (0 = free), if one is set."""
+        prices = self.store.settings.get("zone_prices") or {}
+        try:
+            value = float(prices[zone]) if zone and zone in prices else None
+        except (TypeError, ValueError):
+            return None
+        return value if value is not None and math.isfinite(value) and value >= 0 else None
+
+    async def async_set_zone_price(self, zone: str, price: float | None) -> None:
+        """Set (or with None remove) the price per kWh of charging in a zone."""
+        prices = dict(self.store.settings.get("zone_prices") or {})
+        if price is None:
+            prices.pop(zone, None)
+        else:
+            prices[zone] = round(float(price), 4)
+        await self.store.async_set_setting("zone_prices", prices)
+        self.async_update_listeners()
+
+    def _recent_auto_priced(self, now: datetime) -> ChargeSession | None:
+        """The latest public charge priced with the default or a zone price, if it ended within
+        PUBLIC_DEFAULT_REPLACE_HOURS: a price logged by hand now is that charge's real price ("unless I put in something
+        else")."""
+        latest = None
+        for charge in self.store.charges:
+            ended = dt_util.parse_datetime(charge.ended_at or "")
+            if (charge.location_kind == LOCATION_PUBLIC and charge.price_source in ("default", "zone")
+                    and ended is not None
+                    and now - ended <= timedelta(hours=PUBLIC_DEFAULT_REPLACE_HOURS)
+                    and (latest is None or ended > latest[0])):
+                latest = (ended, charge)
+        return latest[1] if latest else None
+
+    def public_default_price(self) -> float:
+        """The price per kWh a public charge gets when it ends (0 = none, then the phones are asked as before)."""
+        try:
+            value = float(self.store.settings.get("public_default_price") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return value if math.isfinite(value) and value > 0 else 0.0
+
+    def _capacity_kwh(self) -> float | None:
+        smart = getattr(self, "smart", None)
+        capacity = getattr(smart, "capacity", None) if smart is not None else None
+        capacity = capacity or self.battery_capacity_kwh
+        return capacity if capacity and capacity > 0 else None
+
+    def _energy_added_entity(self) -> str | None:
+        """The car's own counter of the energy added in its current/last charge (Tesla Fleet charge_energy_added,
+        Tesla Custom energy_added), of the car's integrations the one that reported last."""
+        sources = getattr(self._vehicle_provider, "sources", None)
+        if sources is None:
+            return None
+        return sources.freshest_matching(self.hass, lambda entry: entry.domain == "sensor" and "energy_added" in (
+            f"{entry.translation_key or ''} {entry.unique_id or ''} {entry.entity_id}"))
+
+    def public_kwh_estimate(self, charge: ChargeSession) -> tuple[float | None, str | None]:
+        """About what a public charge put in, and from where: the car's own counter when it moved during this charge
+        and roughly agrees with the battery ("car"), else the battery's gain over the charge ("battery")."""
+        estimate = None
+        capacity = self._capacity_kwh()
+        start, end = charge.start_battery_pct, charge.end_battery_pct
+        if capacity and start is not None and end is not None and end > start:
+            estimate = round((end - start) / 100 * capacity / PUBLIC_CHARGE_EFFICIENCY, 1)
+        entity_id = self._energy_added_entity()
+        state = self.hass.states.get(entity_id) if entity_id else None
+        started = dt_util.parse_datetime(charge.started_at or "")
+        try:
+            counter = float(state.state) if state is not None else None
+        except (TypeError, ValueError):
+            counter = None
+        if (counter is not None and math.isfinite(counter) and counter > 0 and started is not None
+                and state.last_changed >= started
+                and (estimate is None or 0.5 <= counter / estimate <= 2.0)):
+            return round(counter, 1), "car"
+        return (estimate, "battery") if estimate else (None, None)
 
     def home_power_kw(self) -> float | None:
         """The home charger's power while this car has it (kW): 0 while another car on a shared charger has it."""
@@ -520,15 +614,32 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     end_battery_pct=None,
                     needs_review=True,
                 )
+                await self._find_place(open_public, snapshot)
                 await self.store.async_upsert_charge(open_public)
-                _LOGGER.info("%s: public charging started", self.vehicle_name)
+                _LOGGER.info("%s: public charging started%s", self.vehicle_name,
+                             f" at {open_public.location_name}" if open_public.location_name else "")
         elif not vehicle_charging and open_public is not None:
             open_public.ended_at = now.isoformat()
             open_public.end_battery_pct = snapshot.battery_pct
+            if open_public.location_name is None and open_public.zone is None:
+                await self._find_place(open_public, snapshot)  # the car had no position when it started
+            # The zone's own price (e.g. free at family), else the public default price (e.g. Tesla Supercharger's flat
+            # price) prices the charge at once; any price given later (the phone, the form, the action) replaces it
+            zone_price = self.zone_price(open_public.zone)
+            per_kwh, source = ((zone_price, "zone") if zone_price is not None
+                               else (self.public_default_price() or None, "default"))
+            kwh = self.public_kwh_estimate(open_public)[0] if per_kwh is not None else None
+            if per_kwh is not None and (kwh or per_kwh == 0):
+                open_public.kwh = kwh
+                open_public.price = round((kwh or 0) * per_kwh, 2)
+                open_public.price_source = source
+                open_public.needs_review = False
             await self.store.async_upsert_charge(open_public)
             _LOGGER.info(
-                "%s: public charging ended, waiting for price (log_public_charge service)",
+                "%s: public charging ended, %s",
                 self.vehicle_name,
+                f"priced with the {open_public.price_source} price ({open_public.kwh} kWh, {open_public.price})"
+                if open_public.price_source in ("default", "zone") else "waiting for price (log_public_charge service)",
             )
             if (smart := getattr(self, "smart", None)) is not None:
                 # A message is an extra: a fault in it must not stop the ledger (the charge is already saved).

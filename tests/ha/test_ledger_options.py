@@ -20,7 +20,8 @@ async def test_without_smart_charging_only_ledger_sensors(hass: HomeAssistant, r
     assert {e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), other.entry_id)
             if e.domain in ("number", "text", "button")} == {
         "number.anden_public_charge_energy", "number.anden_public_charge_price", "text.anden_public_charge_location",
-        "button.anden_log_public_charge"}, "only the public charge form, no smart charging settings"
+        "button.anden_log_public_charge", "number.anden_default_public_price_per_kwh"}, \
+        "only the public charge form and its default price, no smart charging settings"
     assert {e.entity_id for e in er.async_entries_for_config_entry(er.async_get(hass), other.entry_id)
             if e.domain == "select"} == {"select.anden_tyre_set"}
     assert hass.data[DOMAIN][other.entry_id].smart is None

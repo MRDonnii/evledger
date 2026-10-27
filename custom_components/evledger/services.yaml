@@ -535,3 +535,34 @@ delete_tread_depth:
       required: true
       selector:
         text:
+
+set_zone_price:
+  name: Set zone price
+  description: >-
+    The price per kWh of charging away from home in a zone, e.g. 0 at family where charging is free. A public charge
+    in the zone gets this price instead of the public default price. Leave the price out to remove the zone's price.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this applies to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    zone:
+      name: Zone
+      description: The zone.
+      required: true
+      selector:
+        entity:
+          domain: zone
+    price:
+      name: Price per kWh
+      description: The price per kWh in the zone (0 = free). Leave it out to remove the zone's price.
+      required: false
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01

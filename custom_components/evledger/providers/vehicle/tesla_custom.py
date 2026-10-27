@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
 
+from ...car_sources import CarSources
+from ...const import (
+    CONF_BATTERY_ENTITY,
+    CONF_CHARGING_BINARY_ENTITY,
+    CONF_DEVICE_TRACKER_ENTITY,
+    CONF_LOCKED_ENTITY,
+    CONF_OUTSIDE_TEMP_ENTITY,
+)
 from ...models import VehicleSnapshot
 from ...smart.plan import finite
 from .base import VehicleProvider
@@ -49,16 +57,25 @@ class TeslaCustomVehicleProvider(VehicleProvider):
         self._charging_binary_entity = charging_binary_entity
         self._locked_entity = locked_entity
         self._outside_temp_entity = outside_temp_entity
+        # The same readings from the car's other integrations; the one that reported last is used (see car_sources)
+        self.sources = CarSources({
+            CONF_BATTERY_ENTITY: battery_entity, CONF_CHARGING_BINARY_ENTITY: charging_binary_entity,
+            CONF_DEVICE_TRACKER_ENTITY: device_tracker_entity, CONF_LOCKED_ENTITY: locked_entity,
+            CONF_OUTSIDE_TEMP_ENTITY: outside_temp_entity,
+        })
 
     def get_snapshot(self, hass: HomeAssistant) -> VehicleSnapshot | None:
-        battery_pct = _float_state(hass, self._battery_entity)
+        fresh = self.sources.freshest
+        battery_pct = _float_state(hass, fresh(hass, CONF_BATTERY_ENTITY, lambda st: finite(st.state) is not None))
         odometer_km = _float_state(hass, self._odometer_entity)
-        outside_temp_c = _float_state(hass, self._outside_temp_entity)
+        outside_temp_c = _float_state(hass, fresh(hass, CONF_OUTSIDE_TEMP_ENTITY))
 
         latitude: float | None = None
         longitude: float | None = None
-        if self._device_tracker_entity:
-            tracker_state = hass.states.get(self._device_tracker_entity)
+        tracker = fresh(hass, CONF_DEVICE_TRACKER_ENTITY, lambda st: finite(st.attributes.get("latitude")) is not None
+                        and finite(st.attributes.get("longitude")) is not None)
+        if tracker:
+            tracker_state = hass.states.get(tracker)
             if tracker_state is not None:
                 latitude = finite(tracker_state.attributes.get("latitude"))
                 longitude = finite(tracker_state.attributes.get("longitude"))
@@ -66,8 +83,8 @@ class TeslaCustomVehicleProvider(VehicleProvider):
                     latitude = longitude = None
 
         # A binary sensor (Tesla Custom) or a charging-state sensor (Tesla Fleet, Teslemetry: "charging").
-        is_charging = _bool_state(hass, self._charging_binary_entity, ("on", "charging"))
-        is_locked = _bool_state(hass, self._locked_entity, ("locked", "on"))
+        is_charging = _bool_state(hass, fresh(hass, CONF_CHARGING_BINARY_ENTITY), ("on", "charging"))
+        is_locked = _bool_state(hass, fresh(hass, CONF_LOCKED_ENTITY), ("locked", "on"))
 
         if battery_pct is None and odometer_km is None and latitude is None:
             # Nothing usable this cycle (e.g. car asleep and entities unavailable).
