@@ -4,6 +4,14 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.14.1] - 2026-10-28
+
+### Fixed
+
+- **A price of 0 in an operator's AFIR data is no price**, not free charging (a Verdo site wrote 0 kr/kWh "ad hoc", last
+  updated in 2024). Free charging is still set with a zone or a named place.
+- **Operator prices match whole words**: "OK" is OK a.m.b.a.'s price, not that of any operator with "ok" in its name.
+
 ## [0.14.0] - 2026-10-28
 
 ### Added

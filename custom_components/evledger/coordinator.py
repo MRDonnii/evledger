@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any
@@ -57,6 +58,11 @@ PUBLIC_CHARGE_EFFICIENCY = 0.95
 FAST_KW = 50
 # Prices a public charge gets by itself (replaced by any price given later)
 AUTO_PRICE_SOURCES = ("place", "zone", "station", "operator", "default")
+
+
+def _word_in(part: str, text: str) -> bool:
+    """part as whole words in text ("ok" in "ok a.m.b.a.", not in "stokke el")."""
+    return re.search(rf"(?<![\w]){re.escape(part)}(?![\w])", text) is not None
 
 
 class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -277,7 +283,7 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         wanted = operator.lower()
         for name, setting in (self.store.settings.get("operator_prices") or {}).items():
             key = str(name).lower()
-            if not key or not (key in wanted or wanted in key):
+            if not key or not (_word_in(key, wanted) or _word_in(wanted, key)):
                 continue
             price, fast = (setting.get("price"), setting.get("fast")) if isinstance(setting, dict) else (setting, None)
             if station_kw is not None and station_kw >= FAST_KW and fast is not None:

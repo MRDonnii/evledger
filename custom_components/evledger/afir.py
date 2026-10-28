@@ -177,6 +177,9 @@ def tariff_from_prices(prices: Any, currency: str | None) -> dict | None:
         if not isinstance(price, dict) or (value := _kroner(price, currency)) is None:
             continue
         kind = _enum(price.get("priceType"))
+        if value == 0:
+            # An empty price field, not free charging (Verdo's site-29445: 0 kr/kWh "ad hoc", last updated 2024-03-05)
+            continue
         if kind == "pricePerKWh":
             period = price.get("overallPeriod")
             if not isinstance(period, dict):

@@ -135,6 +135,26 @@ def test_a_datex_xml_feed_is_read():
     assert sites_from_xml(b"<not xml", "ok") == []
 
 
+def test_a_zero_price_is_no_price():
+    zero = {"priceType": "pricePerKWh", "value": 0, "taxIncluded": True}
+    rate = {"applicableCurrency": ["DKK"], "energyPrice": [zero]}
+    point = {"connector": [{"connectorType": "iec62196T2", "maxPowerAtSocket": 11000}],
+             "electricEnergy": [{"energyRate": [rate]}]}
+    site = {"idG": "z", "locationReference": {"coordinatesForDisplay": {"latitude": 55.0, "longitude": 12.0}},
+            "energyInfrastructureStation": [{"refillPoint": [point]}]}
+    [found] = sites_from_json(json.dumps(publication(site)), "spirii")
+    assert found["g"][0]["tf"] is None, "an empty price field is not free charging"
+
+
+async def test_an_operator_name_matches_as_whole_words(hass: HomeAssistant, request):
+    entry, _ = await setup(hass, request)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    await hass.services.async_call(DOMAIN, "set_operator_price", {"entry_id": entry.entry_id, "operator": "OK",
+                                                                  "price": 3.19}, blocking=True)
+    assert coordinator.operator_price("OK a.m.b.a.") == 3.19
+    assert coordinator.operator_price("Stokke El") is None
+
+
 def test_the_next_page_stays_on_the_same_host():
     base = "https://nap.example.com/datex2/v1/locations"
     assert _next_link('<https://nap.example.com/datex2/v1/locations?page=2>; rel="next"', base) \
