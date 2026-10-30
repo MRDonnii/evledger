@@ -50,6 +50,7 @@ def ble(hass: HomeAssistant, vin: str = VIN, prefix: str = "ble") -> dr.DeviceEn
         ("sensor", f"{vin}_sensor_charge_energy_added", f"{prefix}_charge_energy_added"),
         ("device_tracker", f"{vin}_tracker", f"{prefix}_vehicle"),
         ("number", f"{vin}_number_charge_limit", f"{prefix}_charge_limit"),
+        ("climate", f"{vin}_climate_climate", f"{prefix}_climate"),
     ))
 
 
@@ -58,13 +59,13 @@ def cloud(hass: HomeAssistant) -> None:
     register(hass, "tesla_custom", VIN, "Bil", (
         ("sensor", "vin_battery", "car_battery"), ("binary_sensor", "vin_charging", "car_charging"),
         ("device_tracker", "vin_location_tracker", "car"), ("binary_sensor", "vin_charger", "car_plug", "plug"),
-        ("number", "vin_charge_limit", "car_charge_limit")))
+        ("number", "vin_charge_limit", "car_charge_limit"), ("climate", "vin_hvac", "car_hvac")))
     register(hass, "tesla_fleet", VIN, "Bil", (
         ("sensor", "vin-charge_state_battery_level", "bil_battery_level"),
         ("sensor", "vin-charge_state_charging_state", "bil_charging"),
         ("device_tracker", "vin-location", "bil_location"),
         ("sensor", "vin-charge_state_charge_energy_added", "bil_charge_energy_added"),
-        ("number", "vin-charge_state_charge_limit_soc", "bil_charge_limit")))
+        ("number", "vin-charge_state_charge_limit_soc", "bil_charge_limit"), ("climate", "vin-climate", "bil_climate")))
 
 
 async def snapshot(hass: HomeAssistant, entry):
@@ -183,3 +184,41 @@ async def test_the_ble_running_total_is_not_a_charges_energy(hass: HomeAssistant
     hass.states.async_set("sensor.ble_charge_energy_added", "1834.2", {"unit_of_measurement": "kWh"})
     coordinator = hass.data[DOMAIN][entry.entry_id]
     assert coordinator._energy_added_entity() == "sensor.bil_charge_energy_added"
+
+
+async def test_the_climate_goes_over_bluetooth_at_home_and_the_cloud_away(hass: HomeAssistant, request):
+    """User 2026-10-30: "det er ESP32 der styrer bilen her hjemme … ude skal det være Fleet"."""
+    cloud(hass)
+    ble(hass)
+    for entity_id in ("climate.ble_climate", "climate.bil_climate", "climate.car_hvac"):
+        hass.states.async_set(entity_id, "off")
+    calls, failing = [], set()
+
+    async def record(call):
+        calls.append(f"{call.service} {call.data['entity_id']}")
+        if call.data["entity_id"] in failing:
+            raise HomeAssistantError("not reachable over Bluetooth")
+
+    hass.services.async_register("climate", "turn_on", record)
+    entry, _ = await setup(hass, request, cheap_now=False)
+    routines = hass.data[DOMAIN][entry.entry_id].smart.routines
+    assert routines.climate_entities() == ["climate.ble_climate", "climate.bil_climate", "climate.car_hvac"]
+    assert routines.climate_entity() == "climate.ble_climate", "at home: over Bluetooth"
+    routines._climate("turn_on", routines.climate_entity())
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert calls == ["turn_on climate.ble_climate"]
+    # Bluetooth fails: the cloud gets the same command
+    calls.clear()
+    failing.add("climate.ble_climate")
+    routines._climate("turn_on", routines.climate_entity())
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert calls == ["turn_on climate.ble_climate", "turn_on climate.bil_climate"]
+    # Away: Tesla BLE is unavailable, Tesla Fleet is the climate
+    calls.clear()
+    hass.states.async_set("climate.ble_climate", "unavailable")
+    assert routines.climate_entity() == "climate.bil_climate"
+    routines._climate("turn_on", routines.climate_entity())
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert calls == ["turn_on climate.bil_climate"]
+    assert hass.states.get("sensor.bil_charge_status").attributes["car_climate_entity"] in (
+        "climate.ble_climate", "climate.bil_climate")

@@ -186,7 +186,7 @@ class Routines:
         # (then the climate was turned on by us, and is turned off again if nobody left).
         self.precondition_goal: datetime | None = None
         self.preconditioned = False
-        self._climate_id: str | None = None
+        self._climate_id: list[str] | None = None
         self._calendar_checked: datetime | None = None
         self._calendar_busy = False
         # Calendar events whose trip was cleared by hand: not added again.
@@ -784,14 +784,15 @@ class Routines:
 
     # -- the car's climate before the ready-by time -----------------------------------------------
 
-    def climate_entity(self) -> str | None:
-        """The car's climate entity: chosen in the setup, else one on this car only – the battery sensor's device or a
-        device with the same name in another car integration – preferring one that can send commands to the car
-        (Tesla Fleet, Teslemetry, Tessie) over Tesla Custom."""
+    def climate_entities(self) -> list[str]:
+        """The car's climate entities in order: the one chosen in the setup, else those on this car only – the battery
+        sensor's device or another device of the same car – Tesla BLE first (the car over local Bluetooth: at home, no
+        cloud), then one that can send commands through Tesla's cloud (Tesla Fleet, Teslemetry, Tessie), Tesla Custom
+        last."""
         if chosen := self.planner.options.get(CONF_CAR_CLIMATE):
-            return chosen
+            return [chosen]
         if self._climate_id is None:
-            self._climate_id = ""
+            found: list = []
             registry = er.async_get(self.hass)
             devices = dr.async_get(self.hass)
             battery = registry.async_get(self.planner.battery_entity)
@@ -800,10 +801,23 @@ class Routines:
                 same_car = same_car_devices(devices, car)
                 found = [other for device_id in same_car for other in er.async_entries_for_device(registry, device_id)
                          if other.domain == "climate" and not other.disabled_by and "overheat" not in other.unique_id]
-                order = ("tesla_fleet", "teslemetry", "tessie")
+                order = ("tesla_ble", "tesla_fleet", "teslemetry", "tessie")
                 found.sort(key=lambda other: order.index(other.platform) if other.platform in order else len(order))
-                self._climate_id = found[0].entity_id if found else ""
-        return self._climate_id or None
+            self._climate_id = [other.entity_id for other in found]
+        return list(self._climate_id)
+
+    def _climate_ways(self) -> list[str]:
+        """Where a climate command goes, in order: the reachable ones (Tesla BLE is unavailable out of Bluetooth
+        range, so away from home the cloud integration is first); the first one when none is."""
+        ids = self.climate_entities()
+        reachable = [entity_id for entity_id in ids
+                     if (state := self.hass.states.get(entity_id)) is not None and state.state != STATE_UNAVAILABLE]
+        return reachable or ids[:1]
+
+    def climate_entity(self) -> str | None:
+        """The car's climate entity now: at home over Bluetooth (Tesla BLE) when it reaches the car, else the cloud."""
+        ways = self._climate_ways()
+        return ways[0] if ways else None
 
     def precondition(self, now: datetime) -> None:
         """Before the ready-by (or departure) time the phones are asked whether to warm the car; the climate is only
@@ -841,13 +855,18 @@ class Routines:
         self._climate("turn_on", climate)
 
     def _climate(self, service: str, entity_id: str) -> None:
-        _LOGGER.info("%s: climate.%s on %s", self.planner.entry.title, service, entity_id)
+        """Send a climate command; when it fails (Bluetooth lost the car, the cloud is down) the next way is tried."""
+        ways = self._climate_ways()
+        ways = ways[ways.index(entity_id):] if entity_id in ways else [entity_id]
+        _LOGGER.info("%s: climate.%s on %s", self.planner.entry.title, service, ways[0])
 
         async def call() -> None:
-            try:
-                await self.hass.services.async_call("climate", service, {"entity_id": entity_id}, blocking=True)
-            except Exception as err:  # noqa: BLE001 – a car that does not answer
-                _LOGGER.warning("climate.%s on %s failed: %s", service, entity_id, err or type(err).__name__)
+            for way in ways:
+                try:
+                    await self.hass.services.async_call("climate", service, {"entity_id": way}, blocking=True)
+                    return
+                except Exception as err:  # noqa: BLE001 – a car that does not answer
+                    _LOGGER.warning("climate.%s on %s failed: %s", service, way, err or type(err).__name__)
 
         self.planner.entry.async_create_background_task(self.hass, call(), "ev_smart_charge_climate")
 

@@ -625,7 +625,7 @@ to set up in EV Ledger: the Tesla BLE device ("Tesla" and the VIN's last 6 chara
 same car. EV Ledger reads every one of the car's integrations and uses the one that reported last. At home that is
 Tesla BLE: it reports every 10–60 seconds while the car is within range, also its plug sensor. Away from home its
 readings go unavailable, and Tesla Fleet, Tesla Custom, Teslemetry or Tessie take over by themselves. The charge limit
-is sent over Bluetooth first (no cloud, at once), and through the cloud when that fails. Not from Tesla BLE: the
+and the climate (preconditioning) are sent over Bluetooth first (no cloud, at once), and through the cloud when that fails. Not from Tesla BLE: the
 position (its tracker only says whether the car is within range) and "charge energy added", which there is a total over
 all charges. Pair Tesla BLE with *Charging controls* if it should only start/stop charging and set the limit.
 

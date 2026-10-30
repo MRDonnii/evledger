@@ -4,6 +4,15 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.15.1] - 2026-10-30
+
+### Changed
+
+- **The car's climate (preconditioning) goes over Bluetooth at home.** Tesla BLE's climate comes first while it reaches
+  the car; out of Bluetooth range it is unavailable and Tesla Fleet, Teslemetry or Tessie take the command, Tesla Custom
+  last. When the command fails, the next one is tried. Keeping the battery at the target while heating reads the climate
+  from the same one. A climate chosen in the setup is still the only one used.
+
 ## [0.15.0] - 2026-10-30
 
 ### Added

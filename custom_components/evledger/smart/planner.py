@@ -431,8 +431,7 @@ class ChargePlanner:
         if limit := self._limit_entity():
             watched.append(limit)
         # The car's climate: keeping the battery at the target while it heats follows it at once.
-        if climate := self.routines.climate_entity():
-            watched.append(climate)
+        watched.extend(self.routines.climate_entities())
         self._unsubs.append(async_track_state_change_event(self.hass, list(dict.fromkeys(watched)), self._on_state))
         self._unsubs.append(async_track_time_interval(self.hass, self._on_tick, timedelta(minutes=1)))
         self._unsubs.append(self.notify.async_listen(self))
