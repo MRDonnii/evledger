@@ -57,7 +57,7 @@ or logged out anywhere.
 
 | Role | Provider | What it gives EV Ledger |
 |---|---|---|
-| Vehicle | [Tesla Custom Integration](https://github.com/alandtse/tesla), [Tesla Fleet](https://www.home-assistant.io/integrations/tesla_fleet/), [Teslemetry](https://www.home-assistant.io/integrations/teslemetry/) or [Tessie](https://www.home-assistant.io/integrations/tessie/) — picked as a device | battery %, odometer, location, charging state, lock state |
+| Vehicle | [Tesla Custom Integration](https://github.com/alandtse/tesla), [Tesla Fleet](https://www.home-assistant.io/integrations/tesla_fleet/), [Teslemetry](https://www.home-assistant.io/integrations/teslemetry/) or [Tessie](https://www.home-assistant.io/integrations/tessie/) — picked as a device; [Tesla BLE](https://github.com/yoziru/ha-tesla-ble) (local Bluetooth) as an extra source at home | battery %, odometer, location, charging state, lock state |
 | Vehicle (any other car) | Its sensors, picked by hand | battery %, odometer, location and a charging sensor (on/off, or a state that says `charging`) |
 | Charger (live power) | [Zaptec](https://www.home-assistant.io/integrations/zaptec/) | live power, session energy |
 | Charger (actual cost) | [Monta](https://github.com/erlendsellie/monta_ha) | actual cost of the last completed session |
@@ -618,6 +618,16 @@ commands to the car. Tesla now only accepts commands signed with a *virtual key*
    will use, `car_charge_limit_entity` the charge limit, `car_at_home` the car's location.
 3. If the commands come from another integration than the battery sensor, choose the climate
    entity under **Smart charging → Car climate**.
+
+**Locally over Bluetooth (Tesla BLE).** With [Tesla BLE](https://github.com/yoziru/ha-tesla-ble) and an ESPHome
+Bluetooth proxy near where the car parks, EV Ledger also reads the car over Bluetooth, without Tesla's cloud. Nothing
+to set up in EV Ledger: the Tesla BLE device ("Tesla" and the VIN's last 6 characters) is found by the VIN as the
+same car. EV Ledger reads every one of the car's integrations and uses the one that reported last. At home that is
+Tesla BLE: it reports every 10–60 seconds while the car is within range, also its plug sensor. Away from home its
+readings go unavailable, and Tesla Fleet, Tesla Custom, Teslemetry or Tessie take over by themselves. The charge limit
+is sent over Bluetooth first (no cloud, at once), and through the cloud when that fails. Not from Tesla BLE: the
+position (its tracker only says whether the car is within range) and "charge energy added", which there is a total over
+all charges. Pair Tesla BLE with *Charging controls* if it should only start/stop charging and set the limit.
 
 Every home session that ends also fires the event `evledger_charge_finished` (the vehicle and the
 ledger entry: kWh, price, start and end, battery before and after) for your own automations. It shows in the

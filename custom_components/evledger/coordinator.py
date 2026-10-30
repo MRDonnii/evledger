@@ -532,11 +532,13 @@ class EvLedgerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _energy_added_entity(self) -> str | None:
         """The car's own counter of the energy added in its current/last charge (Tesla Fleet charge_energy_added,
-        Tesla Custom energy_added), of the car's integrations the one that reported last."""
+        Tesla Custom energy_added), of the car's integrations the one that reported last. Not Tesla BLE's: its
+        "charge energy added" is a running total over all charges (the charge's own is an attribute)."""
         sources = getattr(self._vehicle_provider, "sources", None)
         if sources is None:
             return None
-        return sources.freshest_matching(self.hass, lambda entry: entry.domain == "sensor" and "energy_added" in (
+        return sources.freshest_matching(self.hass, lambda entry: entry.domain == "sensor"
+                                         and entry.platform != "tesla_ble" and "energy_added" in (
             f"{entry.translation_key or ''} {entry.unique_id or ''} {entry.entity_id}"))
 
     def public_kwh_estimate(self, charge: ChargeSession) -> tuple[float | None, str | None]:

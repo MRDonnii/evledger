@@ -5,7 +5,11 @@ Supercharger: it kept saying "charging" (and the position there) for over an hou
 had driven off, while Tesla Fleet already said "disconnected". So for the charging state, the battery, the position,
 the lock and the outside temperature the ledger reads every one of the car's integrations (devices with the car's
 name from Tesla Custom, Tesla Fleet, Teslemetry or Tessie) and uses the one that reported last. Not the odometer:
-two integrations' counters differ a little, and switching between them would make trips out of nothing."""
+two integrations' counters differ a little, and switching between them would make trips out of nothing.
+
+Tesla BLE (30 Oct 2026) is one more: the car over local Bluetooth through an ESPHome proxy at home. It reports every
+10–60 s while the car is within range, so at home it is the one that reported last; out of range its readings go
+unavailable and the cloud integrations take over by themselves. Its device is found by the VIN, not the name."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -22,7 +26,7 @@ from .const import (
     CONF_LOCKED_ENTITY,
     CONF_OUTSIDE_TEMP_ENTITY,
 )
-from .device_resolve import TESLA_INTEGRATIONS, all_devices, resolve_tesla_vehicle_entities
+from .device_resolve import TESLA_INTEGRATIONS, resolve_tesla_vehicle_entities, same_car as same_car_devices
 
 FRESHEST_ROLES = (CONF_BATTERY_ENTITY, CONF_CHARGING_BINARY_ENTITY, CONF_DEVICE_TRACKER_ENTITY, CONF_LOCKED_ENTITY,
                   CONF_OUTSIDE_TEMP_ENTITY)
@@ -57,9 +61,7 @@ class CarSources:
         if car is None:
             self._others, self._devices = {}, []
             return
-        name = car.name_by_user or car.name
-        same_car = [device.id for device in all_devices(devices)
-                    if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
+        same_car = same_car_devices(devices, car)
         # Only the car integrations' devices (EV Ledger's own device has the car's name too)
         self._devices = [device_id for device_id in same_car
                          if any(entry.platform in TESLA_INTEGRATIONS

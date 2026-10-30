@@ -41,6 +41,28 @@ def all_devices(device_registry: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
     return devices
 
 
+def _vin(value) -> str | None:
+    """A vehicle identification number (17 letters and digits), else None."""
+    return value if isinstance(value, str) and len(value) == 17 and value.isalnum() else None
+
+
+def same_car(device_registry: dr.DeviceRegistry, car: dr.DeviceEntry) -> list[str]:
+    """The ids of the car's devices: its own, those with its name, and the same vehicle under another name (Claude AI,
+    2026-10-30: Tesla BLE calls the car "Tesla <the VIN's last 6>"), found by a device identifier or serial number
+    that is the car's VIN."""
+    devices = all_devices(device_registry)
+    name = car.name_by_user or car.name
+    named = [device for device in devices
+             if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
+    vins = {vin for device in named for vin in (*(_vin(item[-1]) for item in device.identifiers),
+                                                 _vin(device.serial_number)) if vin}
+    ids = [device.id for device in named]
+    if vins:
+        ids += [device.id for device in devices if device.id not in ids
+                and ({_vin(item[-1]) for item in device.identifiers} | {_vin(device.serial_number)}) & vins]
+    return ids
+
+
 def _entities_for_device(hass: HomeAssistant, device_id: str) -> list[er.RegistryEntry]:
     registry = er.async_get(hass)
     return er.async_entries_for_device(registry, device_id, include_disabled_entities=False)
@@ -62,7 +84,7 @@ def _first_matching(
 
 # The official Tesla integrations (Tesla Fleet, Teslemetry, Tessie) name their entities by the car's name and
 # translated labels, but their unique ids end in the Tesla API's field names: "<vin>-charge_state_battery_level".
-TESLA_INTEGRATIONS = ("tesla_custom", "tesla_fleet", "teslemetry", "tessie")
+TESLA_INTEGRATIONS = ("tesla_custom", "tesla_fleet", "teslemetry", "tessie", "tesla_ble")
 TESLA_API_FIELDS = {
     CONF_BATTERY_ENTITY: (("sensor",), "charge_state_battery_level"),
     CONF_ODOMETER_ENTITY: (("sensor",), "vehicle_state_odometer"),
@@ -70,6 +92,19 @@ TESLA_API_FIELDS = {
     CONF_CHARGING_BINARY_ENTITY: (("binary_sensor", "sensor"), "charge_state_charging_state"),
     CONF_LOCKED_ENTITY: (("lock",), "vehicle_state_locked"),
     CONF_OUTSIDE_TEMP_ENTITY: (("sensor",), "climate_state_outside_temp"),
+}
+
+
+# Tesla BLE (the car over local Bluetooth, through an ESPHome Bluetooth proxy) names its unique ids
+# "<vin>_<platform>_<key>". Its tracker only says whether the car is within Bluetooth range, with no position, so it
+# is no position source.
+TESLA_BLE_KEYS = {
+    CONF_BATTERY_ENTITY: ("sensor", "_sensor_battery_level"),
+    CONF_ODOMETER_ENTITY: ("sensor", "_sensor_odometer"),
+    CONF_DEVICE_TRACKER_ENTITY: None,
+    CONF_CHARGING_BINARY_ENTITY: ("binary_sensor", "_binary_charging"),
+    CONF_LOCKED_ENTITY: ("lock", "_lock_doors"),
+    CONF_OUTSIDE_TEMP_ENTITY: ("sensor", "_sensor_outside_temp"),
 }
 
 
@@ -97,6 +132,10 @@ def resolve_tesla_vehicle_entities(hass: HomeAssistant, device_id: str) -> dict[
         CONF_OUTSIDE_TEMP_ENTITY: _first_matching(entries, "sensor", "_temperature_outside"),
     }
     every = er.async_entries_for_device(er.async_get(hass), device_id, include_disabled_entities=True)
+    if any(entry.platform == "tesla_ble" for entry in every):
+        return {key: next((entry.entity_id for entry in every if spec and entry.domain == spec[0]
+                           and entry.unique_id.endswith(spec[1]) and not entry.disabled_by), None)
+                for key, spec in TESLA_BLE_KEYS.items()}
     return {key: value or _by_api_field(every, *TESLA_API_FIELDS[key]) for key, value in custom.items()}
 
 

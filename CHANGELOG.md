@@ -4,6 +4,24 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.15.0] - 2026-10-30
+
+### Added
+
+- **Tesla BLE (the car over local Bluetooth) as one more of the car's sources.** With
+  [Tesla BLE](https://github.com/yoziru/ha-tesla-ble) and an ESPHome Bluetooth proxy at home, its device ("Tesla" and
+  the VIN's last 6 characters) is found by the VIN as the same car; nothing to set up. Battery, charging, lock, outside
+  temperature and the plug sensor are read from it like from the other integrations: the one that reported last wins,
+  which at home is Tesla BLE (every 10–60 s within range), and out of range the cloud integrations take over by
+  themselves. Not its tracker (no position) and not its "charge energy added" (a total over all charges).
+- **The charge limit goes over Bluetooth first**, then through Tesla Fleet, Teslemetry or Tessie, Tesla Custom last.
+  When one of them fails (the car just left Bluetooth range, the cloud is down), the next one is tried.
+
+### Changed
+
+- **The car's other devices are also found by the VIN** (a device identifier or serial number), not only by the same
+  name: plug sensors, charge limit, climate, "full at" time, the car refresh and the sources.
+
 ## [0.14.1] - 2026-10-28
 
 ### Fixed

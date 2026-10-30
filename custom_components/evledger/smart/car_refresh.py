@@ -16,7 +16,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from ..device_resolve import all_devices
+from ..device_resolve import same_car as same_car_devices
 
 if TYPE_CHECKING:
     from .planner import ChargePlanner
@@ -65,9 +65,7 @@ class CarRefresh:
             car = devices.async_get(battery.device_id) if battery is not None and battery.device_id else None
             found: list[str] = []
             if car is not None:
-                name = car.name_by_user or car.name
-                same_car = [device.id for device in all_devices(devices)
-                            if device.id == car.id or (name and (device.name_by_user or device.name) == name)]
+                same_car = same_car_devices(devices, car)
                 found = [entry.entity_id for device_id in same_car
                          for entry in er.async_entries_for_device(registry, device_id)
                          if entry.platform in CAR_PLATFORMS and entry.domain in DOMAINS and not entry.disabled_by]
