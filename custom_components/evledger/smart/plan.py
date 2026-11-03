@@ -105,10 +105,17 @@ def parse_price_attributes(attributes: dict, estimated: bool = False) -> list[Pr
     raw.sort(key=lambda entry: entry[0])
     slots: dict[datetime, PriceSlot] = {}
     for index, (start, end, price) in enumerate(raw):
+        following = raw[index + 1][0] if index + 1 < len(raw) else None
+        previous = raw[index - 1][0] if index else None
+        if end is not None:
+            # Strømligning's forecast is hourly, but every point says it ends after a quarter (00:00-00:15), so only
+            # the first quarter of each hour had a price. An interval shorter than the step to the next start (at most
+            # an hour) lasts until it (Claude AI, 2026-11-03).
+            step = following - start if following else (start - previous if previous else None)
+            if step is not None and end - start < step <= timedelta(hours=1):
+                end = start + step
         if end is None:
             # No end given: the interval lasts until the next start, or as long as the previous one.
-            following = raw[index + 1][0] if index + 1 < len(raw) else None
-            previous = raw[index - 1][0] if index else None
             if following and following - start <= timedelta(hours=1):
                 end = following
             elif previous and start - previous <= timedelta(hours=1):

@@ -41,6 +41,24 @@ def test_parse_nordpool_raw_without_end_and_value_key():
     assert slots[1].end - slots[1].start == timedelta(minutes=15)
 
 
+def test_parse_hourly_forecast_labelled_as_quarters_fills_the_hour():
+    # Strømligning's forecast: one point per hour, each with an end 15 minutes after its start
+    base = datetime(2026, 11, 4, tzinfo=TZ)
+    items = [{"start": (base + timedelta(hours=i)).isoformat(),
+              "end": (base + timedelta(hours=i, minutes=15)).isoformat(), "price": 2.0 + i} for i in range(3)]
+    slots = plan.parse_price_attributes({"prices": items}, estimated=True)
+    assert len(slots) == 12 and all(slot.estimated for slot in slots)
+    assert [slot.price for slot in slots[4:8]] == [3.0] * 4 and slots[-1].end == base + timedelta(hours=3)
+
+
+def test_parse_real_quarters_keep_their_length():
+    base = datetime(2026, 11, 4, tzinfo=TZ)
+    items = [{"start": (base + timedelta(minutes=15 * i)).isoformat(),
+              "end": (base + timedelta(minutes=15 * (i + 1))).isoformat(), "price": i} for i in range(5)]
+    slots = plan.parse_price_attributes({"prices": items})
+    assert [slot.price for slot in slots] == [0, 1, 2, 3, 4] and slots[-1].end == base + timedelta(minutes=75)
+
+
 def test_parse_ignores_garbage():
     junk = {"prices": [1, {"start": "x", "price": 1}], "today": [1]}
     assert plan.parse_price_attributes(junk) == []
