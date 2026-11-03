@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
@@ -250,6 +251,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.smart.ledger = coordinator
         coordinator.platforms += SMART_PLATFORMS
 
+    # The platforms are set up concurrently and most entities link to the device by its identifier only. The
+    # device is made with the car's name first, so that no entity id is made without it (button.send_plan_to_phone
+    # instead of button.<car>_send_plan_to_phone when the button platform came before the sensors; Claude AI, 2026-11-03).
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=coordinator.vehicle_name,
+        manufacturer="EV Ledger",
+        model="Vehicle ledger",
+    )
     await hass.config_entries.async_forward_entry_setups(entry, coordinator.platforms)
     if coordinator.smart:
         coordinator.smart.async_start()
