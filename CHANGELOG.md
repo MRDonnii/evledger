@@ -4,7 +4,7 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
-## 0.15.2
+## [0.15.2] - 2026-11-03
 
 - Strømlignings prisprognose (dagene efter i morgen) har ét punkt pr. time, men hvert punkt var mærket som et kvarter. Planen så derfor kun det første kvarter af hver prognose-time. Et prisinterval, der er kortere end afstanden til det næste (højst en time), varer nu til det næste. (Claude AI)
 
