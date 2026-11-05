@@ -150,4 +150,5 @@ def ledger_vehicle(entry: ConfigEntry) -> vehicles.Vehicle | None:
         key=str(key), name=label, family=vehicles.family_of(label) or "Tesla",
         capacity_kwh=float(data[CONF_BATTERY_CAPACITY_KWH]),
         consumption_wh_km=float(data.get(CONF_RATED_WH_PER_KM) or 0), range_km=0, body=body,
+        chemistry=vehicles.LEDGER_CHEMISTRY.get(str(key)),
     )

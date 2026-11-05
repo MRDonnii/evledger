@@ -19,44 +19,60 @@ class Vehicle:
     consumption_wh_km: float
     range_km: float
     body: str  # artwork shape used by th-tesla-dashboard-card
+    # The battery's cell chemistry (Claude AI, 2026-11-05): "lfp" (iron phosphate, fine to keep at 100 %), "nmc" (a
+    # nickel battery, NMC or NCA, that should not sit full for long) or None when the variant had both.
+    chemistry: str | None = None
 
 
 OTHER = "other"
 
 VEHICLES: tuple[Vehicle, ...] = (
     Vehicle("model_3_sr_plus", "Model 3 Standard Range Plus (2019–2020)", "Model 3", 50, 145, 402, "model_3"),
-    Vehicle("model_3_rwd", "Model 3 RWD (2021–2023)", "Model 3", 57.5, 150, 438, "model_3"),
-    Vehicle("model_3_lr", "Model 3 Long Range AWD (2019–2023)", "Model 3", 75, 160, 576, "model_3"),
-    Vehicle("model_3_performance", "Model 3 Performance (2019–2023)", "Model 3", 75, 170, 507, "model_3"),
-    Vehicle("model_3_highland_rwd", "Model 3 RWD (2024–)", "Model 3", 57.5, 140, 438, "model_3_highland"),
-    Vehicle("model_3_highland_lr_rwd", "Model 3 Long Range RWD (2025–)", "Model 3", 75, 135, 584, "model_3_highland"),
-    Vehicle("model_3_highland_lr", "Model 3 Long Range AWD (2024–)", "Model 3", 75, 145, 549, "model_3_highland"),
+    Vehicle("model_3_rwd", "Model 3 RWD (2021–2023)", "Model 3", 57.5, 150, 438, "model_3", "lfp"),
+    Vehicle("model_3_lr", "Model 3 Long Range AWD (2019–2023)", "Model 3", 75, 160, 576, "model_3", "nmc"),
+    Vehicle("model_3_performance", "Model 3 Performance (2019–2023)", "Model 3", 75, 170, 507, "model_3", "nmc"),
+    Vehicle("model_3_highland_rwd", "Model 3 RWD (2024–)", "Model 3", 57.5, 140, 438, "model_3_highland", "lfp"),
+    Vehicle("model_3_highland_lr_rwd", "Model 3 Long Range RWD (2025–)", "Model 3", 75, 135, 584,
+            "model_3_highland", "nmc"),
+    Vehicle("model_3_highland_lr", "Model 3 Long Range AWD (2024–)", "Model 3", 75, 145, 549,
+            "model_3_highland", "nmc"),
     Vehicle("model_3_highland_performance", "Model 3 Performance (2024–)", "Model 3", 79, 160, 476,
-            "model_3_highland"),
-    Vehicle("model_y_rwd", "Model Y RWD (2022–2024)", "Model Y", 57.5, 160, 418, "model_y"),
-    Vehicle("model_y_lr", "Model Y Long Range AWD (2020–2024)", "Model Y", 75, 165, 533, "model_y"),
-    Vehicle("model_y_performance", "Model Y Performance (2020–2024)", "Model Y", 75, 175, 488, "model_y"),
-    Vehicle("model_y_juniper_rwd", "Model Y RWD (2025–)", "Model Y", 60, 150, 460, "model_y_juniper"),
-    Vehicle("model_y_juniper_lr_rwd", "Model Y Long Range RWD (2025–)", "Model Y", 78, 145, 575, "model_y_juniper"),
-    Vehicle("model_y_juniper_lr", "Model Y Long Range AWD (2025–)", "Model Y", 78, 155, 529, "model_y_juniper"),
+            "model_3_highland", "nmc"),
+    Vehicle("model_y_rwd", "Model Y RWD (2022–2024)", "Model Y", 57.5, 160, 418, "model_y", "lfp"),
+    Vehicle("model_y_lr", "Model Y Long Range AWD (2020–2024)", "Model Y", 75, 165, 533, "model_y", "nmc"),
+    Vehicle("model_y_performance", "Model Y Performance (2020–2024)", "Model Y", 75, 175, 488, "model_y", "nmc"),
+    Vehicle("model_y_juniper_rwd", "Model Y RWD (2025–)", "Model Y", 60, 150, 460, "model_y_juniper", "lfp"),
+    Vehicle("model_y_juniper_lr_rwd", "Model Y Long Range RWD (2025–)", "Model Y", 78, 145, 575,
+            "model_y_juniper", "nmc"),
+    Vehicle("model_y_juniper_lr", "Model Y Long Range AWD (2025–)", "Model Y", 78, 155, 529, "model_y_juniper", "nmc"),
     Vehicle("model_y_juniper_performance", "Model Y Performance (2025–)", "Model Y", 78, 165, 491,
-            "model_y_juniper"),
-    Vehicle("model_s_75", "Model S 75/75D (2016–2019)", "Model S", 72, 190, 417, "model_s"),
-    Vehicle("model_s_85", "Model S 85/90D (2012–2017)", "Model S", 81, 195, 435, "model_s"),
-    Vehicle("model_s_100", "Model S 100D/P100D (2017–2019)", "Model S", 98, 195, 539, "model_s"),
-    Vehicle("model_s_lr", "Model S Long Range (2019–)", "Model S", 95, 180, 652, "model_s"),
-    Vehicle("model_s_plaid", "Model S Plaid (2021–)", "Model S", 95, 195, 600, "model_s"),
-    Vehicle("model_x_75", "Model X 75D/90D (2016–2019)", "Model X", 81, 225, 417, "model_x"),
-    Vehicle("model_x_100", "Model X 100D/P100D (2017–2019)", "Model X", 98, 225, 475, "model_x"),
-    Vehicle("model_x_lr", "Model X Long Range (2019–)", "Model X", 95, 210, 539, "model_x"),
-    Vehicle("model_x_plaid", "Model X Plaid (2021–)", "Model X", 95, 225, 536, "model_x"),
-    Vehicle("cybertruck_rwd", "Cybertruck RWD (2025–)", "Cybertruck", 92, 270, 563, "cybertruck"),
-    Vehicle("cybertruck_awd", "Cybertruck AWD (2024–)", "Cybertruck", 123, 285, 512, "cybertruck"),
-    Vehicle("cybertruck_cyberbeast", "Cybertruck Cyberbeast (2024–)", "Cybertruck", 123, 300, 483, "cybertruck"),
+            "model_y_juniper", "nmc"),
+    Vehicle("model_s_75", "Model S 75/75D (2016–2019)", "Model S", 72, 190, 417, "model_s", "nmc"),
+    Vehicle("model_s_85", "Model S 85/90D (2012–2017)", "Model S", 81, 195, 435, "model_s", "nmc"),
+    Vehicle("model_s_100", "Model S 100D/P100D (2017–2019)", "Model S", 98, 195, 539, "model_s", "nmc"),
+    Vehicle("model_s_lr", "Model S Long Range (2019–)", "Model S", 95, 180, 652, "model_s", "nmc"),
+    Vehicle("model_s_plaid", "Model S Plaid (2021–)", "Model S", 95, 195, 600, "model_s", "nmc"),
+    Vehicle("model_x_75", "Model X 75D/90D (2016–2019)", "Model X", 81, 225, 417, "model_x", "nmc"),
+    Vehicle("model_x_100", "Model X 100D/P100D (2017–2019)", "Model X", 98, 225, 475, "model_x", "nmc"),
+    Vehicle("model_x_lr", "Model X Long Range (2019–)", "Model X", 95, 210, 539, "model_x", "nmc"),
+    Vehicle("model_x_plaid", "Model X Plaid (2021–)", "Model X", 95, 225, 536, "model_x", "nmc"),
+    Vehicle("cybertruck_rwd", "Cybertruck RWD (2025–)", "Cybertruck", 92, 270, 563, "cybertruck", "nmc"),
+    Vehicle("cybertruck_awd", "Cybertruck AWD (2024–)", "Cybertruck", 123, 285, 512, "cybertruck", "nmc"),
+    Vehicle("cybertruck_cyberbeast", "Cybertruck Cyberbeast (2024–)", "Cybertruck", 123, 300, 483, "cybertruck", "nmc"),
     Vehicle("roadster", "Roadster (2008–2012)", "Roadster", 53, 135, 393, "roadster"),
 )
 
 BY_KEY = {vehicle.key: vehicle for vehicle in VEHICLES}
+
+# The cell chemistry of the models in EV Ledger's own model list (tesla_models.py); the RWD cars sold in Europe since
+# 2021 have an LFP battery, Long Range and Performance a nickel one. Not listed: unknown (Claude AI, 2026-11-05).
+LEDGER_CHEMISTRY = {
+    "model3_2021_rwd": "lfp", "model3_2017_lr_awd": "nmc", "model3_2017_performance": "nmc",
+    "model3_2023_rwd": "lfp", "model3_2023_lr_awd": "nmc", "model3_2024_performance": "nmc",
+    "modely_2020_rwd": "lfp", "modely_2020_lr_awd": "nmc", "modely_2020_performance": "nmc",
+    "modely_2025_rwd": "lfp", "modely_2025_lr_awd": "nmc",
+    "models_2021": "nmc", "models_2021_plaid": "nmc", "modelx_2021": "nmc", "modelx_2021_plaid": "nmc",
+}
 
 
 def get(key: str | None) -> Vehicle | None:

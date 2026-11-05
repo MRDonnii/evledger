@@ -4,6 +4,22 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.16.0] - 2026-11-05
+
+### Added
+
+- **Charge the last part just before departure (NMC)** (`switch.<car>_charge_the_last_part_just_before_departure_nmc`,
+  off by default). A nickel battery (NMC/NCA) should not sit full for long: with this on, the cheapest plan charges up
+  to a level (`number.<car>_top_up_from_level`, 80 %) in the cheapest slots as before, and only the part above it in a
+  window before each ready-by time (`number.<car>_top_up_window`, 3 h), done before it
+  (`number.<car>_top_up_done_before_departure`, 30 min), in the cheapest slots there. A window too short for the energy
+  starts earlier; the target is still reached. Every ready-by time (week plan, weekend, one-time time, calendar trip)
+  has its own window. Nothing changes for an LFP battery (`active: false`, `reason: lfp` on the switch) or for
+  **Charge now**, the fixed window and the price cap. The plan sensor's `top_up` attribute shows the window.
+  (Claude AI)
+- **The battery's chemistry on the car models** (`lfp`, `nmc` or unknown): Model 3/Y RWD are LFP, Long Range,
+  Performance, Model S/X and Cybertruck nickel. (Claude AI)
+
 ## [0.15.2] - 2026-11-03
 
 - Strømlignings prisprognose (dagene efter i morgen) har ét punkt pr. time, men hvert punkt var mærket som et kvarter. Planen så derfor kun det første kvarter af hver prognose-time. Et prisinterval, der er kortere end afstanden til det næste (højst en time), varer nu til det næste. (Claude AI)

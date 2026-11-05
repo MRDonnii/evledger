@@ -315,6 +315,15 @@
       "ready_margin": {
         "name": "Klar før tid"
       },
+      "top_up_soc": {
+        "name": "Sidste del fra niveau"
+      },
+      "top_up_margin": {
+        "name": "Sidste del færdig før afgang"
+      },
+      "top_up_window": {
+        "name": "Vindue til sidste del"
+      },
       "ask_min_saving": {
         "name": "Spørg når det sparer mindst"
       },
@@ -466,6 +475,9 @@
       },
       "smart_price_limit": {
         "name": "Spørg før dyr ladning"
+      },
+      "nmc_top_up": {
+        "name": "Lad det sidste op lige før afgang (NMC)"
       }
     },
     "button": {

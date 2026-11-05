@@ -43,6 +43,18 @@ def _route(planner: ChargePlanner, field: str):
     return getattr(planner.trip.route, field) if planner.trip.route else None
 
 
+def _top_up(planner) -> dict:
+    windows = planner.schedule.top_up
+    first = windows[0] if windows else None
+    return {"active": planner.top_up_active and first is not None, "reason": planner.top_up_reason,
+            "chemistry": planner.chemistry,
+            "from_soc": planner.settings["top_up_soc"],
+            "window_start": first.start.isoformat() if first else None,
+            "window_end": first.end.isoformat() if first else None,
+            "windows": [{"deadline": window.deadline.isoformat(), "from_soc": window.from_soc,
+                         "start": window.start.isoformat(), "end": window.end.isoformat()} for window in windows]}
+
+
 @dataclass(frozen=True, kw_only=True)
 class PlanSensorDescription(SensorEntityDescription):
     value: Callable[[ChargePlanner], Any]
@@ -172,6 +184,9 @@ class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
                 "waiting_for": ({**planner.waiting, "deadline": planner.waiting["deadline"].isoformat()}
                                 if planner.waiting else None),
                 "co2": planner.schedule.co2,
+                # Sparing an NMC battery: the part above from_soc is charged in the window before the next ready-by
+                # time (ending the top-up margin before it); "windows" has one per ready-by time in the plan.
+                "top_up": _top_up(planner),
             }
         if key == "planned_cost":
             return {"alternatives": {

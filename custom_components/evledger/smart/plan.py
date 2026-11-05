@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from itertools import groupby
 
@@ -278,6 +278,24 @@ class ScheduleInput:
     # Done this long before each ready-by time when the slots before it can hold the target (hours): an outage of
     # Home Assistant, a car that wakes late or a slow last percent do not make the car late; otherwise up to the time.
     margin_h: float = 0.0
+    # Sparing a nickel (NMC) battery (Claude AI, 2026-11-05): with the cheapest plan, the energy above top_up_soc is
+    # only charged in the top_up_window_h before each ready-by time less top_up_margin_h, so the battery sits high for
+    # as short a time as possible. None: off (the planner leaves it off for an LFP battery).
+    top_up_soc: float | None = None
+    top_up_margin_h: float = 0.5
+    top_up_window_h: float = 3.0
+
+
+@dataclass(frozen=True)
+class TopUpWindow:
+    """Where the cheapest plan charges the part above from_soc for one ready-by time (deadline): between start and
+    end, end being the ready-by time less the top-up margin. start is earlier than the set window when that is too
+    short for the energy."""
+
+    deadline: datetime
+    from_soc: float
+    start: datetime
+    end: datetime
 
 
 @dataclass(frozen=True)
@@ -320,6 +338,8 @@ class Schedule:
     # and the battery level the plan reaches.
     limit_kwh: float = 0.0
     limit_soc: float | None = None
+    # Sparing an NMC battery: the late window of every ready-by time whose target is above the top-up level.
+    top_up: tuple[TopUpWindow, ...] = ()
 
     def next_block(self, now: datetime) -> ChargeBlock | None:
         return next((block for block in self.blocks if block.end > now), None)
@@ -551,13 +571,77 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         room = sum(kwh[slot.start] for slot in usable if slot.end <= soft)
         return soft if room >= target_kwh + data.wake_h * data.power_kw - 1e-9 else constraint.deadline
 
+    # Sparing an NMC battery (Claude AI, 2026-11-05): per ready-by time (its index in constraints) the late window for
+    # the part above the top-up level, how much energy may be in the battery before that window starts, and the slots
+    # taken in it. Only the cheapest plan; "charge now", the fixed window and the price cap charge as before.
+    sparing = data.mode == MODE_SMART and data.top_up_soc is not None
+    top_windows: dict[int, TopUpWindow] = {}
+    top_allowed: dict[int, float] = {}
+    late: set[datetime] = set()
+
+    def late_end(constraint: Constraint, end: datetime) -> datetime | None:
+        """Where the part above the top-up level must be in: the ready-by time less the top-up margin (or the end
+        planned for, when that is earlier). None: the rule does not apply (target not above the level, too late)."""
+        if not sparing or constraint.target_soc <= data.top_up_soc + 1e-9:
+            return None
+        stop = min(end, constraint.deadline - timedelta(hours=max(data.top_up_margin_h, 0.0)))
+        return stop if stop > now else None
+
+    def charged_by(deadline: datetime) -> float:
+        return delivered(deadline) if data.wake_h > 0 else energy(deadline)
+
+    def place(pool, target_kwh: float, deadline: datetime, index: int) -> None:
+        """The cheapest slots of pool until target_kwh is in by deadline. With a late window for this ready-by time,
+        up to the top-up level anywhere before the window's end and the rest only inside the window; a window too short
+        for that energy starts earlier, just as much as needed. The target is reached as without the rule when even
+        that cannot hold it."""
+        window = top_windows.get(index)
+        if window is None:
+            take(pool, target_kwh, cheapest, deadline)
+            top_up(pool, target_kwh, deadline)
+            return
+        early = [slot for slot in pool if slot.end <= window.end]
+        bulk = min(target_kwh, wall(window.from_soc))
+        take(early, bulk, cheapest, deadline)
+        top_up(early, bulk, deadline)
+        by_start = {slot.start: slot for slot in early}
+        earlier = sorted((start for start in by_start if start < window.start), reverse=True)
+        begin = window.start
+        while True:
+            inside = [slot for slot in early if slot.start >= begin]
+            taken = set(chosen)
+            take(inside, target_kwh, cheapest, deadline)
+            top_up(inside, target_kwh, deadline)
+            late.update(set(chosen) - taken)
+            missing = target_kwh - charged_by(deadline)
+            if missing <= 1e-9 or not earlier:
+                break
+            # Earlier by the free slots that hold the energy still missing (one at a time for a wake-up's loss).
+            free = 0.0
+            while earlier:
+                begin = earlier.pop(0)
+                free += kwh[begin] if begin not in chosen else 0.0
+                if free >= missing - 1e-9:
+                    break
+        if begin < window.start:
+            top_windows[index] = replace(window, start=begin)
+        if charged_by(deadline) < target_kwh - 1e-9:
+            take(pool, target_kwh, cheapest, deadline)
+            top_up(pool, target_kwh, deadline)
+
     finishes: list[datetime] = []
     top = data.target_soc if data.mode != MODE_PRICE_CAP or data.price_cap is not None else data.min_soc
     if data.mode != MODE_NOW:
-        for constraint in constraints:
+        for index, constraint in enumerate(constraints):
             target_kwh = wall(constraint.target_soc)
             end = finish_by(constraint, target_kwh)
             finishes.append(end)
+            if target_kwh > 1e-9 and (stop := late_end(constraint, end)) is not None:
+                top_windows[index] = TopUpWindow(constraint.deadline, data.top_up_soc,
+                                                 stop - timedelta(hours=max(data.top_up_window_h, 0.0)), stop)
+                # An earlier ready-by time with a higher target than the level may already have filled the battery.
+                top_allowed[index] = max([wall(data.top_up_soc), *(wall(item.target_soc)
+                                                                   for item in constraints[:index])])
             constraint = Constraint(end, constraint.target_soc, constraint.firm)
             before = [slot for slot in usable if slot.end <= constraint.deadline]
             if capped and not data.cap_override:
@@ -566,10 +650,8 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
                 # Up to the floor in the cheapest slots whatever the price; above it only below the limit.
                 floor = min(constraint.target_soc, data.floor_soc) if data.floor_soc is not None else None
                 floor_kwh = wall(floor)
-                take(before, floor_kwh, cheapest, constraint.deadline)
-                top_up(before, floor_kwh, constraint.deadline)
-                take([slot for slot in before if under_limit(slot)], target_kwh, cheapest, constraint.deadline)
-                top_up([slot for slot in before if under_limit(slot)], target_kwh, constraint.deadline)
+                place(before, floor_kwh, constraint.deadline, index)
+                place([slot for slot in before if under_limit(slot)], target_kwh, constraint.deadline, index)
                 reached = delivered(constraint.deadline) if data.wake_h > 0 else energy(constraint.deadline)
                 shortfall = max(shortfall, floor_kwh - reached)  # only the floor is a must
                 # A slot above the limit is only there for the floor: no more than the floor is bought then (a whole
@@ -579,8 +661,7 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
                 limit_short = max(limit_short, target_kwh - planned_kwh)
                 need = max(need, planned_kwh)
             else:
-                take(before, target_kwh, cheapest, constraint.deadline)
-                top_up(before, target_kwh, constraint.deadline)
+                place(before, target_kwh, constraint.deadline, index)
                 got = delivered(constraint.deadline) if data.wake_h > 0 else energy(constraint.deadline)
                 shortfall = max(shortfall, target_kwh - got)
                 need = max(need, target_kwh)
@@ -596,24 +677,65 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
     def due(index: int) -> datetime:
         return finishes[index] if finishes else constraints[index].deadline
 
+    slack = max(kwh.values(), default=0.0)  # a whole slot may run a little past the level
+
+    def spares(selection: dict) -> bool:
+        """Does a selection keep every late window: charged in time order, no more than allowed before the window
+        starts and nothing between its end and the ready-by time?"""
+        if not top_windows:
+            return True
+        loss = wake(list(selection.values()))
+        remaining = need
+        amounts: list[tuple[TimelineSlot, float]] = []
+        for slot in sorted(selection.values(), key=lambda item: item.start):
+            if remaining <= 1e-9:
+                break
+            amount = min(kwh[slot.start] - loss.get(slot.start, 0.0), remaining)
+            remaining -= amount
+            amounts.append((slot, amount))
+        for index, window in top_windows.items():
+            if sum(amount for slot, amount in amounts if slot.start < window.start) > top_allowed[index] + slack:
+                return False
+            if any(amount > 1e-9 and slot.end > window.end and slot.start < window.deadline
+                   for slot, amount in amounts):
+                return False
+        return True
+
     if (data.mode in (MODE_SMART, MODE_MANUAL) and len(binding) == 1 and chosen
             and (not limited or all(under_limit(slot) for slot in chosen.values()))):
         deadline = due(binding[0])
-        window = _cheapest_window(limit_pool([slot for slot in usable if slot.end <= deadline]), need, kwh,
-                                  data.price_factor, data.keep_start, data.green)
-        if window and data.green and _greener(window, list(chosen.values()), need, kwh, data.price_factor):
-            chosen = {slot.start: slot for slot in window}
-        pool = limit_pool([slot for slot in usable if slot.end <= deadline])
-        if window and not _contiguous(chosen.values()):
-            if _split_loses(chosen, window, pool, need):
+        whole = need
+        spared = top_windows.get(binding[0])
+        held: dict[datetime, TimelineSlot] = {}
+        backup = dict(chosen)
+        if spared is not None:
+            # Sparing the battery: one block (or the charge running) only for the part up to the level, before the
+            # window's end; the slots taken in the late window stay as they are.
+            deadline = spared.end
+            held = {start: chosen.pop(start) for start in list(chosen) if start in late}
+            need = min(need, wall(spared.from_soc))
+        if chosen and need > 1e-9:
+            pool = limit_pool([slot for slot in usable if slot.end <= deadline and slot.start not in held])
+            window = _cheapest_window(pool, need, kwh, data.price_factor, data.keep_start, data.green)
+            if window and data.green and _greener(window, list(chosen.values()), need, kwh, data.price_factor):
+                chosen = {slot.start: slot for slot in window}
+            if window and not _contiguous(chosen.values()):
+                if _split_loses(chosen, window, pool, need):
+                    chosen.clear()
+                    chosen.update({slot.start: slot for slot in window})
+            kept = _keep_running(list(chosen.values()), pool, need, kwh, data.price_factor, data.keep_start,
+                                 data.charging)
+            if kept:
                 chosen.clear()
-                chosen.update({slot.start: slot for slot in window})
-        kept = _keep_running(list(chosen.values()), pool, need, kwh, data.price_factor, data.keep_start,
-                             data.charging)
-        if kept:
-            chosen.clear()
-            chosen.update({slot.start: slot for slot in kept})
-        top_up(pool, need, deadline)
+                chosen.update({slot.start: slot for slot in kept})
+            top_up(pool, need, deadline)
+        need = whole
+        if spared is not None:
+            chosen.update(held)
+            top_up(limit_pool([slot for slot in usable if slot.end <= deadline]), need, deadline)
+            if not spares(chosen) or charged_by(deadline) < min(need, wall(constraints[binding[0]].target_soc)) - 1e-6:
+                chosen.clear()
+                chosen.update(backup)
     elif (data.mode in (MODE_SMART, MODE_MANUAL) and len(binding) > 1 and chosen and data.keep_start is not None
           and not limited):
         # Several ready-by times that each need energy (below the minimum level for the usual time, the target later):
@@ -629,7 +751,8 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
             chosen.update({slot.start: slot for slot in kept})
             top_up(pool, need, last)
             got = delivered if data.wake_h > 0 else energy
-            if any(got(due(index)) < wall(constraints[index].target_soc) - 1e-6 for index in binding):
+            if (any(got(due(index)) < wall(constraints[index].target_soc) - 1e-6 for index in binding)
+                    or not spares(chosen)):
                 chosen.clear()
                 chosen.update(before)
 
@@ -689,6 +812,7 @@ def build_schedule(data: ScheduleInput, now: datetime) -> Schedule:
         co2=round(co2_grams / co2_kwh) if co2_kwh > 1e-9 and co2_kwh >= total * 0.5 else None,
         limit_kwh=round(max(limit_short, 0.0), 2),
         limit_soc=(min(data.soc + total * data.efficiency / data.capacity_kwh * 100, 100.0) if limited else None),
+        top_up=tuple(top_windows[index] for index in sorted(top_windows)),
     )
 
 

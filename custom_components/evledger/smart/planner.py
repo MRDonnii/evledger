@@ -57,6 +57,9 @@ from .const import (
     DEFAULT_SMART_FLOOR_SOC,
     DEFAULT_SMART_MAX_PRICE,
     DEFAULT_TARGET_SOC,
+    DEFAULT_TOP_UP_MARGIN,
+    DEFAULT_TOP_UP_SOC,
+    DEFAULT_TOP_UP_WINDOW,
     DEFAULT_TRIP_MARGIN,
     DEFAULT_TRIP_RESERVE,
     DEFAULT_WAKE_MINUTES,
@@ -191,6 +194,9 @@ class ChargePlanner:
             "smart_floor_soc": DEFAULT_SMART_FLOOR_SOC,
             "ask_min_saving": DEFAULT_ASK_MIN_SAVING,
             "ready_margin": DEFAULT_READY_MARGIN,
+            "top_up_soc": DEFAULT_TOP_UP_SOC,
+            "top_up_margin": DEFAULT_TOP_UP_MARGIN,
+            "top_up_window": DEFAULT_TOP_UP_WINDOW,
             "consumption": DEFAULT_CONSUMPTION,
             "trip_margin": DEFAULT_TRIP_MARGIN,
             "trip_reserve": DEFAULT_TRIP_RESERVE,
@@ -217,7 +223,8 @@ class ChargePlanner:
                                        "learn_departure": False, "prefer_green": False,
                                        "ask_public_price": False, "morning_check": False, "quiet_night": True,
                                        "week_plan": False, "heat_hold": False,
-                                       "tyre_reminder": False, "smart_price_limit": False}
+                                       "tyre_reminder": False, "smart_price_limit": False,
+                                       "nmc_top_up": False}
         # Learned departure times ({"history_days", "times"}), the cheaper day waited for, the grid's CO2 forecast,
         # and the ready-by time that just passed with the level the plan aimed at (for the morning check).
         self.learned_departures: dict = {"history_days": 0, "times": None}
@@ -402,6 +409,24 @@ class ChargePlanner:
     def ready_by_weekend(self) -> time | None:
         """The ready-by time on Saturdays and Sundays, when it differs from the workdays'."""
         return self.times["ready_by_weekend"] if self.flags["weekend_ready_by"] else None
+
+    @property
+    def chemistry(self) -> str | None:
+        """The battery's cell chemistry from the car's model: "lfp", "nmc" or None (not known)."""
+        vehicle = self.vehicle
+        return vehicle.chemistry if vehicle else None
+
+    @property
+    def top_up_reason(self) -> str | None:
+        """Why the last part is not charged just before departure: "off" (not chosen) or "lfp" (an LFP battery is fine
+        at 100 %, so the choice does nothing). None: it is used. An unknown chemistry follows the choice."""
+        if not self.flags["nmc_top_up"]:
+            return "off"
+        return "lfp" if self.chemistry == "lfp" else None
+
+    @property
+    def top_up_active(self) -> bool:
+        return self.top_up_reason is None
 
     @property
     def controls_charger(self) -> bool:
@@ -1138,6 +1163,9 @@ class ChargePlanner:
         elif (announced := self.schedule.next_block(now)) is not None:
             keep = max(announced.start, now)
 
+        # Sparing an NMC battery: the part above the level just before departure (only the cheapest plan uses it).
+        top_up_soc = self.settings["top_up_soc"] if self.top_up_active else None
+
         def plan_for(mode: str, constraints_for: tuple[Constraint, ...] | None = None,
                      keep_plan: bool = True, limit: tuple[float, float] | bool | None = None) -> Schedule:
             # limit: (keep at least %, max price) for waiting with the dear rest; False: to the target; None: the
@@ -1165,6 +1193,9 @@ class ChargePlanner:
                 wake_h=self.controller.wake_delay(DEFAULT_WAKE_MINUTES) / 60,
                 margin_h=self.settings["ready_margin"] / 60,
                 charging=self.charging_now(now),
+                top_up_soc=top_up_soc,
+                top_up_margin_h=self.settings["top_up_margin"] / 60,
+                top_up_window_h=self.settings["top_up_window"],
             ), now)
 
         self.waiting = None

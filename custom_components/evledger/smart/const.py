@@ -171,6 +171,11 @@ DEFAULT_WAKE_MINUTES = 5.0
 # The plan is done this long before the ready-by time when the cheap slots allow it (minutes): a short outage of Home
 # Assistant, a car that wakes late or a slow last percent do not make the car late.
 DEFAULT_READY_MARGIN = 15.0
+# Sparing an NMC battery (Claude AI, 2026-11-05): above this level (%) the cheapest plan charges only in the last hours
+# (DEFAULT_TOP_UP_WINDOW) before the ready-by time, done DEFAULT_TOP_UP_MARGIN minutes before it.
+DEFAULT_TOP_UP_SOC = 80.0
+DEFAULT_TOP_UP_MARGIN = 30.0
+DEFAULT_TOP_UP_WINDOW = 3.0
 # Home Assistant was away longer than this while a planned period should have started: the plan is made again at once,
 # and the phones are told (minutes; Home Assistant saves the restore data every 15 minutes and when it stops).
 OUTAGE_MIN_MINUTES = 20

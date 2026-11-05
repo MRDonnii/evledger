@@ -34,7 +34,7 @@ FLAG_ICONS = {"notify_start": "mdi:ev-station", "notify_done": "mdi:battery-chec
               "ask_public_price": "mdi:message-reply-text-outline", "morning_check": "mdi:alarm-check",
               "quiet_night": "mdi:bell-sleep", "week_plan": "mdi:calendar-week",
               "heat_hold": "mdi:car-seat-heater", "tyre_reminder": "mdi:tire",
-              "smart_price_limit": "mdi:cash-lock"}
+              "smart_price_limit": "mdi:cash-lock", "nmc_top_up": "mdi:battery-clock-outline"}
 
 
 class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
@@ -135,6 +135,13 @@ class PlanFlag(EvSmartChargeListenerEntity, SwitchEntity, RestoreEntity):
         if self._attr_translation_key == "quiet_night":
             return {"from": planner.times["quiet_from"].strftime("%H:%M"),
                     "until": planner.times["quiet_until"].strftime("%H:%M"), "silent_now": planner.notify.is_quiet()}
+        if self._attr_translation_key == "nmc_top_up":
+            # Whether the choice is used: not for an LFP battery (reason "lfp"), or while it is off ("off").
+            windows = planner.schedule.top_up
+            return {"active": planner.top_up_active, "reason": planner.top_up_reason, "chemistry": planner.chemistry,
+                    "from_soc": planner.settings["top_up_soc"],
+                    "window_start": windows[0].start.isoformat() if windows else None,
+                    "window_end": windows[0].end.isoformat() if windows else None}
         if self._attr_translation_key == "prefer_green":
             return {"price_area": planner.co2_area, "plan_co2": planner.schedule.co2,
                     "co2_updated": planner.co2_updated}

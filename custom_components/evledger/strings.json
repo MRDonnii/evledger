@@ -315,6 +315,15 @@
       "ready_margin": {
         "name": "Ready ahead of time"
       },
+      "top_up_soc": {
+        "name": "Top-up from level"
+      },
+      "top_up_margin": {
+        "name": "Top-up done before departure"
+      },
+      "top_up_window": {
+        "name": "Top-up window"
+      },
       "ask_min_saving": {
         "name": "Ask when waiting saves at least"
       },
@@ -466,6 +475,9 @@
       },
       "smart_price_limit": {
         "name": "Ask before dear charging"
+      },
+      "nmc_top_up": {
+        "name": "Charge the last part just before departure (NMC)"
       }
     },
     "button": {
