@@ -4,6 +4,11 @@ What changed in each version of EV Ledger. A new version in `manifest.json` on `
 with its section below as the release notes. Versions before 0.7.2: see the
 [releases](https://github.com/MRDonnii/evledger/releases).
 
+## [0.16.2] - 2026-11-22
+
+### Changed
+- Maintenance: update test after the repository move. No functional changes.
+
 ## [0.16.1] - 2026-11-22
 
 ### Changed
