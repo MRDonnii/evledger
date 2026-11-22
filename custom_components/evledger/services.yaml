@@ -1,0 +1,656 @@
+log_public_charge:
+  name: Log public charge
+  description: >-
+    Record a charging session that happened away from your configured home
+    charger(s) — a public/destination charger with no Home Assistant
+    integration. If EV Ledger already noticed the car charging away from home
+    and is waiting for a price, this fills that session in; otherwise it
+    creates a new one.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this charge belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    kwh:
+      name: Energy added
+      description: How much energy was added, in kWh.
+      required: true
+      example: 24.5
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 0.1
+          unit_of_measurement: kWh
+    price:
+      name: Total price
+      description: What the session cost in total, in your vehicle's configured currency.
+      required: true
+      example: 145.5
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.01
+    location_name:
+      name: Location
+      description: Where you charged (e.g. "Ionity Kolding", "Clever, Aarhus").
+      required: false
+      example: Ionity Kolding
+      selector:
+        text:
+    started_at:
+      name: Started at
+      description: When the session started. Defaults to now if not set.
+      required: false
+      selector:
+        datetime:
+    note:
+      name: Note
+      description: Anything else worth remembering about this session.
+      required: false
+      selector:
+        text:
+
+delete_charge:
+  name: Delete charge
+  description: >-
+    Permanently remove one charge session — fixes a wrong manual entry or a
+    session that was mis-detected. This cannot be undone.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this charge belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    charge_id:
+      name: Charge ID
+      description: >-
+        The id of the charge to delete — see the `id` field on any entry in
+        sensor.<vehicle>_charges' `charges` attribute.
+      required: true
+      selector:
+        text:
+
+update_charge:
+  name: Update charge
+  description: >-
+    Correct one charge session (home or public): energy, the total price or the price per kWh, location, or note. A
+    price set here is kept (never replaced by an automatic price). With remember, the price per kWh is also used for
+    the next charges at this place or with this operator.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: The vehicle's EV Ledger entry (or give one of its EV Ledger entities instead).
+      selector:
+        config_entry:
+          integration: evledger
+    entity_id:
+      name: Vehicle entity
+      description: Any EV Ledger entity of the vehicle (instead of the entry).
+      selector:
+        entity:
+          integration: evledger
+    charge_id:
+      name: Charge ID
+      required: true
+      selector:
+        text:
+    kwh:
+      name: Energy added
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 0.1
+          unit_of_measurement: kWh
+    price:
+      name: Total price
+      description: The total price (or give the price per kWh instead).
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.01
+    price_per_kwh:
+      name: Price per kWh
+      description: The price per kWh; the total becomes the charge's kWh times this.
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01
+          mode: box
+    location_name:
+      name: Location
+      selector:
+        text:
+    note:
+      name: Note
+      selector:
+        text:
+    remember:
+      name: Remember the price
+      description: Also use this price per kWh for the next charges at this place, or with this operator.
+      selector:
+        select:
+          options:
+            - label: At this place
+              value: place
+            - label: With this operator
+              value: operator
+
+delete_trip:
+  name: Delete trip
+  description: >-
+    Permanently remove one trip — fixes a mis-detected or spurious trip. This
+    cannot be undone.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this trip belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    trip_id:
+      name: Trip ID
+      description: >-
+        The id of the trip to delete — see the `id` field on any entry in
+        sensor.<vehicle>_trips' `trips` attribute.
+      required: true
+      selector:
+        text:
+
+add_charge:
+  name: Add charge
+  description: >-
+    Add a finished charge, at home or away, that EV Ledger did not record itself — for example
+    charges from before EV Ledger was set up, so the monthly and yearly costs are complete.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this charge belongs to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    kwh:
+      name: Energy added
+      description: How much energy was added, in kWh.
+      required: true
+      example: 24.5
+      selector:
+        number:
+          min: 0
+          max: 2000
+          step: 0.1
+          unit_of_measurement: kWh
+    price:
+      name: Total price
+      description: What the charge cost in total. Leave it out when unknown; the charge then waits for a price.
+      required: false
+      example: 18.4
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 0.01
+    started_at:
+      name: Started at
+      description: When the charge started.
+      required: true
+      selector:
+        datetime:
+    ended_at:
+      name: Ended at
+      description: When the charge ended (it counts in that month). Defaults to the start.
+      required: false
+      selector:
+        datetime:
+    location:
+      name: Where
+      description: At home or away (public).
+      required: false
+      default: home
+      selector:
+        select:
+          options:
+            - home
+            - public
+    location_name:
+      name: Location
+      description: Where you charged.
+      required: false
+      selector:
+        text:
+    note:
+      name: Note
+      description: Anything worth remembering, e.g. where the numbers came from.
+      required: false
+      selector:
+        text:
+
+set_week_plan:
+  name: Set week plan
+  description: >-
+    A ready-by time for each weekday for smart charging, each day with the normal target or its own. Days left out
+    (or null) are free: the plan then aims at the next day with a time. While the week plan is on it is used instead
+    of the ready-by time and the learned departure times.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its charge mode).
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    days:
+      name: Days
+      description: >-
+        mon … sun, each {"time": "07:00"} or {"time": "07:00", "target": 90} (50–100 %), or null for a free day.
+      required: true
+      example: '{"mon": {"time": "06:30"}, "tue": {"time": "06:30"}, "fri": {"time": "06:30", "target": 90}, "sat": null}'
+      selector:
+        object:
+    enabled:
+      name: Switch on
+      description: Also switch the week plan on (true) or off (false).
+      required: false
+      selector:
+        boolean:
+
+set_ready_by_once:
+  name: Set one-time ready-by time
+  description: >-
+    Ready by this time once (e.g. an early morning), with the normal target or its own. Until then it replaces the
+    normal ready-by times (which keep the minimum level); once it has passed, the normal times take over again.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its charge mode).
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    at:
+      name: Ready by
+      description: When the car must be ready, at most 14 days ahead.
+      required: true
+      selector:
+        datetime:
+    target:
+      name: Target
+      description: Its own target in %. Leave it out for the normal target.
+      required: false
+      selector:
+        number:
+          min: 50
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+
+clear_ready_by_once:
+  name: Clear one-time ready-by time
+  description: Forget the one-time ready-by time; the normal ready-by times apply again.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its charge mode).
+      required: true
+      selector:
+        entity:
+          integration: evledger
+
+save_tyre_set:
+  name: Save tyre set
+  description: >-
+    Add a tyre set (tyres and rims), or change the given fields of one (with set_id). Leave a field out to keep it.
+    Returns the set's id.
+  fields:
+    entity_id:
+      name: Car
+      description: Any EV Ledger entity of the car (e.g. its Tyres sensor).
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      description: The set's id or name, to change it. Leave out to add a new set.
+      example: Vinter
+      selector:
+        text:
+    name:
+      name: Name
+      example: Vinter
+      selector:
+        text:
+    kind:
+      name: Kind
+      selector:
+        select:
+          options: [summer, winter, studded, all_season]
+    brand:
+      name: Tyre brand
+      example: Nokian
+      selector:
+        text:
+    model:
+      name: Tyre model
+      example: Hakkapeliitta R5 EV
+      selector:
+        text:
+    width_mm:
+      name: Width (mm)
+      example: 235
+      selector:
+        number: {min: 100, max: 400, step: 5}
+    aspect_pct:
+      name: Profile (%)
+      example: 45
+      selector:
+        number: {min: 20, max: 95, step: 5}
+    rim_inch:
+      name: Rim diameter (inch)
+      example: 18
+      selector:
+        number: {min: 10, max: 26, step: 1}
+    load_speed:
+      name: Load and speed index
+      example: 98T
+      selector:
+        text:
+    dot:
+      name: DOT (week and year made)
+      example: "2324"
+      selector:
+        text:
+    rim_name:
+      name: Rim
+      example: Aero 18
+      selector:
+        text:
+    rim_width_in:
+      name: Rim width (J)
+      example: 8.5
+      selector:
+        number: {min: 3, max: 14, step: 0.5}
+    rim_offset_mm:
+      name: Rim offset (ET)
+      example: 40
+      selector:
+        number: {min: -50, max: 90, step: 1}
+    purchased:
+      name: Bought
+      selector:
+        date:
+    price:
+      name: Price
+      selector:
+        number: {min: 0, max: 100000, step: 1}
+    km_before:
+      name: Km before EV Ledger
+      description: How far the set had driven before it was added.
+      selector:
+        number: {min: 0, max: 300000, step: 100, unit_of_measurement: km}
+    storage:
+      name: Stored at
+      description: Where the set is when it is not on the car.
+      example: Dækhotel
+      selector:
+        text:
+    note:
+      name: Note
+      selector:
+        text:
+    retired:
+      name: Retired
+      description: Worn out or sold; kept for its history.
+      selector:
+        boolean:
+
+delete_tyre_set:
+  name: Delete tyre set
+  description: Delete a tyre set and its changes.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      description: The set's id or name.
+      required: true
+      selector:
+        text:
+
+change_tyres:
+  name: Change tyres
+  description: >-
+    A tyre set went on the car, now or at a time in the past. The odometer then is read from the trips when not given.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      description: The set's id or name.
+      required: true
+      example: Vinter
+      selector:
+        text:
+    at:
+      name: When
+      description: Leave out for now.
+      selector:
+        datetime:
+    odometer_km:
+      name: Odometer
+      selector:
+        number: {min: 0, max: 1000000, step: 1, unit_of_measurement: km}
+    note:
+      name: Note
+      selector:
+        text:
+
+update_tyre_change:
+  name: Update tyre change
+  description: Correct when a tyre change was, its odometer or its note.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    change_id:
+      name: Change
+      required: true
+      selector:
+        text:
+    at:
+      name: When
+      selector:
+        datetime:
+    odometer_km:
+      name: Odometer
+      selector:
+        number: {min: 0, max: 1000000, step: 1, unit_of_measurement: km}
+    note:
+      name: Note
+      selector:
+        text:
+
+delete_tyre_change:
+  name: Delete tyre change
+  description: Delete a recorded tyre change.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    change_id:
+      name: Change
+      required: true
+      selector:
+        text:
+
+log_tread_depth:
+  name: Log tread depth
+  description: >-
+    A tread depth reading of a set: one value, or one per tyre (front left, front right, rear left, rear right; the
+    least counts). Two readings some km apart give the wear per 1000 km and the km left.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      required: true
+      selector:
+        text:
+    mm:
+      name: Depth
+      selector:
+        number: {min: 0, max: 20, step: 0.1, unit_of_measurement: mm}
+    each:
+      name: Each tyre
+      description: Up to four depths, front left, front right, rear left, rear right.
+      example: "[6.5, 6.4, 6.1, 6.2]"
+      selector:
+        object:
+    at:
+      name: When
+      selector:
+        datetime:
+    odometer_km:
+      name: Odometer
+      selector:
+        number: {min: 0, max: 1000000, step: 1, unit_of_measurement: km}
+
+delete_tread_depth:
+  name: Delete tread depth reading
+  description: Delete one tread depth reading of a set.
+  fields:
+    entity_id:
+      name: Car
+      required: true
+      selector:
+        entity:
+          integration: evledger
+    set_id:
+      name: Set
+      required: true
+      selector:
+        text:
+    reading_id:
+      name: Reading
+      required: true
+      selector:
+        text:
+
+set_zone_price:
+  name: Set zone price
+  description: >-
+    The price per kWh of charging away from home in a zone, e.g. 0 at family where charging is free. A public charge
+    in the zone gets this price instead of the public default price. Leave the price out to remove the zone's price.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this applies to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    zone:
+      name: Zone
+      description: The zone.
+      required: true
+      selector:
+        entity:
+          domain: zone
+    price:
+      name: Price per kWh
+      description: The price per kWh in the zone (0 = free). Leave it out to remove the zone's price.
+      required: false
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01
+
+set_operator_price:
+  name: Set operator price
+  description: >-
+    The price per kWh of a charging operator (e.g. Clever, PowerGo, Ionity), used for a public charge at that
+    operator's station when Open Charge Map knows the operator. Leave the price out to remove it.
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this applies to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    operator:
+      name: Operator
+      description: The operator's name as Open Charge Map has it (part of it is enough, e.g. "Clever").
+      required: true
+      example: Clever
+      selector:
+        text:
+    price:
+      name: Price per kWh
+      description: The operator's price per kWh (normal/AC charging). Leave both prices out to remove the operator's price.
+      required: false
+      example: 3.95
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01
+    fast_price:
+      name: Fast charger price per kWh
+      description: The operator's price per kWh at a fast charger (50 kW and up), if it differs.
+      required: false
+      example: 5.48
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.01
+
+forget_place:
+  name: Forget place
+  description: Forget a public charging place that was named with a price (the next charge there is asked again).
+  fields:
+    entry_id:
+      name: Vehicle
+      description: Which EV Ledger vehicle this applies to.
+      required: true
+      selector:
+        config_entry:
+          integration: evledger
+    name:
+      name: Name
+      description: The place's name.
+      required: true
+      selector:
+        text:

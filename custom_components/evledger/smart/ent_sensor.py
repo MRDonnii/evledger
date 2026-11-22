@@ -1,0 +1,212 @@
+"""Charge plan sensors."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+)
+from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfLength
+from homeassistant.util import dt as dt_util
+
+from .const import STATUSES
+from .entity import EvSmartChargeListenerEntity
+from .planner import ChargePlanner
+
+NO_PLAN = "—"
+
+
+def _clock(value) -> str:
+    return dt_util.as_local(value).strftime("%H:%M") if value else NO_PLAN
+
+
+def _next_block(planner: ChargePlanner):
+    return planner.schedule.next_block(dt_util.now())
+
+
+def _prices(planner: ChargePlanner) -> list[dict]:
+    now = dt_util.now()
+    last = max([planner.horizon or now, *(block.end for block in planner.schedule.blocks)])
+    until = min(last, now + timedelta(hours=48))
+    factor = planner.settings["price_factor"]
+    return [{"t": slot.start.isoformat(), "p": round(slot.price * factor, 4), **({"e": True} if slot.estimated else {})}
+            for slot in planner.timeline if slot.end > now and slot.start < until]
+
+
+def _route(planner: ChargePlanner, field: str):
+    return getattr(planner.trip.route, field) if planner.trip.route else None
+
+
+def _top_up(planner) -> dict:
+    windows = planner.schedule.top_up
+    first = windows[0] if windows else None
+    return {"active": planner.top_up_active and first is not None, "reason": planner.top_up_reason,
+            "chemistry": planner.chemistry,
+            "from_soc": planner.settings["top_up_soc"],
+            "window_start": first.start.isoformat() if first else None,
+            "window_end": first.end.isoformat() if first else None,
+            "windows": [{"deadline": window.deadline.isoformat(), "from_soc": window.from_soc,
+                         "start": window.start.isoformat(), "end": window.end.isoformat()} for window in windows]}
+
+
+@dataclass(frozen=True, kw_only=True)
+class PlanSensorDescription(SensorEntityDescription):
+    value: Callable[[ChargePlanner], Any]
+
+
+SENSORS: tuple[PlanSensorDescription, ...] = (
+    PlanSensorDescription(key="charge_status", device_class=SensorDeviceClass.ENUM, options=STATUSES,
+                          icon="mdi:ev-plug-type2", value=lambda p: p.status),
+    PlanSensorDescription(key="next_charge_start", device_class=SensorDeviceClass.TIMESTAMP,
+                          icon="mdi:clock-start",
+                          value=lambda p: (block := _next_block(p)) and block.start),
+    PlanSensorDescription(key="next_charge_end", device_class=SensorDeviceClass.TIMESTAMP,
+                          icon="mdi:clock-end",
+                          value=lambda p: p.block_end(_next_block(p), dt_util.now())),
+    PlanSensorDescription(key="planned_cost", device_class=SensorDeviceClass.MONETARY,
+                          icon="mdi:cash-clock", suggested_display_precision=2,
+                          value=lambda p: p.schedule.cost),
+    PlanSensorDescription(key="planned_energy", device_class=SensorDeviceClass.ENERGY,
+                          native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+                          suggested_display_precision=1, icon="mdi:lightning-bolt",
+                          value=lambda p: p.schedule.energy_kwh),
+    PlanSensorDescription(key="plan_target_soc", native_unit_of_measurement=PERCENTAGE,
+                          suggested_display_precision=0, icon="mdi:battery-charging-high",
+                          value=lambda p: p.schedule.target_soc),
+    PlanSensorDescription(key="trip_distance", device_class=SensorDeviceClass.DISTANCE,
+                          native_unit_of_measurement=UnitOfLength.KILOMETERS,
+                          suggested_display_precision=0, icon="mdi:map-marker-distance",
+                          value=lambda p: _route(p, "distance_km")),
+    PlanSensorDescription(key="trip_energy", device_class=SensorDeviceClass.ENERGY,
+                          native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+                          suggested_display_precision=1, icon="mdi:car-electric",
+                          value=lambda p: p.trip_energy_kwh),
+    PlanSensorDescription(key="trip_target_soc", native_unit_of_measurement=PERCENTAGE,
+                          suggested_display_precision=0, icon="mdi:battery-arrow-up-outline",
+                          value=lambda p: p.trip_target_soc),
+)
+
+
+def build(planner) -> list:
+    return list(PlanSensor(planner, description) for description in SENSORS)
+
+
+class PlanSensor(EvSmartChargeListenerEntity, SensorEntity):
+    entity_description: PlanSensorDescription
+    # The price list for cards changes every slot; it is not kept in the recorder.
+    _unrecorded_attributes = frozenset({"prices"})
+
+    def __init__(self, planner: ChargePlanner, description: PlanSensorDescription) -> None:
+        super().__init__(planner, description.key)
+        self.entity_description = description
+
+    @property
+    def native_value(self):
+        return self.entity_description.value(self.planner)
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        if self.entity_description.key in ("best_charge_price", "planned_cost"):
+            return self.planner.price_unit or "kr"
+        return self.entity_description.native_unit_of_measurement
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        key = self.entity_description.key
+        planner = self.planner
+        if key == "best_charge_start":
+            return {"deadline": planner.deadline, "price_slots": planner.slot_count}
+        if key == "charge_status":
+            return {
+                "mode": planner.mode,
+                "charger_state": planner.charger_state if planner.controls_charger else None,
+                "controls_charger": planner.controls_charger,
+                "car_plugged_in": planner.car_present if planner.controls_charger else None,
+                "trip_active": planner.trip_active,
+                "battery_level_assumed": planner.soc_assumed,
+                "vehicle_model": planner.vehicle.key if planner.vehicle else None,
+                "vehicle_name": planner.vehicle.name if planner.vehicle else None,
+                "vehicle_body": planner.vehicle.body if planner.vehicle else None,
+                "battery_capacity_kwh": planner.capacity,
+                # What EV Ledger can do with the car itself: its climate (preconditioning) and charge limit need a
+                # car integration that sends commands (Tesla Fleet with the virtual key, Teslemetry, Tessie).
+                "car_climate_entity": planner.routines.climate_entity(),
+                "car_charge_limit_entity": planner._limit_entity(),
+                "car_at_home": planner.car_home(),
+            }
+        if key == "next_charge_start":
+            schedule = planner.schedule
+            limit_on = planner.flags["smart_price_limit"]
+            view = planner.limit_view
+            return {
+                "mode": planner.mode,
+                "charge_now": schedule.charge_now,
+                "blocks": [
+                    {"start": block.start.isoformat(), "end": block.end.isoformat(),
+                     "kwh": round(block.kwh, 2), "cost": round(block.cost, 2), "estimated": block.estimated}
+                    for block in schedule.blocks
+                ],
+                "deadline": planner.deadline,
+                # The ready-by time's own target (week plan, one-time time) and what set it.
+                "deadline_target": planner.active_target,
+                "deadline_source": planner.deadline_source,
+                "trip_departure": planner.trip.departure,
+                "estimated_prices": schedule.estimated,
+                "shortfall_kwh": schedule.shortfall_kwh,
+                # Price limit on the cheapest plan: the limit, the energy above it (charged at the higher price, or
+                # left for later when the answer was to wait), the level reached below it, and the cheaper periods.
+                # (EV Ledger 0.9: "price_limit" is the price above which the best later period is cheaper, or the
+                # fixed limit when that is higher; the floor is the reserve the daily driving must leave.)
+                "price_limit": view["price_limit"] if view else None,
+                "price_limit_floor": planner.settings["smart_floor_soc"] if limit_on else None,
+                "above_limit_kwh": view["over_kwh"] if view else schedule.limit_kwh,
+                "limit_soc": planner.wait_soc if planner.wait_soc is not None else (
+                    view["below_soc"] if view and view["over_kwh"] else (
+                        round(schedule.limit_soc, 1) if schedule.limit_soc is not None else None)),
+                "limit_wait": planner.limit_wait if view or planner.wait_params else None,
+                "above_limit_cost": view["over_cost"] if view else None,
+                "limit_saving": view["saving"] if view else None,
+                "limit_ask": view["ask"] if view else None,
+                "daily_use_kwh": view["daily_use_kwh"] if view else None,
+                "limit_cheaper": [{key: (value.isoformat() if key in ("start", "end") else value)
+                                   for key, value in window.items()} for window in view["windows"]] if view else [],
+                # The prices the plan chose from, for a chart of when the car would charge (also before it is
+                # plugged in): start, price (with the price factor) and whether it is estimated.
+                "slot_minutes": planner.slot_minutes,
+                "prices": _prices(planner),
+                # Waiting for a cheaper day (that day's departure, prices and saving), and the plan's CO2 per kWh.
+                "waiting_for": ({**planner.waiting, "deadline": planner.waiting["deadline"].isoformat()}
+                                if planner.waiting else None),
+                "co2": planner.schedule.co2,
+                # Sparing an NMC battery: the part above from_soc is charged in the window before the next ready-by
+                # time (ending the top-up margin before it); "windows" has one per ready-by time in the plan.
+                "top_up": _top_up(planner),
+            }
+        if key == "planned_cost":
+            return {"alternatives": {
+                mode: {
+                    "cost": plan.cost, "energy_kwh": plan.energy_kwh, "estimated": plan.estimated,
+                    "start": plan.blocks[0].start.isoformat() if plan.blocks else None,
+                    "end": plan.blocks[-1].end.isoformat() if plan.blocks else None,
+                    "blocks": len(plan.blocks), "shortfall_kwh": plan.shortfall_kwh,
+                }
+                for mode, plan in planner.alternatives.items()
+            }}
+        if key == "trip_distance":
+            route = planner.trip.route
+            return {
+                "destination": planner.trip.destination or None,
+                "resolved_name": route.name if route else None,
+                "duration_min": route.duration_min if route else None,
+                "method": route.method if route else None,
+                "round_trip": planner.trip.round_trip,
+                "looking_up": planner.trip.looking_up,
+                "error": planner.trip.error,
+            }
+        return None

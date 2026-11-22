@@ -1,0 +1,51 @@
+name: Publish release
+
+# A new version in manifest.json on main is published as a GitHub release (vX.Y.Z), with that version's section of
+# CHANGELOG.md as its notes (GitHub's generated notes when there is none). A release that already exists is left alone.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - custom_components/evledger/manifest.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: version
+        shell: bash
+        run: |
+          version="$(jq -r '.version' custom_components/evledger/manifest.json)"
+          test -n "$version" && test "$version" != "null"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          # The lines under "## [X.Y.Z]" up to the next "## " heading.
+          awk -v version="$VERSION" '
+            /^## / { if (found) exit; found = index($0, "[" version "]") > 0; next }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if grep -q '[^[:space:]]' notes.md; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          fi

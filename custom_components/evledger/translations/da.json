@@ -1,0 +1,569 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tilføj en bil",
+        "description": "Vælg enhederne herunder, så finder EV Ledger selv alle de sensorer, den skal bruge: (1) din bil (Tesla Custom, Tesla Fleet, Teslemetry eller Tessie; lad den stå tom for en anden bil og vælg dens sensorer på næste side), (2) din hjemmelader, (3) en lade-app/konto som Monta, (4) din elpris. Lad en vælger stå tom for at udelade den rolle. Næste side sætter smart opladning op. Slå 'Avanceret opsætning' til nederst, hvis du selv vil gennemgå alle sensorer.",
+        "data": {
+          "vehicle_name": "Bilnavn",
+          "currency": "Valuta",
+          "vehicle_device_id": "1. Bil",
+          "zaptec_device_id": "2. Lader (valgfri)",
+          "monta_device_id": "3. Ladestyring (valgfri)",
+          "spot_price_device_id": "4. Strømpris (valgfri)",
+          "tesla_model_key": "Model / variant til effektivitetssammenligning (valgfri)",
+          "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
+          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')",
+          "advanced_setup": "Avanceret opsætning — vis alle sensorfelter så jeg selv kan gennemgå eller rette dem"
+        },
+        "data_description": {
+          "vehicle_device_id": "Din bil fra Tesla Custom, Tesla Fleet, Teslemetry eller Tessie. Tom: vælg bilens sensorer selv på næste side (alle bilmærker).",
+          "zaptec_device_id": "Din hjemmelader, fx Zaptec — lad stå tom hvis du ikke har en",
+          "monta_device_id": "Din ladestyrings-app/konto, fx Monta — lad stå tom hvis du ikke har en",
+          "spot_price_device_id": "Din elpris-integration, fx Nordpool eller Strømligning — lad stå tom hvis du ikke har en"
+        }
+      },
+      "fill_missing": {
+        "title": "Gennemgå sensorer",
+        "description": "Enten kunne noget ikke findes automatisk, eller også har du slået avanceret opsætning til — under alle omstændigheder kan alt herunder redigeres. Det der allerede er fundet er udfyldt på forhånd; ret kun det der skal rettes.",
+        "data": {
+          "battery_entity": "Batteriniveau-sensor",
+          "odometer_entity": "Kilometertæller-sensor",
+          "device_tracker_entity": "Lokation (device tracker)",
+          "charging_binary_entity": "Lader (binær sensor eller en ladetilstands-sensor)",
+          "locked_entity": "Låst (valgfri)",
+          "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)",
+          "zaptec_power_entity": "Ladeeffekt-sensor",
+          "zaptec_session_energy_entity": "Sessionsenergi-sensor",
+          "zaptec_charging_entity": "Lader (binary sensor eller switch, valgfri)",
+          "zaptec_completed_energy_entity": "Afsluttet sessionsenergi-sensor (valgfri, anbefales)",
+          "monta_last_charge_entity": "Seneste ladning-sensor",
+          "monta_wallet_entity": "Wallet-saldo-sensor (valgfri)",
+          "spot_price_entity": "Elpris-sensor"
+        }
+      },
+      "smart_charge": {
+        "title": "Smart opladning",
+        "description": "Lad når strømmen er billigst, og lad EV Ledger starte og stoppe laderen. Bil, batteri og elpris kommer fra ledger-opsætningen; tomme felter findes automatisk (Zaptec-laderens tilstandssensor, bilens stik-sensor).",
+        "data": {
+          "enabled": "Smart opladning",
+          "price_entities": "Elpris-sensorer (i dag og i morgen)",
+          "charger_type": "Styring af laderen",
+          "zaptec_mode_entity": "Zaptec-laderens tilstandssensor",
+          "charge_switch": "Ladekontakt",
+          "car_plugged_entity": "Bilens tilslutnings-sensor",
+          "notify_services": "Mobiler der skal bekræfte planen",
+          "notify_only_home": "Kun mobiler der er hjemme",
+          "notify_url": "Side der åbnes ved tryk",
+          "notify_icon": "Ikon på beskederne",
+          "car_climate_entity": "Bilens klima (forvarmning)",
+          "trip_calendar": "Kalender med ture",
+          "trip_calendar_keyword": "Kodeord i kalenderen"
+        },
+        "data_description": {
+          "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
+          "price_entities": "Tom: ledgerens elpris-sensor (med Strømligning også dens egen sensor for i morgen). Valgt selv: den første tæller, hvor de overlapper.",
+          "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
+          "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke.",
+          "notify_url": "Dashboard-sti der åbnes, når man trykker på beskeden, fx /teknik-overblik/tesla.",
+          "notify_icon": "Material Design-ikon, der vises ved beskederne. Tom: mdi:ev-station.",
+          "car_climate_entity": "Tom: bilens klima-entity findes på samme enhed som batteri-sensoren. Kræver en bil-integration, der kan sende kommandoer til bilen (Tesla Fleet med virtuel nøgle, Teslemetry eller Tessie).",
+          "trip_calendar": "Begivenheder de næste 36 timer bliver til en midlertidig plan: bilen er ladet nok til turen og kører hjemmefra i tide til begivenhedens start.",
+          "trip_calendar_keyword": "Kun begivenheder med ordet i titlen eller beskrivelsen, fx 'bil'. Tom: alle begivenheder med en adresse."
+        }
+      }
+    },
+    "error": {
+      "no_prices": "Ingen af sensorerne har en prisliste i attributterne.",
+      "required_for_zaptec": "Vælg Zaptec-laderens tilstandssensor.",
+      "required_for_switch": "Vælg ladekontakten."
+    },
+    "abort": {
+      "already_configured": "Denne bil er allerede sat op."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Genkonfigurér EV Ledger",
+        "description": "Én side for alt der er sat op i dag. Ryd en Zaptec-/Monta-/pris-entitet for at fjerne den udbyder helt.",
+        "data": {
+          "battery_entity": "Batteriniveau-sensor",
+          "odometer_entity": "Kilometertæller-sensor",
+          "device_tracker_entity": "Lokation (device tracker)",
+          "charging_binary_entity": "Lader (binær sensor eller en ladetilstands-sensor)",
+          "locked_entity": "Låst (valgfri)",
+          "outside_temp_entity": "Udendørstemperatur-sensor (valgfri, aktiverer effektivitet-vs-temperatur)",
+          "zaptec_power_entity": "Zaptec ladeeffekt-sensor (valgfri — lad stå tom for at fjerne Zaptec)",
+          "zaptec_session_energy_entity": "Zaptec sessionsenergi-sensor (valgfri — lad stå tom for at fjerne Zaptec)",
+          "zaptec_charging_entity": "Zaptec lader (binary sensor eller switch, valgfri)",
+          "zaptec_completed_energy_entity": "Zaptec afsluttet sessionsenergi-sensor (valgfri)",
+          "monta_last_charge_entity": "Monta seneste ladning-sensor (valgfri — lad stå tom for at fjerne Monta)",
+          "monta_wallet_entity": "Monta wallet-saldo-sensor (valgfri)",
+          "spot_price_entity": "Elpris-sensor (valgfri — lad stå tom for at fjerne spotpris-estimater)",
+          "tesla_model_key": "Model / variant til effektivitetssammenligning (valgfri)",
+          "battery_capacity_kwh": "Brugbar batterikapacitet i kWh (bruges kun hvis model er 'Brugerdefineret')",
+          "rated_wh_per_km": "Normeret forbrug i Wh/km (bruges kun hvis model er 'Brugerdefineret')",
+          "ocm_api_key": "Open Charge Map API-nøgle (valgfri)",
+          "monta_client_id": "Monta Public API client id (valgfri)",
+          "monta_client_secret": "Monta Public API client secret (valgfri)",
+          "eco_movement_token": "Eco-Movement-token (valgfri)"
+        },
+        "data_description": {
+          "ocm_api_key": "Giver offentlige opladninger ladestandens navn og operatør. Gratis: log ind på openchargemap.org, åbn My Profile → My Apps, registrér en app (Register an application) og kopiér dens API-nøgle hertil. Lad feltet stå tomt for ikke at bruge den.",
+          "monta_client_id": "Operatørernes egne priser (EU's AFIR-data) for EWII, Norlys, go'energi, NRGi, Uno-X, Energi Fyn m.fl. på Monta. Gratis: log ind på portal2.monta.app med din Monta-konto, åbn din profil (nederst til venstre) → Applications → + Add Application, og kopiér client id hertil.",
+          "monta_client_secret": "Den client secret, der vises én gang, når applikationen oprettes.",
+          "eco_movement_token": "Operatørernes egne priser (EU's AFIR-data) for Clever, Circle K, Q8, Allego, Ionity, Lidl, Fastned m.fl. Bed support@eco-movement.com om en token til deres danske NAP-feed (nap-dk.eco-movement.com). Spirii's, OK's, EV-EL's og TotalEnergies' data bruges uden nøgle."
+        }
+      },
+      "smart_charge": {
+        "title": "Smart opladning",
+        "description": "Lad når strømmen er billigst, og lad EV Ledger starte og stoppe laderen. Bil, batteri og elpris kommer fra ledger-opsætningen; tomme felter findes automatisk (Zaptec-laderens tilstandssensor, bilens stik-sensor).",
+        "data": {
+          "enabled": "Smart opladning",
+          "price_entities": "Elpris-sensorer (i dag og i morgen)",
+          "charger_type": "Styring af laderen",
+          "zaptec_mode_entity": "Zaptec-laderens tilstandssensor",
+          "charge_switch": "Ladekontakt",
+          "car_plugged_entity": "Bilens tilslutnings-sensor",
+          "notify_services": "Mobiler der skal bekræfte planen",
+          "notify_only_home": "Kun mobiler der er hjemme",
+          "notify_url": "Side der åbnes ved tryk",
+          "notify_icon": "Ikon på beskederne",
+          "car_climate_entity": "Bilens klima (forvarmning)",
+          "trip_calendar": "Kalender med ture",
+          "trip_calendar_keyword": "Kodeord i kalenderen"
+        },
+        "data_description": {
+          "enabled": "Giver ladeplaner (billigst, fast tid, lad nu, prisloft, pause), en midlertidig tur-plan og pris pr. plan.",
+          "price_entities": "Tom: ledgerens elpris-sensor (med Strømligning også dens egen sensor for i morgen). Valgt selv: den første tæller, hvor de overlapper.",
+          "charger_type": "Tom: Zaptec, når ledgeren bruger en Zaptec-lader.",
+          "car_plugged_entity": "Tom: bilens egen stik-sensor. Er den slukket, står en anden bil i laderen, og laderen røres ikke.",
+          "notify_url": "Dashboard-sti der åbnes, når man trykker på beskeden, fx /teknik-overblik/tesla.",
+          "notify_icon": "Material Design-ikon, der vises ved beskederne. Tom: mdi:ev-station.",
+          "car_climate_entity": "Tom: bilens klima-entity findes på samme enhed som batteri-sensoren. Kræver en bil-integration, der kan sende kommandoer til bilen (Tesla Fleet med virtuel nøgle, Teslemetry eller Tessie).",
+          "trip_calendar": "Begivenheder de næste 36 timer bliver til en midlertidig plan: bilen er ladet nok til turen og kører hjemmefra i tide til begivenhedens start.",
+          "trip_calendar_keyword": "Kun begivenheder med ordet i titlen eller beskrivelsen, fx 'bil'. Tom: alle begivenheder med en adresse."
+        }
+      }
+    },
+    "error": {
+      "no_prices": "Ingen af sensorerne har en prisliste i attributterne.",
+      "required_for_zaptec": "Vælg Zaptec-laderens tilstandssensor.",
+      "required_for_switch": "Vælg ladekontakten."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "trips": {
+        "name": "Ture"
+      },
+      "charges": {
+        "name": "Ladninger"
+      },
+      "charging_status": {
+        "name": "Ladestatus",
+        "state": {
+          "idle": "Lader ikke",
+          "home": "Lader hjemme",
+          "public": "Lader (offentlig)"
+        }
+      },
+      "cost_per_km": {
+        "name": "Pris pr. km"
+      },
+      "pending_review": {
+        "name": "Ladninger der mangler pris"
+      },
+      "efficiency": {
+        "name": "Effektivitet vs. normeret"
+      },
+      "monthly_performance": {
+        "name": "Månedlig performance"
+      },
+      "total_cost": {
+        "name": "Samlet ladeomkostning"
+      },
+      "total_distance": {
+        "name": "Samlet distance"
+      },
+      "last_trip": {
+        "name": "Seneste tur"
+      },
+      "last_charge": {
+        "name": "Seneste ladning"
+      },
+      "battery_efficiency_score": {
+        "name": "Batteri-effektivitetsscore"
+      },
+      "next_charge_start": {
+        "name": "Næste ladestart"
+      },
+      "next_charge_end": {
+        "name": "Næste ladeslut"
+      },
+      "planned_cost": {
+        "name": "Planlagt ladepris"
+      },
+      "planned_energy": {
+        "name": "Planlagt energi"
+      },
+      "plan_target_soc": {
+        "name": "Planens mål-SOC"
+      },
+      "trip_distance": {
+        "name": "Turens afstand"
+      },
+      "trip_energy": {
+        "name": "Turens energiforbrug"
+      },
+      "trip_target_soc": {
+        "name": "SOC turen kræver"
+      },
+      "charge_status": {
+        "name": "Ladestatus",
+        "state": {
+          "plan_only": "Kun plan",
+          "manual": "Manuel",
+          "disconnected": "Ikke tilsluttet",
+          "other_car": "En anden bil er tilsluttet",
+          "unknown": "Ukendt",
+          "charging": "Lader",
+          "stopped_externally": "Stoppet af bilen eller appen",
+          "not_responding": "Laderen svarer ikke",
+          "paused": "På pause",
+          "starting": "Starter",
+          "done": "Mål nået",
+          "waiting": "Venter på billig strøm",
+          "awaiting_confirmation": "Venter på bekræftelse"
+        }
+      },
+      "home_cost_today": {
+        "name": "Hjemmeladning i dag"
+      },
+      "distance_today": {
+        "name": "Kørt i dag"
+      },
+      "home_charging_power": {
+        "name": "Hjemmeladning effekt"
+      },
+      "home_charging_energy": {
+        "name": "Hjemmeladning kWh i alt"
+      },
+      "home_charging_energy_today": {
+        "name": "Hjemmeladning kWh i dag"
+      },
+      "home_charging_energy_month": {
+        "name": "Hjemmeladning kWh denne måned"
+      },
+      "cost_this_year": {
+        "name": "Ladeudgift i år"
+      },
+      "tyres": {
+        "name": "Hjul"
+      }
+    },
+    "number": {
+      "target_soc": {
+        "name": "Mål-SOC"
+      },
+      "charge_power_kw": {
+        "name": "Ladeeffekt"
+      },
+      "efficiency": {
+        "name": "Ladevirkningsgrad"
+      },
+      "price_factor": {
+        "name": "Prisfaktor"
+      },
+      "price_cap": {
+        "name": "Prisloft"
+      },
+      "min_soc": {
+        "name": "Minimum-SOC"
+      },
+      "consumption": {
+        "name": "Forbrug"
+      },
+      "trip_margin": {
+        "name": "Sikkerhedsmargin på tur"
+      },
+      "trip_reserve": {
+        "name": "Reserve ved ankomst"
+      },
+      "reminder_soc": {
+        "name": "Påmind under"
+      },
+      "precondition_minutes": {
+        "name": "Forvarm minutter før"
+      },
+      "low_price": {
+        "name": "Besked ved strømpris under"
+      },
+      "public_charge_energy": {
+        "name": "Offentlig ladning kWh"
+      },
+      "public_charge_price": {
+        "name": "Offentlig ladning pris"
+      },
+      "heat_hold_price": {
+        "name": "Prisgrænse under opvarmning"
+      },
+      "smart_max_price": {
+        "name": "Fast prisgrænse"
+      },
+      "ready_margin": {
+        "name": "Klar før tid"
+      },
+      "top_up_soc": {
+        "name": "Sidste del fra niveau"
+      },
+      "top_up_margin": {
+        "name": "Sidste del færdig før afgang"
+      },
+      "top_up_window": {
+        "name": "Vindue til sidste del"
+      },
+      "ask_min_saving": {
+        "name": "Spørg når det sparer mindst"
+      },
+      "smart_floor_soc": {
+        "name": "Behold altid mindst"
+      },
+      "public_default_price": {
+        "name": "Standardpris ude pr. kWh"
+      }
+    },
+    "time": {
+      "ready_by_time": {
+        "name": "Klar senest"
+      },
+      "fixed_start": {
+        "name": "Fast ladestart"
+      },
+      "fixed_end": {
+        "name": "Fast ladeslut"
+      },
+      "ready_by_weekend": {
+        "name": "Klar senest i weekenden"
+      },
+      "reminder_time": {
+        "name": "Aftentjek kl."
+      },
+      "quiet_from": {
+        "name": "Lydløs fra"
+      },
+      "quiet_until": {
+        "name": "Lydløs til"
+      }
+    },
+    "select": {
+      "charge_mode": {
+        "name": "Ladeplan",
+        "state": {
+          "smart": "Billigst inden afgang",
+          "fixed": "Fast tidspunkt",
+          "now": "Lad nu",
+          "price_cap": "Prisloft",
+          "off": "Pause",
+          "manual": "Manuel (styres ikke)"
+        }
+      },
+      "default_charge_mode": {
+        "name": "Standardplan",
+        "state": {
+          "smart": "Billigst inden afgang",
+          "fixed": "Fast tidspunkt",
+          "price_cap": "Prisloft",
+          "now": "Lad nu",
+          "manual": "Manuel (styres ikke)"
+        }
+      },
+      "price_resolution": {
+        "name": "Prisopløsning",
+        "state": {
+          "quarter": "Kvarter (15 min)",
+          "hour": "Time"
+        }
+      },
+      "tyre_set": {
+        "name": "Hjulsæt"
+      }
+    },
+    "datetime": {
+      "trip_departure": {
+        "name": "Midlertidig afgang"
+      },
+      "ready_by_once": {
+        "name": "Klar senest én gang"
+      }
+    },
+    "text": {
+      "trip_destination": {
+        "name": "Turens destination"
+      },
+      "public_charge_location": {
+        "name": "Offentlig ladning sted"
+      }
+    },
+    "switch": {
+      "trip_round_trip": {
+        "name": "Tur/retur"
+      },
+      "confirm_on_phone": {
+        "name": "Bekræft plan på mobil"
+      },
+      "notify_plan": {
+        "name": "Besked om ladeplan på mobil"
+      },
+      "price_cap_override": {
+        "name": "Overskrid prisloftet ved behov"
+      },
+      "price_limit_wait": {
+        "name": "Vent med resten over prisgrænsen"
+      },
+      "notify_done": {
+        "name": "Besked når opladningen er færdig"
+      },
+      "plug_reminder": {
+        "name": "Påmindelse om at sætte bilen til"
+      },
+      "weekend_ready_by": {
+        "name": "Anden tid i weekenden"
+      },
+      "precondition": {
+        "name": "Forvarm bilen til Klar senest"
+      },
+      "notify_start": {
+        "name": "Besked når opladningen starter"
+      },
+      "learn": {
+        "name": "Lær ladeeffekt og virkningsgrad"
+      },
+      "monthly_summary": {
+        "name": "Månedsoversigt på mobilen"
+      },
+      "low_price_alert": {
+        "name": "Besked når strømmen er billig"
+      },
+      "wait_cheaper_day": {
+        "name": "Vent på billigere dag"
+      },
+      "learn_departure": {
+        "name": "Lær køretider"
+      },
+      "prefer_green": {
+        "name": "Foretræk grøn strøm"
+      },
+      "ask_public_price": {
+        "name": "Spørg om pris efter offentlig ladning"
+      },
+      "morning_check": {
+        "name": "Besked hvis målet ikke nås"
+      },
+      "quiet_night": {
+        "name": "Lydløse beskeder om natten"
+      },
+      "week_plan": {
+        "name": "Ugeplan"
+      },
+      "heat_hold": {
+        "name": "Hold batteriet på målet under opvarmning"
+      },
+      "tyre_reminder": {
+        "name": "Påmindelse om hjulskift"
+      },
+      "smart_price_limit": {
+        "name": "Spørg før dyr ladning"
+      },
+      "nmc_top_up": {
+        "name": "Lad det sidste op lige før afgang (NMC)"
+      }
+    },
+    "button": {
+      "trip_clear": {
+        "name": "Ryd midlertidig plan"
+      },
+      "confirm_plan": {
+        "name": "Bekræft plan"
+      },
+      "send_plan": {
+        "name": "Send ladeplan til mobil"
+      },
+      "send_monthly_summary": {
+        "name": "Send månedsoversigt"
+      },
+      "log_public_charge": {
+        "name": "Gem offentlig ladning"
+      }
+    },
+    "binary_sensor": {
+      "charge_now": {
+        "name": "Lad nu-signal"
+      },
+      "plugged_in": {
+        "name": "Sat til"
+      }
+    }
+  },
+  "selector": {
+    "charger_type": {
+      "options": {
+        "none": "Ingen (kun plan)",
+        "zaptec": "Zaptec",
+        "switch": "Kontakt (OCPP, Monta, ...)"
+      }
+    }
+  },
+  "exceptions": {
+    "departure_out_of_range": {
+      "message": "Afgangen skal ligge ude i fremtiden og højst 14 dage frem."
+    },
+    "public_charge_no_kwh": {
+      "message": "Skriv først kWh for den offentlige ladning."
+    },
+    "ready_by_once_out_of_range": {
+      "message": "Engangstiden skal ligge i fremtiden og højst 14 dage frem."
+    },
+    "no_smart_charging": {
+      "message": "{entity_id} hører ikke til en EV Ledger-bil med smart opladning."
+    },
+    "bad_week_plan": {
+      "message": "Ugeplanen er ikke gyldig: {error}"
+    },
+    "empty_week_plan": {
+      "message": "Ugeplanen skal have en klar-senest-tid på mindst én dag."
+    },
+    "not_ev_ledger": {
+      "message": "{entity_id} hører ikke til en bil i EV Ledger."
+    },
+    "unknown_tyre_set": {
+      "message": "Der er intet hjulsæt der hedder {set}."
+    },
+    "tyre_set_needs_name": {
+      "message": "Et nyt hjulsæt skal have et navn."
+    },
+    "tyre_set_name_taken": {
+      "message": "Der er allerede et hjulsæt der hedder {set}."
+    },
+    "tyre_set_already_on": {
+      "message": "{set} sidder allerede på bilen på det tidspunkt."
+    },
+    "unknown_tyre_change": {
+      "message": "Hjulskiftet findes ikke."
+    },
+    "unknown_tread_reading": {
+      "message": "Målingen af mønsterdybde findes ikke."
+    }
+  },
+  "issues": {
+    "missing_entities": {
+      "title": "{name}: entiteter, som EV Ledger læser, er væk",
+      "description": "EV Ledger kan ikke finde disse entiteter for {name}: {entities}.\n\nIndtil de er tilbage, bliver ture, ladninger eller smart opladning måske ikke registreret eller styret. De er ofte væk, fordi bil-, lader- eller elpris-integrationen har omdøbt dem, er fjernet, eller fordi entiteterne er deaktiveret. Vælg de nye entiteter under **Indstillinger → Enheder og tjenester → EV Ledger → Konfigurer**, eller aktivér dem igen. Beskeden forsvinder af sig selv, når de er tilbage."
+    },
+    "missing_phones": {
+      "title": "{name}: mobiler til beskederne er væk",
+      "description": "Smart opladning for {name} sender beskeder til mobiler, som Home Assistant ikke længere har: {phones}.\n\nEn ny mobil eller en geninstalleret Companion-app får en ny notify-tjeneste. Vælg mobilerne igen under **Indstillinger → Enheder og tjenester → EV Ledger → Konfigurer → Smart opladning**. Beskeden forsvinder af sig selv, når de er tilbage."
+    }
+  }
+}

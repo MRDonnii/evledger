@@ -1,0 +1,793 @@
+"""Sensor platform for EV Ledger."""
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import Any
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    CONF_BATTERY_CAPACITY_KWH,
+    CONF_BATTERY_ENTITY,
+    CONF_CHARGING_BINARY_ENTITY,
+    CONF_DEVICE_TRACKER_ENTITY,
+    CONF_LOCKED_ENTITY,
+    CONF_ODOMETER_ENTITY,
+    CONF_OUTSIDE_TEMP_ENTITY,
+    CONF_ZAPTEC_SESSION_ENERGY_ENTITY,
+    CONF_MODEL_LABEL,
+    CONF_RATED_WH_PER_KM,
+    CONF_ZAPTEC_POWER_ENTITY,
+    DOMAIN,
+    LOCATION_HOME,
+    TEMP_BUCKET_COLD_MAX_C,
+    TEMP_BUCKET_MILD_MAX_C,
+)
+from .smart.ent_sensor import build as build_smart_sensors
+from .coordinator import EvLedgerCoordinator
+from .models import ChargeSession, Trip
+
+MAX_LIST_ITEMS = 20
+MAX_MONTHS = 24
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up EV Ledger sensors for one vehicle entry."""
+    coordinator: EvLedgerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    entities: list[SensorEntity] = [
+        EvLedgerTripsSensor(coordinator, entry),
+        EvLedgerChargesSensor(coordinator, entry),
+        EvLedgerChargingStatusSensor(coordinator, entry),
+        EvLedgerCostPerKmSensor(coordinator, entry),
+        EvLedgerPendingReviewSensor(coordinator, entry),
+        EvLedgerTotalCostSensor(coordinator, entry),
+        EvLedgerTotalDistanceSensor(coordinator, entry),
+        EvLedgerLastTripSensor(coordinator, entry),
+        EvLedgerLastChargeSensor(coordinator, entry),
+        EvLedgerHomeCostTodaySensor(coordinator, entry),
+        EvLedgerDistanceTodaySensor(coordinator, entry),
+        EvLedgerHomePowerSensor(coordinator, entry),
+        EvLedgerHomeEnergySensor(coordinator, entry),
+        EvLedgerHomeEnergySensor(coordinator, entry, "today"),
+        EvLedgerHomeEnergySensor(coordinator, entry, "month"),
+        EvLedgerCostThisYearSensor(coordinator, entry),
+        EvLedgerTyresSensor(coordinator, entry),
+    ]
+    if entry.data.get(CONF_RATED_WH_PER_KM) and entry.data.get(CONF_BATTERY_CAPACITY_KWH):
+        entities.append(EvLedgerEfficiencySensor(coordinator, entry))
+        entities.append(EvLedgerBatteryEfficiencyScoreSensor(coordinator, entry))
+        entities.append(EvLedgerMonthlyPerformanceSensor(coordinator, entry))
+    if getattr(coordinator, "smart", None) is not None:
+        entities.extend(build_smart_sensors(coordinator.smart))
+    async_add_entities(entities)
+
+
+class _EvLedgerBaseSensor(CoordinatorEntity[EvLedgerCoordinator], SensorEntity):
+    _attr_has_entity_name = True
+
+    def __init__(
+        self, coordinator: EvLedgerCoordinator, entry: ConfigEntry, key: str, name: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_translation_key = key
+        self._attr_name = name
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=coordinator.vehicle_name,
+            manufacturer="EV Ledger",
+            model="Vehicle ledger",
+        )
+
+
+class EvLedgerTripsSensor(_EvLedgerBaseSensor):
+    """Total trip count, with recent trips and total distance as attributes."""
+
+    _attr_icon = "mdi:map-marker-distance"
+    # The recent trips are for cards; kept in the recorder they would add a large row at every trip.
+    _unrecorded_attributes = frozenset({"trips"})
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "trips", "Trips")
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.get("trips", []))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        total_km = sum(t.distance_km or 0 for t in trips)
+        return {
+            "total_distance_km": round(total_km, 1),
+            "trips": [t.to_dict() for t in trips[:MAX_LIST_ITEMS]],
+        }
+
+
+class EvLedgerChargesSensor(_EvLedgerBaseSensor):
+    """Total charge count, with home/public cost rollups and recent sessions as attributes."""
+
+    _attr_icon = "mdi:battery-charging-100"
+    _unrecorded_attributes = frozenset({"charges"})
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "charges", "Charges")
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.get("charges", []))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        finished = [c for c in charges if c.ended_at is not None]
+        home = [c for c in finished if c.location_kind == "home"]
+        public = [c for c in finished if c.location_kind == "public"]
+
+        def _sum(items: list[ChargeSession], field: str) -> float:
+            return round(sum(getattr(c, field) or 0 for c in items), 2)
+
+        return {
+            "total_kwh": _sum(finished, "kwh"),
+            "total_price": _sum(finished, "price"),
+            "home_kwh": _sum(home, "kwh"),
+            "home_price": _sum(home, "price"),
+            "public_kwh": _sum(public, "kwh"),
+            "public_price": _sum(public, "price"),
+            "currency": self.coordinator.currency,
+            "charges": [c.to_dict() for c in charges[:MAX_LIST_ITEMS]],
+        }
+
+
+class EvLedgerChargingStatusSensor(_EvLedgerBaseSensor):
+    """Whether the vehicle is currently charging, and where."""
+
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "charging_status", "Charging status")
+
+    @property
+    def native_value(self) -> str:
+        if self.coordinator.data.get("open_charge_home") is not None:
+            return "home"
+        if self.coordinator.data.get("open_charge_public") is not None:
+            return "public"
+        return "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        open_charge: ChargeSession | None = self.coordinator.data.get(
+            "open_charge_home"
+        ) or self.coordinator.data.get("open_charge_public")
+        # The car and charger sensors the ledger reads, so a dashboard card can find the car from this entity alone.
+        data = self._entry.data
+        sources = {key: data.get(conf) for key, conf in (
+            ("battery", CONF_BATTERY_ENTITY), ("odometer", CONF_ODOMETER_ENTITY),
+            ("location", CONF_DEVICE_TRACKER_ENTITY), ("charging", CONF_CHARGING_BINARY_ENTITY),
+            ("lock", CONF_LOCKED_ENTITY), ("outside_temperature", CONF_OUTSIDE_TEMP_ENTITY),
+            ("charger_power", CONF_ZAPTEC_POWER_ENTITY), ("charger_session", CONF_ZAPTEC_SESSION_ENERGY_ENTITY),
+        ) if data.get(conf)}
+        return {**(open_charge.to_dict() if open_charge is not None else {}), "source_entities": sources}
+
+
+class EvLedgerCostPerKmSensor(_EvLedgerBaseSensor):
+    """All-time average charging cost per kilometre driven."""
+
+    _attr_icon = "mdi:cash-multiple"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "cost_per_km", "Cost per km")
+
+    @property
+    def native_value(self) -> float | None:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        total_km = sum(t.distance_km or 0 for t in trips)
+        if total_km <= 0:
+            return None
+        # Only the charges from the period the ledger has trips for: charges added from before (e.g. imported
+        # history) have no kilometres to go with them.
+        first_trip = min((t.started_at for t in trips if t.started_at), default=None)
+        total_price = sum(c.price or 0 for c in charges
+                          if c.ended_at is not None and (first_trip is None or c.ended_at >= first_trip))
+        return round(total_price / total_km, 2)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return f"{self.coordinator.currency}/km"
+
+
+class EvLedgerPendingReviewSensor(_EvLedgerBaseSensor):
+    """Charge sessions still missing a price — usually public charges awaiting manual entry."""
+
+    _attr_icon = "mdi:comment-question-outline"
+    _unrecorded_attributes = frozenset({"pending"})
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "pending_review", "Charges needing price")
+
+    @property
+    def native_value(self) -> int:
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        return sum(1 for c in charges if c.needs_review)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        pending = [c for c in charges if c.needs_review]
+        return {"pending": [c.to_dict() for c in pending[:MAX_LIST_ITEMS]]}
+
+
+class EvLedgerTotalCostSensor(_EvLedgerBaseSensor):
+    """Running total spent on charging — a proper monetary sensor with `state_class: total`,
+    so it shows up natively in HA's own Statistics graphs and month-over-month views."""
+
+    _attr_icon = "mdi:cash-multiple"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "total_cost", "Total charging cost")
+
+    @property
+    def native_value(self) -> float:
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        return round(sum(c.price or 0 for c in charges if c.ended_at is not None), 2)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+
+class EvLedgerHomeCostTodaySensor(_EvLedgerBaseSensor):
+    """What charging at home cost today: the charges that ended today and the one running, priced as it charges."""
+
+    _attr_icon = "mdi:home-lightning-bolt-outline"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "home_cost_today", "Home charging cost today")
+
+    def _today(self) -> tuple[float, float]:
+        today = dt_util.now().date()
+        cost = kwh = 0.0
+        for charge in self.coordinator.store.charges:
+            if charge.location_kind != LOCATION_HOME:
+                continue
+            if charge.ended_at:
+                ended = dt_util.parse_datetime(charge.ended_at)
+                if ended and dt_util.as_local(ended).date() == today:
+                    cost += charge.price or 0.0
+                    kwh += charge.kwh or 0.0
+            elif (meter := self.coordinator.store.meter(charge.id)):
+                cost += float(meter.get("cost") or 0.0)
+                kwh += self.coordinator.running_kwh(charge.id)
+        return round(cost, 2), round(kwh, 2)
+
+    @property
+    def native_value(self) -> float:
+        return self._today()[0]
+
+    @property
+    def last_reset(self):
+        return dt_util.start_of_local_day()
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"kwh": self._today()[1]}
+
+
+class EvLedgerDistanceTodaySensor(_EvLedgerBaseSensor):
+    """Kilometres driven today (the trips that ended today and the one under way); 0 again at midnight."""
+
+    _attr_icon = "mdi:road-variant"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "km"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "distance_today", "Distance today")
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.distance_today()
+
+    @property
+    def last_reset(self):
+        return dt_util.start_of_local_day()
+
+
+class EvLedgerHomePowerSensor(_EvLedgerBaseSensor):
+    """The home charger's power while this car charges (kW, whatever unit the charger reports), live with the
+    charger's own sensor; 0 while another car on a shared charger has it."""
+
+    _attr_icon = "mdi:ev-station"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "kW"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "home_charging_power", "Home charging power")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        sources = [self._entry.data.get(CONF_ZAPTEC_POWER_ENTITY)]
+        if sources := [entity_id for entity_id in sources if entity_id]:
+            self.async_on_remove(async_track_state_change_event(self.hass, sources, self._source_changed))
+
+    @callback
+    def _source_changed(self, _event) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.home_power_kw()
+
+
+class EvLedgerHomeEnergySensor(_EvLedgerBaseSensor):
+    """kWh charged at home: all of it, today or this month (the charges that ended in the period and the one
+    running). For the Energy dashboard and energy cards, without utility meters of one's own."""
+
+    _attr_icon = "mdi:home-lightning-bolt"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_suggested_display_precision = 2
+
+    PERIODS = {None: ("home_charging_energy", "Home charging energy"),
+               "today": ("home_charging_energy_today", "Home charging energy today"),
+               "month": ("home_charging_energy_month", "Home charging energy this month")}
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry, period: str | None = None) -> None:
+        super().__init__(coordinator, entry, *self.PERIODS[period])
+        self._period = period
+
+    def _start(self):
+        if self._period is None:
+            return None
+        start = dt_util.start_of_local_day()
+        return start.replace(day=1) if self._period == "month" else start
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.home_energy(self._start())
+
+    @property
+    def last_reset(self):
+        return self._start()
+
+
+class EvLedgerCostThisYearSensor(_EvLedgerBaseSensor):
+    """What charging cost this year (home and away), with the last 12 months for a chart."""
+
+    _attr_icon = "mdi:calendar-cash"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_suggested_display_precision = 0
+    _unrecorded_attributes = frozenset({"months", "months_year_before"})
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "cost_this_year", "Charging cost this year")
+
+    def _months(self) -> dict[str, dict]:
+        return self.coordinator.costs_by_month()
+
+    @property
+    def native_value(self) -> float:
+        year = str(dt_util.now().year)
+        return round(sum(m["cost"] for key, m in self._months().items() if key.startswith(year)), 2)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+    @property
+    def last_reset(self):
+        return dt_util.start_of_local_day().replace(month=1, day=1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        months = self._months()
+        now = dt_util.now()
+        year, last_year = str(now.year), str(now.year - 1)
+        keys = []
+        cursor = now.replace(day=1)
+        for _ in range(12):
+            keys.append(cursor.strftime("%Y-%m"))
+            cursor = (cursor - timedelta(days=1)).replace(day=1)
+        empty = {"cost": 0.0, "kwh": 0.0, "home_cost": 0.0, "public_cost": 0.0, "charges": 0, "unpriced": 0}
+
+        def month(key: str) -> dict:
+            found = months.get(key, empty)
+            return {**empty, **found, "month": key,
+                    **{k: round(found[k], 2) for k in ("cost", "kwh", "home_cost", "public_cost")}}
+
+        return {
+            "kwh": round(sum(m["kwh"] for key, m in months.items() if key.startswith(year)), 1),
+            "unpriced": sum(m["unpriced"] for key, m in months.items() if key.startswith(year)),
+            "previous_year": round(sum(m["cost"] for key, m in months.items() if key.startswith(last_year)), 2),
+            "previous_year_kwh": round(sum(m["kwh"] for key, m in months.items() if key.startswith(last_year)), 1),
+            # The last 12 months, oldest first, and the same months a year before (for comparing).
+            "months": [month(key) for key in reversed(keys)],
+            "months_year_before": [month(f"{int(key[:4]) - 1}{key[4:]}") for key in reversed(keys)],
+        }
+
+
+class EvLedgerTotalDistanceSensor(_EvLedgerBaseSensor):
+    """Running total distance driven — `state_class: total_increasing` for native HA
+    Statistics graphs (distance only ever goes up)."""
+
+    _attr_icon = "mdi:map-marker-distance"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "km"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "total_distance", "Total distance")
+
+    @property
+    def native_value(self) -> float:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        return round(sum(t.distance_km or 0 for t in trips), 1)
+
+
+class EvLedgerLastTripSensor(_EvLedgerBaseSensor):
+    """The most recent completed trip's distance, for a simple glanceable tile."""
+
+    _attr_icon = "mdi:map-marker-path"
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = "km"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "last_trip", "Last trip")
+
+    def _last_trip(self) -> Trip | None:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        finished = [t for t in trips if t.ended_at is not None]
+        return finished[0] if finished else None
+
+    @property
+    def native_value(self) -> float | None:
+        trip = self._last_trip()
+        return trip.distance_km if trip else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        trip = self._last_trip()
+        return trip.to_dict() if trip else {}
+
+
+class EvLedgerLastChargeSensor(_EvLedgerBaseSensor):
+    """The most recent completed charge session's cost, for a simple glanceable tile."""
+
+    _attr_icon = "mdi:battery-charging-100"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "last_charge", "Last charge")
+
+    def _last_charge(self) -> ChargeSession | None:
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        finished = [c for c in charges if c.ended_at is not None]
+        return finished[0] if finished else None
+
+    @property
+    def native_value(self) -> float | None:
+        charge = self._last_charge()
+        return charge.price if charge else None
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return self.coordinator.currency
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        charge = self._last_charge()
+        return charge.to_dict() if charge else {}
+
+
+class EvLedgerTyresSensor(_EvLedgerBaseSensor):
+    """The tyre set on the car, with every set's km, use, cost and wear, each season, the sets compared at the same
+    outside temperature, and whether it is time to change."""
+
+    _attr_icon = "mdi:tire"
+    _unrecorded_attributes = frozenset({"sets", "seasons", "comparison"})
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "tyres", "Tyres")
+
+    @property
+    def native_value(self) -> str | None:
+        active = self.coordinator.active_tyre_set()
+        return active.name if active else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        stats = self.coordinator.tyre_stats()
+        active = self.coordinator.active_tyre_set()
+        current = next((s for s in stats["sets"] if active and s["id"] == active.id), None)
+        season = stats["seasons"][0] if stats["seasons"] and stats["seasons"][0]["to"] is None else None
+        return {
+            "set_id": active.id if active else None,
+            "kind": active.kind if active else None,
+            "size": current["size"] if current else None,
+            "rim": current["rim"] if current else None,
+            "mounted_at": season["from"] if season else None,
+            "season_km": season["km"] if season else None,
+            "season_wh_per_km": season["wh_per_km"] if season else None,
+            "tread_mm": current["tread_mm"] if current else None,
+            "suggestion": self.coordinator.tyre_suggestion(),
+            "energy_from": "battery_drop" if self.coordinator.battery_capacity_kwh else None,
+            "sets": stats["sets"],
+            "seasons": stats["seasons"][:MAX_LIST_ITEMS],
+            "comparison": stats["comparison"],
+        }
+
+
+def _trip_energy_kwh(trip: Trip, battery_capacity_kwh: float) -> float | None:
+    """Estimate a trip's energy use from its battery-percent drop.
+
+    Only valid for trips that didn't charge mid-drive (battery % should only
+    fall); returns None if the data needed isn't there or looks wrong.
+    """
+    if trip.start_battery_pct is None or trip.end_battery_pct is None:
+        return None
+    if not trip.distance_km or trip.distance_km <= 0:
+        return None
+    delta_pct = trip.start_battery_pct - trip.end_battery_pct
+    if delta_pct <= 0:
+        return None
+    return (delta_pct / 100) * battery_capacity_kwh
+
+
+def _bucket_for_temp(temp_c: float) -> str:
+    if temp_c < TEMP_BUCKET_COLD_MAX_C:
+        return "cold"
+    if temp_c < TEMP_BUCKET_MILD_MAX_C:
+        return "mild"
+    return "warm"
+
+
+class EvLedgerEfficiencySensor(_EvLedgerBaseSensor):
+    """Real-world Wh/km, bucketed by outside temperature at trip start, vs. the
+    configured rated (WLTP) consumption for this vehicle's model/trim."""
+
+    _attr_icon = "mdi:thermometer-lines"
+    _attr_native_unit_of_measurement = "Wh/km"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "efficiency", "Efficiency vs. rated")
+        self._battery_capacity_kwh: float = entry.data[CONF_BATTERY_CAPACITY_KWH]
+        self._rated_wh_per_km: float = entry.data[CONF_RATED_WH_PER_KM]
+        self._model_label: str = entry.data.get(CONF_MODEL_LABEL, "Custom")
+
+    def _buckets(self) -> dict[str, dict[str, float]]:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        buckets: dict[str, dict[str, float]] = {
+            "cold": {"kwh": 0.0, "km": 0.0, "trips": 0},
+            "mild": {"kwh": 0.0, "km": 0.0, "trips": 0},
+            "warm": {"kwh": 0.0, "km": 0.0, "trips": 0},
+        }
+        for trip in trips:
+            energy_kwh = _trip_energy_kwh(trip, self._battery_capacity_kwh)
+            if energy_kwh is None or trip.start_outside_temp_c is None:
+                continue
+            bucket = buckets[_bucket_for_temp(trip.start_outside_temp_c)]
+            bucket["kwh"] += energy_kwh
+            bucket["km"] += trip.distance_km
+            bucket["trips"] += 1
+        return buckets
+
+    @staticmethod
+    def _wh_per_km(bucket: dict[str, float]) -> float | None:
+        if bucket["km"] <= 0:
+            return None
+        return round((bucket["kwh"] * 1000) / bucket["km"], 0)
+
+    @property
+    def native_value(self) -> float | None:
+        overall_kwh = 0.0
+        overall_km = 0.0
+        for bucket in self._buckets().values():
+            overall_kwh += bucket["kwh"]
+            overall_km += bucket["km"]
+        if overall_km <= 0:
+            return None
+        return round((overall_kwh * 1000) / overall_km, 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        buckets = self._buckets()
+        result: dict[str, Any] = {
+            "model": self._model_label,
+            "rated_wh_per_km": self._rated_wh_per_km,
+            "battery_capacity_kwh": self._battery_capacity_kwh,
+        }
+        for name, bucket in buckets.items():
+            wh_per_km = self._wh_per_km(bucket)
+            result[f"{name}_wh_per_km"] = wh_per_km
+            result[f"{name}_trip_count"] = int(bucket["trips"])
+            result[f"{name}_deviation_pct"] = (
+                round(((wh_per_km - self._rated_wh_per_km) / self._rated_wh_per_km) * 100, 1)
+                if wh_per_km is not None
+                else None
+            )
+        return result
+
+
+class EvLedgerBatteryEfficiencyScoreSensor(EvLedgerEfficiencySensor):
+    """Efficiency score overall and by temperature season.
+
+    A score of 100 means the measured consumption matches the configured
+    rated Wh/km. Higher is more efficient. The seasonal labels intentionally
+    use temperature rather than calendar months so warm winter days and cold
+    summer days are compared fairly.
+    """
+
+    _attr_icon = "mdi:battery-heart-variant"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        _EvLedgerBaseSensor.__init__(
+            self,
+            coordinator,
+            entry,
+            "battery_efficiency_score",
+            "Battery efficiency score",
+        )
+        self._battery_capacity_kwh = entry.data[CONF_BATTERY_CAPACITY_KWH]
+        self._rated_wh_per_km = entry.data[CONF_RATED_WH_PER_KM]
+        self._model_label = entry.data.get(CONF_MODEL_LABEL, "Custom")
+
+    def _score(self, bucket: dict[str, float]) -> float | None:
+        wh_per_km = self._wh_per_km(bucket)
+        if wh_per_km is None or wh_per_km <= 0:
+            return None
+        return round((self._rated_wh_per_km / wh_per_km) * 100, 0)
+
+    @property
+    def native_value(self) -> float | None:
+        buckets = self._buckets()
+        total = {
+            "kwh": sum(bucket["kwh"] for bucket in buckets.values()),
+            "km": sum(bucket["km"] for bucket in buckets.values()),
+            "trips": sum(bucket["trips"] for bucket in buckets.values()),
+        }
+        return self._score(total)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        buckets = self._buckets()
+        result: dict[str, Any] = {
+            "model": self._model_label,
+            "rated_wh_per_km": self._rated_wh_per_km,
+            "battery_capacity_kwh": self._battery_capacity_kwh,
+            "method": "rated_wh_per_km / measured_wh_per_km * 100",
+            "winter_definition": f"below {TEMP_BUCKET_COLD_MAX_C} C",
+            "transition_definition": (
+                f"{TEMP_BUCKET_COLD_MAX_C} to {TEMP_BUCKET_MILD_MAX_C - 0.1} C"
+            ),
+            "summer_definition": f"{TEMP_BUCKET_MILD_MAX_C} C and above",
+        }
+        aliases = {"cold": "winter", "mild": "transition", "warm": "summer"}
+        for bucket_name, season_name in aliases.items():
+            bucket = buckets[bucket_name]
+            result[f"{season_name}_score"] = self._score(bucket)
+            result[f"{season_name}_wh_per_km"] = self._wh_per_km(bucket)
+            result[f"{season_name}_trip_count"] = int(bucket["trips"])
+            result[f"{season_name}_distance_km"] = round(bucket["km"], 1)
+        return result
+
+
+class EvLedgerMonthlyPerformanceSensor(_EvLedgerBaseSensor):
+    """Month-by-month breakdown: distance driven, cost, and a performance score.
+
+    Score = rated Wh/km ÷ actual Wh/km × 100 — 100 means driving exactly as
+    efficiently as the official rated consumption, above 100 means beating
+    it, below 100 means using more energy than rated. Cost is booked to the
+    month a charge happened in (not the month the km were driven), matching
+    how a real electricity bill works.
+
+    The full per-month breakdown lives in the `months` attribute (newest
+    first, up to MAX_MONTHS back) — that's the "flip back in time" view.
+    The state itself is `state_class: measurement`, so HA's own History
+    graph also shows the score's trend over time for free.
+    """
+
+    _attr_icon = "mdi:calendar-month"
+    _unrecorded_attributes = frozenset({"months"})
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator: EvLedgerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "monthly_performance", "Monthly performance")
+        self._battery_capacity_kwh: float = entry.data[CONF_BATTERY_CAPACITY_KWH]
+        self._rated_wh_per_km: float = entry.data[CONF_RATED_WH_PER_KM]
+
+    def _months(self) -> list[dict[str, Any]]:
+        trips: list[Trip] = self.coordinator.data.get("trips", [])
+        charges: list[ChargeSession] = self.coordinator.data.get("charges", [])
+        buckets: dict[str, dict[str, float]] = {}
+
+        def _bucket(month_key: str) -> dict[str, float]:
+            return buckets.setdefault(
+                month_key, {"km": 0.0, "kwh": 0.0, "trip_count": 0, "cost": 0.0}
+            )
+
+        for trip in trips:
+            if not trip.started_at or not trip.distance_km or trip.distance_km <= 0:
+                continue
+            bucket = _bucket(trip.started_at[:7])
+            bucket["km"] += trip.distance_km
+            bucket["trip_count"] += 1
+            energy_kwh = _trip_energy_kwh(trip, self._battery_capacity_kwh)
+            if energy_kwh is not None:
+                bucket["kwh"] += energy_kwh
+
+        for charge in charges:
+            if charge.ended_at is None or charge.price is None or not charge.started_at:
+                continue
+            _bucket(charge.started_at[:7])["cost"] += charge.price
+
+        months: list[dict[str, Any]] = []
+        for month_key in sorted(buckets, reverse=True)[:MAX_MONTHS]:
+            b = buckets[month_key]
+            wh_per_km = round((b["kwh"] * 1000) / b["km"], 0) if b["km"] > 0 else None
+            score = (
+                round((self._rated_wh_per_km / wh_per_km) * 100, 0)
+                if wh_per_km
+                else None
+            )
+            months.append(
+                {
+                    "month": month_key,
+                    "distance_km": round(b["km"], 1),
+                    "trip_count": int(b["trip_count"]),
+                    "wh_per_km": wh_per_km,
+                    "score": score,
+                    "cost": round(b["cost"], 2),
+                    "cost_per_km": round(b["cost"] / b["km"], 2) if b["km"] > 0 else None,
+                }
+            )
+        return months
+
+    @property
+    def native_value(self) -> float | None:
+        months = self._months()
+        return months[0]["score"] if months else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "rated_wh_per_km": self._rated_wh_per_km,
+            "currency": self.coordinator.currency,
+            "months": self._months(),
+        }

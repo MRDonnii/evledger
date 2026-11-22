@@ -1,0 +1,421 @@
+"""Confirm the charge plan on the phone: an actionable notification to the chosen Companion apps."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from datetime import time
+from typing import TYPE_CHECKING
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_HOME
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
+from homeassistant.util import dt as dt_util
+
+from ..public_place import distance_m
+from .const import (
+    CONF_NOTIFY_ICON,
+    CONF_NOTIFY_ONLY_HOME,
+    CONF_NOTIFY_SERVICES,
+    CONF_NOTIFY_URL,
+    CONFIRM_TIMEOUT_MINUTES,
+    DEFAULT_NOTIFY_ICON,
+    NOTIFY_COLOR,
+)
+from .plan import MODE_FIXED, MODE_MANUAL, MODE_NOW, MODE_OFF, MODE_PRICE_CAP, MODE_SMART, fixed_window
+
+# A message about charging away goes to the phones this close to the car
+NEAR_CAR_M = 2000
+
+if TYPE_CHECKING:
+    from .planner import ChargePlanner
+
+_LOGGER = logging.getLogger(__name__)
+
+ACTION_EVENT = "mobile_app_notification_action"
+# Messages that only tell what happens (plan active, charging started, charge done) arrive without sound at night;
+# questions and warnings keep their sound.
+QUIET_FROM = time(22, 0)
+QUIET_UNTIL = time(7, 0)
+QUIET_KINDS = ("start", "done", "plug_soon", "outage")
+# Android: a notification channel without sound for the silent messages (iOS uses the "passive" interruption level).
+QUIET_CHANNEL = "EV Ledger lydløs"
+ANSWERS = {"NOW": MODE_NOW, "OFF": MODE_OFF}
+NAMES = {MODE_SMART: "Billigst", MODE_FIXED: "Fast tid", MODE_NOW: "Lad nu", MODE_PRICE_CAP: "Prisloft",
+         MODE_MANUAL: "Manuel"}
+
+
+DAYS = ("man.", "tir.", "ons.", "tor.", "fre.", "lør.", "søn.")
+
+
+def wait_text(waiting: dict, unit: str = "kr") -> str:
+    """Why the plan waits: the cheaper day, its price against tonight's, the saving and the battery until then."""
+    def money(value: float) -> str:
+        return f"{value:.2f}".replace(".", ",")
+
+    day = DAYS[dt_util.as_local(waiting["deadline"]).weekday()]
+    return (f"Venter til {day}: ca. {money(waiting['price'])} {unit}/kWh mod {money(waiting['price_now'])} i nat "
+            f"(spar ca. {money(waiting['saving'])} {unit}). Batteriet rækker (ca. {waiting['soc_then']} %).")
+
+
+def tracker_for(service: str) -> str:
+    """The Companion app's device tracker for its notify service (notify.mobile_app_<device>)."""
+    return f"device_tracker.{service.removeprefix('notify.').removeprefix('mobile_app_')}"
+
+
+class PhoneNotifier:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, options: Callable[[], dict]) -> None:
+        self.hass = hass
+        self.entry = entry
+        self._options = options
+        self.prefix = f"EVSC_{entry.entry_id}_"
+        # (on, from, until) for silent messages at night; set by the planner.
+        self.quiet_window: Callable[[], tuple[bool, time, time]] = lambda: (True, QUIET_FROM, QUIET_UNTIL)
+        self.tag = f"ev_smart_charge_{entry.entry_id}"
+
+    @property
+    def options(self) -> dict:
+        return self._options()
+
+    @property
+    def targets(self) -> list[str]:
+        return [service.removeprefix("notify.") for service in self.options.get(CONF_NOTIFY_SERVICES) or []]
+
+    def recipients(self, near: tuple[float, float] | None = None) -> list[str]:
+        """The chosen phones; with "only when home", the ones whose app reports being home. A message about charging
+        away (near = the car's position) goes to the phones within NEAR_CAR_M of the car instead, else to all of them:
+        "only when home" is for home charging (Claude AI, 2026-10-27: public price questions never arrived)."""
+        if near is not None:
+            close = []
+            for service in self.targets:
+                tracker = self.hass.states.get(tracker_for(service))
+                lat = tracker.attributes.get("latitude") if tracker is not None else None
+                lon = tracker.attributes.get("longitude") if tracker is not None else None
+                if isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and \
+                        distance_m(near[0], near[1], lat, lon) <= NEAR_CAR_M:
+                    close.append(service)
+            return close or self.targets
+        if not self.options.get(CONF_NOTIFY_ONLY_HOME):
+            return self.targets
+        result = []
+        for service in self.targets:
+            tracker = self.hass.states.get(tracker_for(service))
+            if tracker is None or tracker.state == STATE_HOME:  # unknown phone location: still ask
+                result.append(service)
+        return result
+
+    @callback
+    def async_listen(self, planner: ChargePlanner) -> CALLBACK_TYPE:
+        @callback
+        def on_action(event: Event) -> None:
+            action = str(event.data.get("action", ""))
+            if not action.startswith(self.prefix):
+                return
+            answer = action.removeprefix(self.prefix)
+            _LOGGER.debug("Phone answered %s", answer)
+            if answer == "CONFIRM":
+                planner.async_answer(planner.mode)  # the plan that waits for the answer, e.g. the default plan
+            elif answer in ("CAP_OK", "CAP_STOP"):
+                planner.async_set_cap_override(answer == "CAP_OK")
+            elif answer in ("WAIT", "FULL"):
+                planner.async_set_limit_wait(answer == "WAIT")
+            elif answer in ("PRE_ON", "PRE_SKIP"):
+                planner.routines.answer_precondition(answer == "PRE_ON")
+            elif answer.startswith("PUBOP_"):
+                charge_id, _, index = answer.removeprefix("PUBOP_").rpartition("_")
+                if index.isdigit():
+                    planner.routines.answer_operator(charge_id, int(index))
+            elif answer.startswith("PUBKWH_"):
+                planner.routines.answer_per_kwh(answer.removeprefix("PUBKWH_"), str(event.data.get("reply_text") or ""))
+            elif answer.startswith("PUBLIC_"):
+                planner.routines.answer_public(answer.removeprefix("PUBLIC_"), str(event.data.get("reply_text") or ""))
+            elif mode := ANSWERS.get(answer):
+                planner.async_answer(mode)
+
+        return self.hass.bus.async_listen(ACTION_EVENT, on_action)
+
+    def message(self, planner: ChargePlanner) -> str:
+        return f"{self.plan_text(planner)}\nUden svar kører planen om {CONFIRM_TIMEOUT_MINUTES} min."
+
+    def plan_text(self, planner: ChargePlanner) -> str:
+        """The active plan, one fact per line: plan, time, price, energy and target."""
+        unit = planner.price_unit or "kr"
+        schedule = planner.schedule
+
+        def money(value: float) -> str:
+            return f"{value:.2f} {unit}".replace(".", ",")
+
+        def when(value) -> str:
+            local = dt_util.as_local(value)
+            days = (local.date() - dt_util.now().date()).days
+            day = {0: "", 1: "i morgen "}.get(days, local.strftime("%d.%m. "))
+            return f"{day}{local.strftime('%H:%M')}"
+
+        if planner.mode == MODE_OFF:
+            return "Plan: Pause\nBilen lades ikke."
+        lines = [f"Plan: {NAMES.get(planner.mode, planner.mode)}"]
+        if not schedule.blocks:
+            if planner.waiting:
+                lines.append(wait_text(planner.waiting, unit))
+            elif schedule.limit_kwh >= 0.5:
+                lines.append("Du valgte at vente: bilen lades ikke i nat, resten tages i en billigere periode.")
+            else:
+                lines.append("Batteriet er allerede ladet til målet.")
+            return "\n".join(lines)
+        if schedule.limit_kwh >= 0.5:
+            lines.append(f"Du valgte at vente: lader til ca. {schedule.limit_soc or 0:.0f} % i nat, "
+                         "resten i en billigere periode.")
+        first, last = schedule.blocks[0].start, planner.block_end(schedule.blocks[-1], dt_util.now())
+        start = "nu" if first <= dt_util.now() else when(first)
+        same_day = dt_util.as_local(first).date() == dt_util.as_local(last).date()
+        end = dt_util.as_local(last).strftime("%H:%M") if same_day else when(last)
+        time_line = f"Tid: {start} – {end}"
+        if len(schedule.blocks) > 1:
+            time_line += f" ({len(schedule.blocks)} perioder)"
+        lines.append(time_line)
+        price = f"Pris: {money(schedule.cost or 0)}"
+        now = planner.alternatives.get(MODE_NOW)
+        saving = now.cost - schedule.cost if now and now.cost and schedule.cost is not None else 0
+        if planner.mode != MODE_NOW and saving >= 0.5:
+            price += f" (spar {money(saving)})"
+        lines.append(price)
+        energy = f"Energi: {schedule.energy_kwh:.1f} kWh".replace(".", ",")
+        if schedule.target_soc is not None:
+            energy += f" · mål {schedule.target_soc:.0f} %"
+        lines.append(energy)
+        if planner.deadline and planner.mode in (MODE_SMART, MODE_PRICE_CAP):
+            extra = {"once": " (engangstid)", "week": " (ugeplan)"}.get(planner.deadline_source, "")
+            if planner.deadline_target is not None:
+                extra += f" · {planner.deadline_target:.0f} %"
+            lines.append(f"Klar senest: {when(planner.deadline)}{extra}")
+        if planner.waiting:
+            lines.append(wait_text(planner.waiting, unit))
+        if schedule.co2 is not None:
+            lines.append(f"CO₂: ca. {schedule.co2:.0f} g/kWh")
+        return "\n".join(lines)
+
+    def money(self, planner: ChargePlanner, value: float, per_kwh: bool = False) -> str:
+        unit = planner.price_unit or "kr"
+        return f"{value:.2f} {unit}{'/kWh' if per_kwh else ''}".replace(".", ",")
+
+    @staticmethod
+    def when(value) -> str:
+        local = dt_util.as_local(value)
+        days = (local.date() - dt_util.now().date()).days
+        day = {0: "kl. ", 1: "i morgen kl. "}.get(days, local.strftime("%d.%m. kl. "))
+        return f"{day}{local.strftime('%H:%M')}"
+
+    def start_text(self, planner: ChargePlanner, now) -> str:
+        """Charging started: the plan, when this charging period ends, the expected price and the target."""
+        schedule = planner.schedule
+        lines = [f"Plan: {NAMES.get(planner.mode, planner.mode)}"]
+        block = schedule.next_block(now)
+        if block is not None:
+            end = f"Slut ca. {self.when(planner.block_end(block, now))}"
+            if len(schedule.blocks) > 1:
+                end += f" (periode {schedule.blocks.index(block) + 1} af {len(schedule.blocks)})"
+            lines.append(end)
+        if schedule.cost is not None and schedule.energy_kwh > 0:
+            energy = f"{schedule.energy_kwh:.1f}".replace(".", ",")
+            lines.append(f"Forventet pris: {self.money(planner, schedule.cost)} for {energy} kWh")
+        soc = planner._battery_soc()
+        if schedule.target_soc is not None:
+            lines.append(f"Mål {schedule.target_soc:.0f} %" + (f" (nu {soc:.0f} %)" if soc is not None else ""))
+        return "\n".join(lines)
+
+    def cap_text(self, planner: ChargePlanner, now) -> str:
+        """The price cap cannot reach the target in time: what the cap reaches, and what exceeding it costs."""
+        schedule = planner.schedule
+        goal = planner.goal_time(now)
+        by = f" {self.when(goal)}" if goal else ""
+        lines = [
+            f"Under prisloftet ({self.money(planner, planner.settings['price_cap'], True)}) når bilen ca. "
+            f"{schedule.cap_soc or 0:.0f} %{' inden' + by if by else ''}.",
+            f"For at nå {schedule.target_soc or planner.target:.0f} % skal der lades "
+            f"{schedule.over_cap_kwh:.1f} kWh over loftet".replace(".", ",")
+            + (f", til op til {self.money(planner, schedule.over_cap_max_price, True)}"
+               if schedule.over_cap_max_price is not None else "")
+            + f" (ca. {self.money(planner, schedule.over_cap_extra)} ekstra).",
+            "Uden svar lader den videre til målet.",
+        ]
+        return "\n".join(lines)
+
+    def price_text(self, planner: ChargePlanner, now, soc: float, view: dict) -> str:
+        """Charging all the way tonight costs more than waiting: how far tonight gets (what the daily driving needs
+        until the cheaper period), what the rest costs tonight, and the cheaper periods with the saving."""
+        target = planner.schedule.target_soc or planner.target
+
+        def kwh(value: float) -> str:
+            return f"{value:.1f}".replace(".", ",")
+
+        def when(value) -> str:
+            local = dt_util.as_local(value)
+            days = (local.date() - dt_util.as_local(now).date()).days
+            day = {0: "i dag", 1: "i morgen"}.get(days, DAYS[local.weekday()])
+            return f"{day} kl. {local.strftime('%H:%M')}"
+
+        lines = [f"Bilen er på {soc:.0f} %. Til målet {target:.0f} % koster de sidste {kwh(view['over_kwh'])} kWh "
+                 f"ca. {self.money(planner, view['over_price'], True)} i nat."]
+        driving = (f" – nok til jeres kørsel (ca. {kwh(view['daily_use_kwh'])} kWh om dagen) med "
+                   f"{view['reserve_soc']:.0f} % tilbage" if view["daily_use_kwh"] else "")
+        wait, full = self.wait_labels(planner, soc, view)
+        lines.append(f"{wait}: ca. {self.money(planner, view['below_cost'])} i nat{driving}."
+                     if view["below_soc"] > soc + 0.5 else f"{wait}: bilen har nok til den billigere periode{driving}.")
+        for index, window in enumerate(view["windows"]):
+            lead = "Resten" if index == 0 else "Eller"
+            part = "om dagen" if window["kind"] == "day" else "om natten"
+            end = dt_util.as_local(window["end"]).strftime("%H:%M")
+            lines.append(f"{lead} {part} {when(window['start'])}–{end}, ca. "
+                         f"{self.money(planner, window['price'], True)}{' (prognose)' if window['estimated'] else ''}"
+                         f" – spar ca. {self.money(planner, window['saving'])}.")
+        lines.append(f"Uden svar: {full[0].lower()}{full[1:]}.")
+        return "\n".join(lines)
+
+    def wait_labels(self, planner: ChargePlanner, soc: float, view: dict) -> tuple[str, str]:
+        """The two answers named by what they charge to tonight, so it is easy to see whether waiting is enough
+        (user, 2026-10-15: "Vent med resten" should say what it charges to)."""
+        target = planner.schedule.target_soc or planner.target
+        below = view["below_soc"]
+        return (f"Lad kun til {below:.0f} %" if below > soc + 0.5 else "Lad ikke i nat", f"Lad til {target:.0f} %")
+
+    def short_text(self, planner: ChargePlanner, now, reach: float, target: float) -> str:
+        """The plan cannot reach its target in time (plugged in late, fixed window too short)."""
+        if planner.mode == MODE_FIXED:
+            begin, end = fixed_window(now, planner.times["fixed_start"], planner.times["fixed_end"])
+            return (f"Fast tid {dt_util.as_local(begin).strftime('%H:%M')}–{dt_util.as_local(end).strftime('%H:%M')} "
+                    f"er for kort: bilen når ca. {reach:.0f} % af målet {target:.0f} %.")
+        goal = planner.goal_time(now)
+        return (f"Bilen når ca. {reach:.0f} % af målet {target:.0f} %{' ' + self.when(goal) if goal else ''}. "
+                "Planen lader så meget, den kan.")
+
+    def _tap(self) -> dict:
+        """Open a dashboard page when the notification itself is tapped (iOS: url, Android: clickAction),
+        and show an EV charging icon instead of the app icon (iOS: rounded avatar, Android: small icon)."""
+        url = self.options.get(CONF_NOTIFY_URL)
+        data = {"url": url, "clickAction": url} if url else {}
+        data |= {"notification_icon": self.options.get(CONF_NOTIFY_ICON) or DEFAULT_NOTIFY_ICON,
+                 "notification_icon_color": "white", "color": NOTIFY_COLOR}
+        return data
+
+    def is_quiet(self) -> bool:
+        """Inside the silent window (it may cross midnight)."""
+        enabled, start, end = self.quiet_window()
+        if not enabled or start == end:
+            return False
+        now = dt_util.now().time()
+        return start <= now < end if start < end else now >= start or now < end
+
+    def in_night(self) -> bool:
+        """The night (the silent window's times, also when silent messages are switched off): no reminders then – the
+        family sleeps (2026-10-16: the brother was told to plug in at midnight and at 04:30)."""
+        _enabled, start, end = self.quiet_window()
+        if start == end:
+            start, end = time(22, 0), time(7, 0)
+        now = dt_util.now().time()
+        return start <= now < end if start < end else now >= start or now < end
+
+    def quiet(self) -> dict:
+        """Without sound in the silent window: iOS "passive" (into the notification centre without sound or lighting
+        the screen), Android a low-importance channel."""
+        if not self.is_quiet():
+            return {}
+        return {"push": {"interruption-level": "passive"}, "channel": QUIET_CHANNEL, "importance": "low"}
+
+    async def async_send_info(self, planner: ChargePlanner) -> None:
+        """Tell the phones which plan is active, with times and price; the same tag replaces an older one."""
+        data = {
+            "title": f"{self.entry.title}: ladeplan aktiv",
+            "message": self.plan_text(planner),
+            "data": {
+                **self._tap(),
+                **self.quiet(),
+                "tag": self.tag,
+                "actions": [
+                    {"action": f"{self.prefix}NOW", "title": "Lad nu"},
+                    {"action": f"{self.prefix}OFF", "title": "Pause"},
+                ],
+            },
+        }
+        for service in self.recipients():
+            await self._call(service, data)
+
+    async def async_send_alert(self, text: str) -> None:
+        """Something stands in the way of the plan; the same tag replaces the plan message."""
+        data = {
+            "title": f"{self.entry.title}: opladning",
+            "message": text,
+            "data": {**self._tap(), "tag": self.tag,
+                     "actions": [{"action": f"{self.prefix}NOW", "title": "Lad nu"}]},
+        }
+        for service in self.recipients():
+            await self._call(service, data)
+
+    async def async_send_precondition(self, goal) -> None:
+        """Ask before the car's climate is turned on: without an answer nothing happens."""
+        data = {
+            "title": f"{self.entry.title}: forvarm bilen?",
+            "message": f"Afgang {self.when(goal)}. Klimaet tændes kun, hvis du trykker Forvarm.",
+            "data": {**self._tap(), "tag": f"{self.tag}_precondition",
+                     "actions": [{"action": f"{self.prefix}PRE_ON", "title": "Forvarm"},
+                                 {"action": f"{self.prefix}PRE_SKIP", "title": "Spring over"}]},
+        }
+        for service in self.recipients():
+            await self._call(service, data)
+
+    async def async_send_warning(self, kind: str, text: str, labels: tuple[str, str] | None = None) -> None:
+        """A warning under its own tag, so it does not replace the plan message. The price cap question
+        has Approve / Stop above the cap; the others Charge now."""
+        if kind == "price":
+            title = f"{self.entry.title}: billigere at vente?"
+            wait, full = labels or ("Vent med resten", "Lad til målet")
+            actions = [{"action": f"{self.prefix}WAIT", "title": wait},
+                       {"action": f"{self.prefix}FULL", "title": full}]
+        elif kind == "cap":
+            title = f"{self.entry.title}: prisloftet rækker ikke"
+            actions = [{"action": f"{self.prefix}CAP_OK", "title": "Godkend"},
+                       {"action": f"{self.prefix}CAP_STOP", "title": "Stop over loftet"}]
+        else:
+            title = f"{self.entry.title}: når ikke målet"
+            actions = [{"action": f"{self.prefix}NOW", "title": "Lad nu"}] if kind == "short" else []
+        data = {"title": title, "message": text,
+                "data": {**self._tap(), "tag": f"{self.tag}_{kind}", "actions": actions}}
+        for service in self.recipients():
+            await self._call(service, data)
+
+    async def async_send_note(self, kind: str, title: str, text: str, actions: list[dict] | None = None,
+                              icon: str | None = None, near: tuple[float, float] | None = None) -> None:
+        """A message under its own tag: charging started (with Pause), the charge is done, a reminder to plug in,
+        the charger is offline."""
+        data = {"title": f"{self.entry.title}: {title}", "message": text,
+                "data": {**self._tap(), **({"notification_icon": icon} if icon else {}), "tag": f"{self.tag}_{kind}",
+                         **({"actions": actions} if actions else {}),
+                         **(self.quiet() if kind in QUIET_KINDS else {})}}
+        for service in self.recipients(near):
+            await self._call(service, data)
+
+    async def async_send_plan(self, planner: ChargePlanner) -> None:
+        data = {
+            "title": f"{self.entry.title} er sat til opladning",
+            "message": self.message(planner),
+            "data": {
+                **self._tap(),
+                "tag": self.tag,
+                "actions": [
+                    {"action": f"{self.prefix}CONFIRM", "title": f"Bekræft {NAMES.get(planner.mode, 'plan').lower()}"},
+                    {"action": f"{self.prefix}NOW", "title": "Lad nu"},
+                    {"action": f"{self.prefix}OFF", "title": "Pause"},
+                ],
+            },
+        }
+        for service in self.recipients():
+            await self._call(service, data)
+
+    async def async_clear(self) -> None:
+        for service in self.targets:
+            await self._call(service, {"message": "clear_notification", "data": {"tag": self.tag}})
+
+    async def _call(self, service: str, data: dict) -> None:
+        try:
+            await self.hass.services.async_call("notify", service, data, blocking=True)
+        except Exception as err:  # noqa: BLE001 – a phone that cannot be reached: the next message is tried again
+            _LOGGER.warning("notify.%s failed: %s", service, err or type(err).__name__)

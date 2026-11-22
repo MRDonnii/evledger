@@ -1,0 +1,148 @@
+"""Charge mode (how the charger is controlled now) and the default plan."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+
+from homeassistant.components.select import SelectEntity
+from homeassistant.const import EntityCategory
+from homeassistant.helpers.restore_state import RestoredExtraData, RestoreEntity
+from homeassistant.util import dt as dt_util
+
+from .const import DEFAULT_WAKE_MINUTES
+from .control import Action
+from .entity import EvSmartChargeListenerEntity
+from .plan import DEFAULT_MODES, MODES, RESOLUTIONS, finite
+
+
+def build(planner) -> list:
+    return [ChargeModeSelect(planner, "charge_mode"), DefaultModeSelect(planner, "default_charge_mode"),
+            PriceResolutionSelect(planner, "price_resolution")]
+
+
+class ChargeModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity):
+    _attr_icon = "mdi:ev-station"
+    _attr_options = list(MODES)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in MODES:
+            before = last.attributes.get("mode_before_now")
+            if before in MODES:
+                self.planner.mode_before_now = before
+            self.planner.now_seen_connected = bool(last.attributes.get("now_seen_connected"))
+            blocks = []
+            for item in last.attributes.get("planned") or []:
+                try:
+                    start, end = (dt_util.parse_datetime(str(value)) for value in item)
+                except (TypeError, ValueError):
+                    continue
+                if start and end:
+                    blocks.append((start, end))
+            self.planner.restored_blocks = blocks
+            # When Home Assistant was last alive (saved with the restore data every 15 minutes and when it stops): a
+            # planned period inside the time it was away is told to the phones, and the new plan catches up.
+            extra = await self.async_get_last_extra_data()
+            alive = (extra.as_dict() if extra else {}).get("alive_at")
+            self.planner.note_outage(dt_util.parse_datetime(str(alive)) if alive else None)
+            warned = last.attributes.get("warned")
+            if isinstance(warned, list):
+                self.planner.warned = {str(item) for item in warned}
+            if (last_soc := finite(last.attributes.get("last_soc"))) is not None:
+                self.planner.last_soc = last_soc
+            # The charger command sent last (and when), so a car that starts late after a restart is still ours and
+            # an old "charging" just after our stop is still known as such.
+            command = last.attributes.get("last_command")
+            at = dt_util.parse_datetime(str(last.attributes.get("last_command_at") or ""))
+            if command in (Action.START, Action.STOP) and at and dt_util.utcnow() - at < timedelta(hours=12):
+                self.planner.controller.last_command, self.planner.controller.last_command_at = Action(command), at
+            delays = last.attributes.get("start_delays")
+            if isinstance(delays, list):
+                self.planner.controller.start_delays = [float(item) for item in delays
+                                                        if isinstance(item, (int, float)) and 0 <= item <= 45][-10:]
+            started = dt_util.parse_datetime(str(last.attributes.get("last_start_at") or ""))
+            if started and dt_util.utcnow() - started < timedelta(hours=12):
+                self.planner.controller.last_start_at = started
+            self.planner.async_set_mode(last.state, restore=True)
+
+    @property
+    def current_option(self) -> str:
+        return self.planner.mode
+
+    @property
+    def extra_restore_state_data(self) -> RestoredExtraData:
+        """Saved by Home Assistant every 15 minutes and when it stops: the time it was last alive."""
+        return RestoredExtraData({"alive_at": dt_util.utcnow().isoformat()})
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"default_mode": self.planner.default_mode,
+                "mode_before_now": self.planner.mode_before_now,
+                "now_seen_connected": self.planner.now_seen_connected,
+                "last_soc": self.planner.last_soc,
+                "car_limit": self.planner.car_limit(),
+                # Quarters or whole hours: price cards can show the prices the same way.
+                "price_resolution": self.planner.resolution,
+                "warned": sorted(self.planner.warned),
+                "last_command": str(self.planner.controller.last_command),
+                "last_command_at": (self.planner.controller.last_command_at.isoformat()
+                                    if self.planner.controller.last_command_at else None),
+                "last_start_at": (self.planner.controller.last_start_at.isoformat()
+                                  if self.planner.controller.last_start_at else None),
+                # How long the car took from a start to drawing power (minutes), and what the plan counts with.
+                "start_delays": list(self.planner.controller.start_delays),
+                "wake_minutes": self.planner.controller.wake_delay(DEFAULT_WAKE_MINUTES),
+                # The plan's charging periods, followed after a restart until the prices are back.
+                "planned": self._planned()}
+
+    def _planned(self) -> list[list[str]]:
+        planner = self.planner
+        blocks = ([(block.start, block.end) for block in planner.schedule.blocks] if planner.slot_count
+                  else planner.restored_blocks)
+        return [[start.isoformat(), end.isoformat()] for start, end in blocks]
+
+    async def async_select_option(self, option: str) -> None:
+        self.planner.async_set_mode(option)
+
+
+class DefaultModeSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity):
+    """The plan used when a car is plugged in, and returned to after another plan has run."""
+
+    _attr_icon = "mdi:calendar-star"
+    _attr_options = list(DEFAULT_MODES)
+    _attr_entity_category = EntityCategory.CONFIG
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in DEFAULT_MODES:
+            self.planner.async_set_default_mode(last.state, restore=True)
+
+    @property
+    def current_option(self) -> str:
+        return self.planner.default_mode
+
+    async def async_select_option(self, option: str) -> None:
+        self.planner.async_set_default_mode(option)
+
+
+class PriceResolutionSelect(EvSmartChargeListenerEntity, SelectEntity, RestoreEntity):
+    """Plan in quarters or in whole hours (with the mean price of the hour). Price cards can follow it too."""
+
+    _attr_icon = "mdi:timer-cog-outline"
+    _attr_options = list(RESOLUTIONS)
+    _attr_entity_category = EntityCategory.CONFIG
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in RESOLUTIONS:
+            self.planner.async_set_resolution(last.state, restore=True)
+
+    @property
+    def current_option(self) -> str:
+        return self.planner.resolution
+
+    async def async_select_option(self, option: str) -> None:
+        self.planner.async_set_resolution(option)

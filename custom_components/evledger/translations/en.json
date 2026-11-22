@@ -1,0 +1,569 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a vehicle",
+        "description": "Pick the devices below and EV Ledger finds every sensor it needs: (1) your car (Tesla Custom, Tesla Fleet, Teslemetry or Tessie; leave empty for another car and pick its sensors on the next page), (2) your home charger, (3) a charging app/account such as Monta, (4) your power price. Leave a picker empty to leave that role out. The next page sets up smart charging. Turn on 'Advanced setup' at the bottom to review every sensor by hand.",
+        "data": {
+          "vehicle_name": "Vehicle name",
+          "currency": "Currency",
+          "vehicle_device_id": "1. Vehicle",
+          "zaptec_device_id": "2. Charger (optional)",
+          "monta_device_id": "3. Charging control (optional)",
+          "spot_price_device_id": "4. Power price (optional)",
+          "tesla_model_key": "Model / trim for efficiency comparison (optional)",
+          "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
+          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')",
+          "advanced_setup": "Advanced setup — show every sensor field so I can review or override them"
+        },
+        "data_description": {
+          "vehicle_device_id": "Your car from Tesla Custom, Tesla Fleet, Teslemetry or Tessie. Empty: pick the car's sensors by hand on the next page (any car).",
+          "zaptec_device_id": "Your home charger, e.g. Zaptec — leave empty if you don't have one",
+          "monta_device_id": "Your charging-control app/account, e.g. Monta — leave empty if you don't have one",
+          "spot_price_device_id": "Your electricity-price integration, e.g. Nordpool or Strømligning — leave empty if you don't have one"
+        }
+      },
+      "fill_missing": {
+        "title": "Review sensors",
+        "description": "Either something couldn't be found automatically, or you turned on advanced setup — either way, everything shown here is editable. Anything already found is pre-filled; just correct what needs it.",
+        "data": {
+          "battery_entity": "Battery level sensor",
+          "odometer_entity": "Odometer sensor",
+          "device_tracker_entity": "Location (device tracker)",
+          "charging_binary_entity": "Is charging (binary sensor, or a charging state sensor)",
+          "locked_entity": "Is locked (optional)",
+          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)",
+          "zaptec_power_entity": "Charge power sensor",
+          "zaptec_session_energy_entity": "Session energy sensor",
+          "zaptec_charging_entity": "Charging (binary sensor or switch, optional)",
+          "zaptec_completed_energy_entity": "Completed session energy sensor (optional, recommended)",
+          "monta_last_charge_entity": "Last charge sensor",
+          "monta_wallet_entity": "Wallet balance sensor (optional)",
+          "spot_price_entity": "Power price sensor"
+        }
+      },
+      "smart_charge": {
+        "title": "Smart charging",
+        "description": "Charge when power is cheapest and let EV Ledger start and stop the charger. The car, the battery and the price sensor come from the ledger setup; fields left empty are found automatically (the Zaptec charger's mode sensor, the car's plug sensor).",
+        "data": {
+          "enabled": "Smart charging",
+          "price_entities": "Price sensors (today and tomorrow)",
+          "charger_type": "Charger control",
+          "zaptec_mode_entity": "Zaptec charger mode sensor",
+          "charge_switch": "Charging switch",
+          "car_plugged_entity": "Car plugged-in sensor",
+          "notify_services": "Phones to confirm the plan on",
+          "notify_only_home": "Only phones that are home",
+          "notify_url": "Page to open on tap",
+          "notify_icon": "Icon on the messages",
+          "car_climate_entity": "Car climate (preconditioning)",
+          "trip_calendar": "Trip calendar",
+          "trip_calendar_keyword": "Calendar keyword"
+        },
+        "data_description": {
+          "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
+          "price_entities": "Empty: the ledger's power price sensor (with Strømligning also its own sensor for tomorrow). Chosen by hand, the first one counts where they overlap.",
+          "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
+          "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone.",
+          "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car.",
+          "notify_icon": "Material Design Icon shown with the messages. Empty: mdi:ev-station.",
+          "car_climate_entity": "Empty: the car's climate entity on the battery sensor's device. Needs a car integration that can send commands to the car (Tesla Fleet with the virtual key, Teslemetry or Tessie).",
+          "trip_calendar": "Events in the next 36 hours become a temporary plan: the car has enough charge for the trip and leaves home in time for the event's start.",
+          "trip_calendar_keyword": "Only events with this word in the title or description, e.g. 'car'. Empty: every event with an address."
+        }
+      }
+    },
+    "error": {
+      "no_prices": "None of the sensors has a price list in its attributes.",
+      "required_for_zaptec": "Pick the Zaptec charger mode sensor.",
+      "required_for_switch": "Pick the charging switch."
+    },
+    "abort": {
+      "already_configured": "This car is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Reconfigure EV Ledger",
+        "description": "One page for everything currently configured. Clear a Zaptec/Monta/price entity to drop that provider entirely.",
+        "data": {
+          "battery_entity": "Battery level sensor",
+          "odometer_entity": "Odometer sensor",
+          "device_tracker_entity": "Location (device tracker)",
+          "charging_binary_entity": "Is charging (binary sensor, or a charging state sensor)",
+          "locked_entity": "Is locked (optional)",
+          "outside_temp_entity": "Outside temperature sensor (optional, enables efficiency-vs-temperature tracking)",
+          "zaptec_power_entity": "Zaptec charge power sensor (optional — leave empty to drop Zaptec)",
+          "zaptec_session_energy_entity": "Zaptec session energy sensor (optional — leave empty to drop Zaptec)",
+          "zaptec_charging_entity": "Zaptec charging (binary sensor or switch, optional)",
+          "zaptec_completed_energy_entity": "Zaptec completed session energy sensor (optional)",
+          "monta_last_charge_entity": "Monta last charge sensor (optional — leave empty to drop Monta)",
+          "monta_wallet_entity": "Monta wallet balance sensor (optional)",
+          "spot_price_entity": "Electricity price sensor (optional — leave empty to drop spot-price estimates)",
+          "tesla_model_key": "Model / trim for efficiency comparison (optional)",
+          "battery_capacity_kwh": "Usable battery capacity in kWh (only used if model is 'Custom')",
+          "rated_wh_per_km": "Rated consumption in Wh/km (only used if model is 'Custom')",
+          "ocm_api_key": "Open Charge Map API key (optional)",
+          "monta_client_id": "Monta Public API client id (optional)",
+          "monta_client_secret": "Monta Public API client secret (optional)",
+          "eco_movement_token": "Eco-Movement token (optional)"
+        },
+        "data_description": {
+          "ocm_api_key": "Gives public charges the station's name and operator. Free: sign in at openchargemap.org, open My Profile → My Apps, register an application and copy its API key here. Leave empty to not use it.",
+          "monta_client_id": "The operators' own prices (EU AFIR data) for EWII, Norlys, go'energi, NRGi, Uno-X, Energi Fyn and others on Monta. Free: sign in at portal2.monta.app with your Monta account, open your profile (bottom left) → Applications → + Add Application, and copy the client id here.",
+          "monta_client_secret": "The client secret shown once when the application is made.",
+          "eco_movement_token": "The operators' own prices (EU AFIR data) for Clever, Circle K, Q8, Allego, Ionity, Lidl, Fastned and others. Ask support@eco-movement.com for a token to their Danish NAP feed (nap-dk.eco-movement.com). Spirii's, OK's, EV-EL's and TotalEnergies' data are used without a key."
+        }
+      },
+      "smart_charge": {
+        "title": "Smart charging",
+        "description": "Charge when power is cheapest and let EV Ledger start and stop the charger. The car, the battery and the price sensor come from the ledger setup; fields left empty are found automatically (the Zaptec charger's mode sensor, the car's plug sensor).",
+        "data": {
+          "enabled": "Smart charging",
+          "price_entities": "Price sensors (today and tomorrow)",
+          "charger_type": "Charger control",
+          "zaptec_mode_entity": "Zaptec charger mode sensor",
+          "charge_switch": "Charging switch",
+          "car_plugged_entity": "Car plugged-in sensor",
+          "notify_services": "Phones to confirm the plan on",
+          "notify_only_home": "Only phones that are home",
+          "notify_url": "Page to open on tap",
+          "notify_icon": "Icon on the messages",
+          "car_climate_entity": "Car climate (preconditioning)",
+          "trip_calendar": "Trip calendar",
+          "trip_calendar_keyword": "Calendar keyword"
+        },
+        "data_description": {
+          "enabled": "Adds charge plans (cheapest, fixed time, charge now, price cap, pause), a temporary trip plan and price per plan.",
+          "price_entities": "Empty: the ledger's power price sensor (with Strømligning also its own sensor for tomorrow). Chosen by hand, the first one counts where they overlap.",
+          "charger_type": "Empty: Zaptec when the ledger uses a Zaptec charger.",
+          "car_plugged_entity": "Empty: the car's own plug sensor. When it is off another car is at the charger and it is left alone.",
+          "notify_url": "Dashboard path opened when the notification is tapped, e.g. /dashboard-ev/car.",
+          "notify_icon": "Material Design Icon shown with the messages. Empty: mdi:ev-station.",
+          "car_climate_entity": "Empty: the car's climate entity on the battery sensor's device. Needs a car integration that can send commands to the car (Tesla Fleet with the virtual key, Teslemetry or Tessie).",
+          "trip_calendar": "Events in the next 36 hours become a temporary plan: the car has enough charge for the trip and leaves home in time for the event's start.",
+          "trip_calendar_keyword": "Only events with this word in the title or description, e.g. 'car'. Empty: every event with an address."
+        }
+      }
+    },
+    "error": {
+      "no_prices": "None of the sensors has a price list in its attributes.",
+      "required_for_zaptec": "Pick the Zaptec charger mode sensor.",
+      "required_for_switch": "Pick the charging switch."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "trips": {
+        "name": "Trips"
+      },
+      "charges": {
+        "name": "Charges"
+      },
+      "charging_status": {
+        "name": "Charging status",
+        "state": {
+          "idle": "Idle",
+          "home": "Charging at home",
+          "public": "Charging (public)"
+        }
+      },
+      "cost_per_km": {
+        "name": "Cost per km"
+      },
+      "pending_review": {
+        "name": "Charges needing price"
+      },
+      "efficiency": {
+        "name": "Efficiency vs. rated"
+      },
+      "monthly_performance": {
+        "name": "Monthly performance"
+      },
+      "total_cost": {
+        "name": "Total charging cost"
+      },
+      "total_distance": {
+        "name": "Total distance"
+      },
+      "last_trip": {
+        "name": "Last trip"
+      },
+      "last_charge": {
+        "name": "Last charge"
+      },
+      "battery_efficiency_score": {
+        "name": "Battery efficiency score"
+      },
+      "next_charge_start": {
+        "name": "Next charge start"
+      },
+      "next_charge_end": {
+        "name": "Next charge end"
+      },
+      "planned_cost": {
+        "name": "Planned charge cost"
+      },
+      "planned_energy": {
+        "name": "Planned charge energy"
+      },
+      "plan_target_soc": {
+        "name": "Plan target SOC"
+      },
+      "trip_distance": {
+        "name": "Trip distance"
+      },
+      "trip_energy": {
+        "name": "Trip energy"
+      },
+      "trip_target_soc": {
+        "name": "Trip SOC needed"
+      },
+      "charge_status": {
+        "name": "Charge status",
+        "state": {
+          "plan_only": "Plan only",
+          "manual": "Manual",
+          "disconnected": "Not plugged in",
+          "other_car": "Another car is plugged in",
+          "unknown": "Unknown",
+          "charging": "Charging",
+          "stopped_externally": "Stopped by the car or app",
+          "not_responding": "Charger does not respond",
+          "paused": "Paused",
+          "starting": "Starting",
+          "done": "Target reached",
+          "waiting": "Waiting for cheap power",
+          "awaiting_confirmation": "Waiting for confirmation"
+        }
+      },
+      "home_cost_today": {
+        "name": "Home charging cost today"
+      },
+      "distance_today": {
+        "name": "Distance today"
+      },
+      "home_charging_power": {
+        "name": "Home charging power"
+      },
+      "home_charging_energy": {
+        "name": "Home charging energy"
+      },
+      "home_charging_energy_today": {
+        "name": "Home charging energy today"
+      },
+      "home_charging_energy_month": {
+        "name": "Home charging energy this month"
+      },
+      "cost_this_year": {
+        "name": "Charging cost this year"
+      },
+      "tyres": {
+        "name": "Tyres"
+      }
+    },
+    "number": {
+      "target_soc": {
+        "name": "Target SOC"
+      },
+      "charge_power_kw": {
+        "name": "Charging power"
+      },
+      "efficiency": {
+        "name": "Charging efficiency"
+      },
+      "price_factor": {
+        "name": "Price factor"
+      },
+      "price_cap": {
+        "name": "Price cap"
+      },
+      "min_soc": {
+        "name": "Minimum SOC"
+      },
+      "consumption": {
+        "name": "Consumption"
+      },
+      "trip_margin": {
+        "name": "Trip safety margin"
+      },
+      "trip_reserve": {
+        "name": "Arrival reserve"
+      },
+      "reminder_soc": {
+        "name": "Remind below"
+      },
+      "precondition_minutes": {
+        "name": "Precondition minutes before"
+      },
+      "low_price": {
+        "name": "Cheap power message below"
+      },
+      "public_charge_energy": {
+        "name": "Public charge energy"
+      },
+      "public_charge_price": {
+        "name": "Public charge price"
+      },
+      "heat_hold_price": {
+        "name": "Price limit while heating"
+      },
+      "smart_max_price": {
+        "name": "Fixed price limit"
+      },
+      "ready_margin": {
+        "name": "Ready ahead of time"
+      },
+      "top_up_soc": {
+        "name": "Top-up from level"
+      },
+      "top_up_margin": {
+        "name": "Top-up done before departure"
+      },
+      "top_up_window": {
+        "name": "Top-up window"
+      },
+      "ask_min_saving": {
+        "name": "Ask when waiting saves at least"
+      },
+      "smart_floor_soc": {
+        "name": "Always keep at least"
+      },
+      "public_default_price": {
+        "name": "Default public price per kWh"
+      }
+    },
+    "time": {
+      "ready_by_time": {
+        "name": "Ready by"
+      },
+      "fixed_start": {
+        "name": "Fixed charging start"
+      },
+      "fixed_end": {
+        "name": "Fixed charging end"
+      },
+      "ready_by_weekend": {
+        "name": "Ready by at the weekend"
+      },
+      "reminder_time": {
+        "name": "Evening check at"
+      },
+      "quiet_from": {
+        "name": "Silent from"
+      },
+      "quiet_until": {
+        "name": "Silent until"
+      }
+    },
+    "select": {
+      "charge_mode": {
+        "name": "Charge mode",
+        "state": {
+          "smart": "Cheapest before departure",
+          "fixed": "Fixed time",
+          "now": "Charge now",
+          "price_cap": "Price cap",
+          "off": "Pause",
+          "manual": "Manual (not controlled)"
+        }
+      },
+      "default_charge_mode": {
+        "name": "Default plan",
+        "state": {
+          "smart": "Cheapest before departure",
+          "fixed": "Fixed time",
+          "price_cap": "Price cap",
+          "now": "Charge now",
+          "manual": "Manual (not controlled)"
+        }
+      },
+      "price_resolution": {
+        "name": "Price resolution",
+        "state": {
+          "quarter": "Quarter (15 min)",
+          "hour": "Hour"
+        }
+      },
+      "tyre_set": {
+        "name": "Tyre set"
+      }
+    },
+    "datetime": {
+      "trip_departure": {
+        "name": "Temporary departure"
+      },
+      "ready_by_once": {
+        "name": "Ready by once"
+      }
+    },
+    "text": {
+      "trip_destination": {
+        "name": "Trip destination"
+      },
+      "public_charge_location": {
+        "name": "Public charge location"
+      }
+    },
+    "switch": {
+      "trip_round_trip": {
+        "name": "Round trip"
+      },
+      "confirm_on_phone": {
+        "name": "Confirm plan on phone"
+      },
+      "notify_plan": {
+        "name": "Notify plan on phone"
+      },
+      "price_cap_override": {
+        "name": "Exceed price cap"
+      },
+      "price_limit_wait": {
+        "name": "Wait above the price limit"
+      },
+      "notify_done": {
+        "name": "Message when charging is done"
+      },
+      "plug_reminder": {
+        "name": "Reminder to plug in"
+      },
+      "weekend_ready_by": {
+        "name": "Another time at the weekend"
+      },
+      "precondition": {
+        "name": "Precondition the car for ready by"
+      },
+      "notify_start": {
+        "name": "Message when charging starts"
+      },
+      "learn": {
+        "name": "Learn charging power and efficiency"
+      },
+      "monthly_summary": {
+        "name": "Monthly summary on the phone"
+      },
+      "low_price_alert": {
+        "name": "Message when power is cheap"
+      },
+      "wait_cheaper_day": {
+        "name": "Wait for a cheaper day"
+      },
+      "learn_departure": {
+        "name": "Learn departure times"
+      },
+      "prefer_green": {
+        "name": "Prefer green power"
+      },
+      "ask_public_price": {
+        "name": "Ask for the price of public charges"
+      },
+      "morning_check": {
+        "name": "Message if the target is not reached"
+      },
+      "quiet_night": {
+        "name": "Silent messages at night"
+      },
+      "week_plan": {
+        "name": "Week plan"
+      },
+      "heat_hold": {
+        "name": "Keep the battery at the target while heating"
+      },
+      "tyre_reminder": {
+        "name": "Tyre change reminder"
+      },
+      "smart_price_limit": {
+        "name": "Ask before dear charging"
+      },
+      "nmc_top_up": {
+        "name": "Charge the last part just before departure (NMC)"
+      }
+    },
+    "button": {
+      "trip_clear": {
+        "name": "Clear temporary plan"
+      },
+      "confirm_plan": {
+        "name": "Confirm plan"
+      },
+      "send_plan": {
+        "name": "Send plan to phone"
+      },
+      "send_monthly_summary": {
+        "name": "Send monthly summary"
+      },
+      "log_public_charge": {
+        "name": "Log public charge"
+      }
+    },
+    "binary_sensor": {
+      "charge_now": {
+        "name": "Charge now"
+      },
+      "plugged_in": {
+        "name": "Plugged in"
+      }
+    }
+  },
+  "selector": {
+    "charger_type": {
+      "options": {
+        "none": "None (plan only)",
+        "zaptec": "Zaptec",
+        "switch": "Switch (OCPP, Monta, ...)"
+      }
+    }
+  },
+  "exceptions": {
+    "departure_out_of_range": {
+      "message": "The departure must be in the future and at most 14 days ahead."
+    },
+    "public_charge_no_kwh": {
+      "message": "Enter the public charge's kWh first."
+    },
+    "ready_by_once_out_of_range": {
+      "message": "The one-time ready-by time must be in the future and at most 14 days ahead."
+    },
+    "no_smart_charging": {
+      "message": "{entity_id} does not belong to an EV Ledger car with smart charging."
+    },
+    "bad_week_plan": {
+      "message": "The week plan is not valid: {error}"
+    },
+    "empty_week_plan": {
+      "message": "The week plan needs a ready-by time on at least one day."
+    },
+    "not_ev_ledger": {
+      "message": "{entity_id} does not belong to an EV Ledger car."
+    },
+    "unknown_tyre_set": {
+      "message": "No tyre set called {set}."
+    },
+    "tyre_set_needs_name": {
+      "message": "A new tyre set needs a name."
+    },
+    "tyre_set_name_taken": {
+      "message": "There is already a tyre set called {set}."
+    },
+    "tyre_set_already_on": {
+      "message": "{set} is already on the car at that time."
+    },
+    "unknown_tyre_change": {
+      "message": "No such tyre change."
+    },
+    "unknown_tread_reading": {
+      "message": "No such tread depth reading."
+    }
+  },
+  "issues": {
+    "missing_entities": {
+      "title": "{name}: entities EV Ledger reads are gone",
+      "description": "EV Ledger cannot find these entities of {name}: {entities}.\n\nUntil they are back, trips, charges or smart charging may not be recorded or controlled. They are often gone because the car, charger or price integration renamed them, was removed, or the entities were disabled. Choose the new entities under **Settings → Devices & services → EV Ledger → Configure**, or enable them again. This message goes away by itself when they are back."
+    },
+    "missing_phones": {
+      "title": "{name}: phones for the messages are gone",
+      "description": "Smart charging for {name} sends messages to phones that Home Assistant no longer has: {phones}.\n\nA new phone or a reinstalled Companion app gets a new notify service. Choose the phones again under **Settings → Devices & services → EV Ledger → Configure → Smart charging**. This message goes away by itself when they are back."
+    }
+  }
+}
